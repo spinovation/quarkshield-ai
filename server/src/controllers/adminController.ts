@@ -175,15 +175,77 @@ export const createClient = async (req: Request, res: Response) => {
 };
 
 export const deleteClient = async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
-    const result = await pool.query('DELETE FROM admin_clients WHERE id = $1 OR name = $1 RETURNING id, name', [id]);
-    if (result.rowCount === 0) {
+
+    // 1. Identify client to get exact name and admin_email
+    const clientQuery = await client.query(
+      'SELECT id, name, admin_email FROM admin_clients WHERE id = $1 OR name = $1',
+      [id]
+    );
+    if (clientQuery.rowCount === 0) {
+      client.release();
       return res.status(404).json({ error: 'Tenant not found.' });
     }
 
-    res.json({ success: true, message: `Tenant ${result.rows[0].name} successfully decommissioned.` });
+    const tenant = clientQuery.rows[0];
+    const tenantName = tenant.name;
+    const adminEmail = tenant.admin_email;
+
+    await client.query('BEGIN');
+
+    // 2. Cascade delete tenant users (GDPR / PII right to be forgotten)
+    await client.query('DELETE FROM tenant_users WHERE LOWER(tenant_name) = LOWER($1)', [tenantName]);
+
+    // 3. Cascade delete tenant settings
+    await client.query('DELETE FROM tenant_settings WHERE LOWER(tenant_name) = LOWER($1)', [tenantName]);
+
+    // 4. Cascade delete daily historical snapshots
+    await client.query('DELETE FROM fleet_daily_snapshots WHERE LOWER(tenant_name) = LOWER($1)', [tenantName]);
+
+    // 5. Cascade delete enterprise licenses issued to this tenant
+    await client.query('DELETE FROM admin_licenses WHERE LOWER(tenant_name) = LOWER($1)', [tenantName]);
+
+    // 6. Delete all fleet machines enrolled under this tenant (assets and commands cascade automatically via FK)
+    await client.query(
+      `DELETE FROM fleet_machines 
+       WHERE LOWER(tenant_name) = LOWER($1) 
+          OR token_id IN (SELECT id FROM fleet_tokens WHERE LOWER(tenant_name) = LOWER($1))`,
+      [tenantName]
+    );
+
+    // 7. Delete all fleet tokens generated for this tenant
+    await client.query('DELETE FROM fleet_tokens WHERE LOWER(tenant_name) = LOWER($1)', [tenantName]);
+
+    // 8. Delete the admin_client record
+    await client.query('DELETE FROM admin_clients WHERE id = $1', [tenant.id]);
+
+    // 9. If an admin_email was associated with this tenant, check if it's used by any other tenant.
+    // If not, and row is not locked, delete or dissociate from admin_users so no orphan PII remains.
+    if (adminEmail) {
+      const otherClients = await client.query(
+        'SELECT id FROM admin_clients WHERE LOWER(admin_email) = LOWER($1) AND id != $2',
+        [adminEmail, tenant.id]
+      );
+      if (otherClients.rowCount === 0) {
+        await client.query(
+          'DELETE FROM admin_users WHERE LOWER(email) = LOWER($1) AND row_locked = false',
+          [adminEmail]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    client.release();
+
+    res.json({ 
+      success: true, 
+      message: `Tenant '${tenantName}' and all associated telemetry, machines, tokens, and PII were permanently purged.` 
+    });
   } catch (err: any) {
+    await client.query('ROLLBACK');
+    client.release();
     console.error('Error deleting client:', err);
     res.status(500).json({ error: 'Failed to delete client tenant.' });
   }
@@ -342,17 +404,44 @@ export const resetUserPassword = async (req: Request, res: Response) => {
 };
 
 export const deleteUser = async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const { id } = req.params;
-    const result = await pool.query(
-      'DELETE FROM admin_users WHERE id = $1 AND row_locked = false RETURNING id, email',
-      [id]
-    );
-    if (result.rowCount === 0) {
-      return res.status(400).json({ error: 'User not found or user row is locked against deletion.' });
+
+    // 1. Fetch user to get email and check row lock
+    const userRes = await client.query('SELECT id, email, row_locked FROM admin_users WHERE id = $1', [id]);
+    if (userRes.rowCount === 0) {
+      client.release();
+      return res.status(404).json({ error: 'User not found.' });
     }
-    res.json({ success: true, message: `User account ${result.rows[0].email} deleted.` });
+
+    const user = userRes.rows[0];
+    if (user.row_locked) {
+      client.release();
+      return res.status(400).json({ error: 'User row is locked against deletion.' });
+    }
+
+    await client.query('BEGIN');
+
+    // 2. Prevent automatic resurrection: clear admin_email from admin_clients if matched
+    await client.query('UPDATE admin_clients SET admin_email = NULL WHERE LOWER(admin_email) = LOWER($1)', [user.email]);
+
+    // 3. Purge user from tenant_users to remove any organization credentials / 2FA secrets
+    await client.query('DELETE FROM tenant_users WHERE LOWER(email) = LOWER($1)', [user.email]);
+
+    // 4. Delete from admin_users
+    await client.query('DELETE FROM admin_users WHERE id = $1', [user.id]);
+
+    await client.query('COMMIT');
+    client.release();
+
+    res.json({ 
+      success: true, 
+      message: `User account ${user.email} and all associated credentials were permanently deleted.` 
+    });
   } catch (err: any) {
+    await client.query('ROLLBACK');
+    client.release();
     console.error('Error deleting user:', err);
     res.status(500).json({ error: 'Failed to delete user.' });
   }
