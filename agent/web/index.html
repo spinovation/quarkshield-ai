@@ -1,0 +1,2757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuarkShield.AI — Post-Quantum Guard</title>
+  <link rel="icon" type="image/png" href="/app_icon.png">
+  <link rel="shortcut icon" href="/favicon.ico">
+  <style>
+    :root {
+      --bg-dark: #07090e;
+      --bg-card: rgba(18, 24, 38, 0.7);
+      --bg-card-hover: rgba(26, 35, 56, 0.85);
+      --border-color: rgba(0, 242, 254, 0.18);
+      --border-bright: rgba(0, 242, 254, 0.45);
+      --accent-cyan: #00f2fe;
+      --accent-blue: #4facfe;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-red: #ef4444;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(0, 242, 254, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(79, 172, 254, 0.08) 0px, transparent 50%);
+      color: var(--text-main);
+      font-family: var(--font-family);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    /* Glassmorphism Classes */
+    .glass {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+    }
+
+    /* Top Navigation Bar */
+    header {
+      border-bottom: 1px solid var(--border-color);
+      padding: 0.65rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(7, 9, 14, 0.85);
+      backdrop-filter: blur(10px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 20px rgba(0, 242, 254, 0.35);
+    }
+
+    .brand-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #ffffff 40%, var(--accent-cyan));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .brand-sub {
+      font-size: 0.72rem;
+      color: var(--accent-cyan);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 600;
+    }
+
+    .host-badge {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 0.85rem;
+      border-radius: 20px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .host-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-emerald);
+      box-shadow: 0 0 8px var(--accent-emerald);
+    }
+
+    /* Main Container */
+    main {
+      flex: 1;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 0.35rem 2rem 2rem 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    /* Hero Post-Quantum Guard Shield Section */
+    .hero-scanner {
+      padding: 0.5rem 1.75rem 1.75rem 1.75rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .shield-container {
+      position: relative;
+      width: 120px;
+      height: 120px;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .shield-pulse {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(0, 242, 254, 0.25) 0%, transparent 70%);
+      animation: pulse 2.8s infinite ease-in-out;
+    }
+
+    .shield-pulse.vulnerable {
+      background: radial-gradient(circle, rgba(239, 68, 68, 0.3) 0%, transparent 70%);
+      animation: pulseAlert 1.8s infinite ease-in-out;
+    }
+
+    .shield-pulse.secure {
+      background: radial-gradient(circle, rgba(16, 185, 129, 0.3) 0%, transparent 70%);
+    }
+
+    .shield-pulse.scanning {
+      background: radial-gradient(circle, rgba(0, 242, 254, 0.4) 0%, transparent 70%);
+      animation: radarSweep 1.5s infinite linear;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); opacity: 0.6; }
+      50% { transform: scale(1.35); opacity: 0.15; }
+    }
+
+    @keyframes pulseAlert {
+      0%, 100% { transform: scale(1); opacity: 0.8; }
+      50% { transform: scale(1.4); opacity: 0.25; }
+    }
+
+    @keyframes radarSweep {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .shield-icon-svg {
+      width: 80px;
+      height: 80px;
+      position: relative;
+      z-index: 2;
+      filter: drop-shadow(0 0 15px rgba(0, 242, 254, 0.5));
+      transition: all 0.3s ease;
+    }
+
+    .hero-title {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .hero-subtitle {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      max-width: 600px;
+      margin-bottom: 1.25rem;
+      line-height: 1.5;
+    }
+
+    /* Scanner Buttons */
+    .scan-actions {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .btn {
+      padding: 0.85rem 1.75rem;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+      border: none;
+      outline: none;
+      text-decoration: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue));
+      color: #000;
+      box-shadow: 0 4px 20px rgba(0, 242, 254, 0.35);
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 26px rgba(0, 242, 254, 0.5);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.09);
+      border-color: var(--border-bright);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+
+    /* Live Scanning Progress Box */
+    .scan-progress-box {
+      margin-top: 1.5rem;
+      width: 100%;
+      max-width: 680px;
+      display: none;
+      text-align: left;
+    }
+
+    .progress-bar-bg {
+      width: 100%;
+      height: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 0.75rem;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent-cyan), var(--accent-blue));
+      transition: width 0.2s ease;
+      box-shadow: 0 0 12px var(--accent-cyan);
+    }
+
+    .scan-ticker {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      font-family: monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 0.5rem;
+    }
+
+    .scan-stats-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    /* Metric Cards Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.25rem;
+    }
+
+    .metric-card {
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .metric-header {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .metric-value {
+      font-size: 1.85rem;
+      font-weight: 700;
+    }
+
+    .metric-sub {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+    }
+
+    /* Threat Status Alert Banner */
+    .threat-banner {
+      padding: 1.25rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      border-radius: 12px;
+      margin-bottom: 0.5rem;
+    }
+
+    .threat-banner.critical {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+
+    .threat-banner.secure {
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+
+    .threat-banner-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .threat-icon {
+      font-size: 1.8rem;
+    }
+
+    /* CBOM Explorer Section */
+    .cbom-section {
+      padding: 1.5rem;
+    }
+
+    .cbom-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .cbom-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .search-input {
+      padding: 0.5rem 0.9rem;
+      background: rgba(0, 0, 0, 0.3);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.85rem;
+      outline: none;
+      width: 240px;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent-cyan);
+    }
+
+    /* Filter Tabs */
+    .cbom-filter-tabs {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1.1rem;
+      padding: 0 0.2rem;
+    }
+
+    .filter-tab {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: var(--text-muted);
+      border-radius: 20px;
+      padding: 0.38rem 0.85rem;
+      font-size: 0.78rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+
+    .filter-tab:hover {
+      background: rgba(255, 255, 255, 0.09);
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.22);
+    }
+
+    .filter-tab.active {
+      background: rgba(0, 242, 254, 0.15);
+      color: var(--accent-cyan);
+      border-color: rgba(0, 242, 254, 0.55);
+      font-weight: 600;
+      box-shadow: 0 0 12px rgba(0, 242, 254, 0.25);
+    }
+
+    .tab-count {
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 10px;
+      padding: 0.12rem 0.45rem;
+      font-size: 0.7rem;
+      font-weight: 600;
+    }
+
+    .clickable-card {
+      cursor: pointer;
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .clickable-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+
+    /* Findings Table */
+    .table-container {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.85rem;
+    }
+
+    th {
+      padding: 0.75rem 1rem;
+      color: var(--text-dim);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    td {
+      padding: 0.9rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      color: var(--text-main);
+    }
+
+    tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.55rem;
+      border-radius: 4px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .badge-critical { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .badge-high { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .badge-secure { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .badge-type { background: rgba(255, 255, 255, 0.07); color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.1); }
+
+    .preset-chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 6px;
+      color: var(--text-main);
+      padding: 0.3rem 0.7rem;
+      font-size: 0.76rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+    }
+    .preset-chip:hover {
+      background: rgba(0, 242, 254, 0.15);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      transform: translateY(-1px);
+    }
+
+    /* Sync to Cloud Fleet Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1rem;
+    }
+
+    .modal-card {
+      background: #0d121f;
+      border: 1px solid var(--border-bright);
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+      border-radius: 16px;
+      max-width: 520px;
+      width: 100%;
+      padding: 2rem;
+    }
+
+    .modal-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .form-group {
+      margin-top: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .form-label {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #fff;
+      font-size: 0.9rem;
+      outline: none;
+    }
+
+    .form-input:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 10px rgba(0, 242, 254, 0.2);
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 1.25rem 2rem;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(7, 9, 14, 0.6);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header>
+    <div class="brand" style="display: flex; align-items: center; gap: 0.85rem;">
+      <a href="https://quarkshield.ai" target="_blank" title="QuarkShield.AI" style="display: flex; align-items: center; text-decoration: none;">
+        <img src="/quarkshield-logo.png" alt="QuarkShield" style="height: 28px; width: auto; object-fit: contain; display: block; filter: drop-shadow(0 0 10px rgba(0, 242, 254, 0.35));">
+      </a>
+      <div style="height: 22px; width: 1px; background: rgba(255, 255, 255, 0.16); margin: 0 0.1rem;"></div>
+      <div style="display: flex; align-items: center; gap: 0.45rem; flex-wrap: nowrap;">
+        <span class="brand-sub" id="brand-sub-title" style="font-size: 0.82rem; font-weight: 700; color: var(--accent-cyan); letter-spacing: 0.03em; white-space: nowrap; text-transform: none;">
+          Post-Quantum Guard for Mac
+        </span>
+        <span id="os-badge-pill" style="font-size: 0.68rem; font-weight: 600; padding: 2px 8px; border-radius: 12px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; white-space: nowrap;">
+          🍎 macOS
+        </span>
+      </div>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+      <button class="btn btn-secondary" onclick="openSyncModal()" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;">
+        🌐 Connect to Fleet
+      </button>
+      <button class="btn btn-secondary" onclick="openGuideModal()" style="padding: 0.4rem 0.9rem; font-size: 0.8rem; color: var(--accent-cyan); border-color: rgba(56, 189, 248, 0.4);">
+        📖 User Guide
+      </button>
+      <button class="btn btn-secondary" onclick="uninstallApp()" style="padding: 0.4rem 0.9rem; font-size: 0.8rem; color: #f87171; border-color: rgba(248, 113, 113, 0.3);">
+        🗑️ Uninstall
+      </button>
+      <button class="btn btn-secondary" onclick="exitApp()" style="padding: 0.4rem 0.9rem; font-size: 0.8rem; color: #94a3b8;">
+        ✕ Exit
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Post-Quantum Guard Dashboard -->
+  <main>
+    
+    <!-- Hero Scanner Box -->
+    <section class="glass hero-scanner">
+      <!-- Scanner Card Top Meta Bar: Corporate License (Left) & Machine Name (Right) -->
+      <div class="hero-meta-bar" style="width: 100%; display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; margin-top: 0; flex-wrap: wrap; gap: 0.75rem;">
+        <div id="license-badge" class="filter-tab" onclick="openLicenseModal()" style="cursor: pointer; padding: 0.35rem 0.85rem; font-size: 0.76rem; border-color: rgba(52, 211, 153, 0.4); color: #34d399; background: rgba(52, 211, 153, 0.12); border-radius: 8px; font-weight: 600; display: inline-flex; align-items: center; gap: 0.4rem;" title="Click to view license status or activate key">
+          ⏱️ 7-Day Trial (7 Days Left)
+        </div>
+        <div class="host-badge" style="padding: 0.35rem 0.85rem; font-size: 0.76rem; border-radius: 8px; background: rgba(13, 19, 33, 0.7); border: 1px solid rgba(255, 255, 255, 0.12); display: inline-flex; align-items: center; gap: 0.5rem; color: #cbd5e1;">
+          <div class="host-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);"></div>
+          <span id="header-host">Inspecting Host...</span>
+        </div>
+      </div>
+      <div class="shield-container">
+        <div class="shield-pulse" id="shield-pulse"></div>
+        <svg id="shield-icon" class="shield-icon-svg" viewBox="0 0 24 24" fill="none" stroke="var(--accent-cyan)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4" stroke-width="2.2"/>
+        </svg>
+      </div>
+
+      <div id="hero-platform-badge" style="margin-top: 0.85rem; margin-bottom: 0.35rem; display: inline-flex; align-items: center; gap: 0.45rem; padding: 0.35rem 0.9rem; border-radius: 20px; background: rgba(14, 165, 233, 0.12); border: 1px solid rgba(14, 165, 233, 0.3); font-size: 0.8rem; color: #38bdf8; font-weight: 600;">
+        🍎 Post-Quantum Guard for Mac
+      </div>
+
+      <h1 class="hero-title" id="scan-heading">Workstation Not Audited</h1>
+      <p class="hero-subtitle" id="scan-desc">
+        Evaluate this workstation's cryptographic posture. Detect RSA, ECC, and SSH keys vulnerable to quantum decryption (Shor's Algorithm) and verify NIST FIPS 203/204 readiness.
+      </p>
+
+      <!-- Scan Buttons -->
+      <div class="scan-actions" id="scan-actions-container">
+        <button class="btn btn-primary" id="btn-quick-scan" onclick="triggerScan(true)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+          </svg>
+          ⚡ Quick Scan Workstation
+        </button>
+
+        <button class="btn btn-secondary" id="btn-full-scan" onclick="toggleCustomScan()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          📁 Custom Path Scan
+        </button>
+
+        <button class="btn btn-secondary" id="btn-probe-tls" onclick="toggleProbeBox()" style="border-color: rgba(56, 189, 248, 0.4); color: var(--accent-cyan);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <line x1="2" y1="12" x2="22" y2="12"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+          </svg>
+          🌐 Probe TLS / Endpoint
+        </button>
+
+        <button class="btn btn-secondary" id="btn-scan-history" onclick="openHistoryModal()" style="border-color: rgba(168, 85, 247, 0.45); color: #c084fc; background: rgba(168, 85, 247, 0.08); font-weight: 600;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+          📜 Prior Scans ( <span class="history-count-tag">0</span> )
+        </button>
+      </div>
+
+      <!-- Custom Path Selector -->
+      <div id="custom-path-box" style="display: none; width: 100%; max-width: 660px; margin-top: 1.25rem;">
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+          <input type="text" id="custom-path-input" class="form-input" placeholder="Select or enter folder path..." style="flex: 1; min-width: 250px;">
+          <button class="btn btn-secondary" id="btn-browse-folder" onclick="openFolderPicker()" style="padding: 0.65rem 1.1rem; display: flex; align-items: center; gap: 0.4rem; white-space: nowrap;">
+            📂 Browse Folder...
+          </button>
+          <button class="btn btn-primary" onclick="triggerScan(false)" style="padding: 0.65rem 1.25rem; white-space: nowrap;">
+            ⚡ Audit Path
+          </button>
+        </div>
+        <!-- Quick Target Presets -->
+        <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 0.75rem; font-size: 0.78rem; color: var(--text-dim); flex-wrap: wrap;">
+          <span style="font-weight: 600; color: var(--text-muted);">Quick Targets:</span>
+          <div id="quick-preset-chips" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <!-- Populated dynamically based on operating system -->
+          </div>
+        </div>
+        <div id="browse-hint" style="display: none; margin-top: 0.65rem; font-size: 0.78rem; color: #fbbf24; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 0.45rem 0.75rem;">
+          ℹ️ <span id="browse-hint-text">Folder dialog opened.</span>
+        </div>
+      </div>
+
+      <!-- Remote TLS Handshake Auditor Box (Parity with Image 3) -->
+      <div id="network-probe-box" style="display: none; width: 100%; max-width: 820px; margin-top: 1.5rem;">
+        <div style="background: rgba(13, 19, 33, 0.7); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 1.5rem; text-align: left;">
+          <h3 style="font-size: 1.25rem; font-weight: 700; color: #ffffff; margin: 0 0 1rem 0;">Remote TLS Handshake Auditor</h3>
+          
+          <!-- Outbound Connection Disclosure Banner -->
+          <div style="background: rgba(234, 179, 8, 0.08); border: 1px solid rgba(234, 179, 8, 0.35); border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.25rem;">
+            <div style="display: flex; align-items: flex-start; gap: 0.75rem;">
+              <div style="color: #eab308; font-size: 1.2rem; line-height: 1; flex-shrink: 0; margin-top: 2px;">⚠️</div>
+              <div style="font-size: 0.82rem; color: #fef08a; line-height: 1.5;">
+                <strong style="color: #ffffff; font-size: 0.88rem; display: block; margin-bottom: 0.25rem;">Outbound Audit Connection Disclosure</strong>
+                Scanning will initiate a <strong>direct outbound TCP/TLS socket connection</strong> from the QuarkShield agent to the host on port 443. The auditor evaluates ciphers, key-exchange suites (e.g., ML-KEM/Kyber vs RSA/ECC), protocol versions, and public certificate metadata.
+                <div style="margin-top: 0.5rem; color: #94a3b8; font-size: 0.78rem;">
+                  🛡️ <strong>Security Guarantee:</strong> No payload data, HTTP headers, credentials, or file paths are sent or inspected. Only public cryptographic handshake negotiations are audited.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Input Row (NO forced :443 suffix) -->
+          <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <input type="text" id="probe-target-input" class="form-input" placeholder="https://cloudflare.com" style="flex: 1; min-width: 260px; font-size: 0.95rem;">
+            <button class="btn btn-primary" id="btn-run-probe" onclick="triggerProbe()" style="padding: 0.7rem 1.5rem; white-space: nowrap; font-weight: 600; background: linear-gradient(135deg, #0ea5e9, #8b5cf6); border: none; border-radius: 6px; box-shadow: 0 0 16px rgba(14, 165, 233, 0.35);">
+              Scan Endpoint
+            </button>
+          </div>
+          <div style="text-align: left; margin-top: 0.6rem; display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--text-secondary);">
+            <input type="checkbox" id="probe-auth-check" checked style="accent-color: #0ea5e9; width: 15px; height: 15px; cursor: pointer;">
+            <label for="probe-auth-check" style="cursor: pointer;">I authorize QuarkShield to make this outbound TLS handshake request.</label>
+          </div>
+
+          <!-- Dedicated Results Card (Shown after probe completes) -->
+          <div id="probe-result-card" style="display: none; margin-top: 1.5rem; text-align: left; background: rgba(10, 15, 29, 0.95); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 10px; padding: 1.5rem; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);">
+            <!-- Card Header -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 1rem; margin-bottom: 1.25rem;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+                  <span id="probe-res-host" style="font-size: 1.35rem; font-weight: 800; color: #ffffff;">cloudflare.com</span>
+                  <span id="probe-res-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 0.75rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 9999px;">
+                    Post-Quantum Secure
+                  </span>
+                </div>
+                <div style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.25rem;">TLS handshake algorithm audit summary.</div>
+              </div>
+              <div style="display: flex; gap: 0.6rem; align-items: center;">
+                <button class="btn btn-secondary" onclick="clearProbeResult()" style="padding: 0.45rem 1rem; font-size: 0.8rem;">Clear</button>
+                <button class="btn btn-primary" id="btn-track-inventory" onclick="trackProbeInInventory()" style="padding: 0.45rem 1.1rem; font-size: 0.8rem; background: linear-gradient(135deg, #0ea5e9, #8b5cf6);">Track in Inventory</button>
+              </div>
+            </div>
+
+            <!-- 2-Column Body Matching Image 3 -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.75rem;">
+              <!-- Col 1 -->
+              <div style="display: flex; flex-direction: column; gap: 1.25rem;">
+                <div>
+                  <div style="font-size: 0.7rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">PROTOCOL SUITE</div>
+                  <div id="probe-res-protocol" style="font-family: monospace; font-size: 0.9rem; font-weight: 600; color: #f1f5f9; word-break: break-all;">
+                    TLS_AES_256_GCM_SHA384 (X25519MLKEM768) / ECDSA / ECDH
+                  </div>
+                </div>
+                <div>
+                  <div style="font-size: 0.7rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">PUBLIC KEY SIZE</div>
+                  <div id="probe-res-keysize" style="font-size: 0.95rem; font-weight: 700; color: #f1f5f9;">256-bit</div>
+                </div>
+                <div>
+                  <div style="font-size: 0.7rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.35rem;">QUANTUM THREAT LEVEL</div>
+                  <div id="probe-res-threat" style="font-size: 1rem; font-weight: 800; color: #34d399;">SECURE</div>
+                </div>
+              </div>
+
+              <!-- Col 2 -->
+              <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <div>
+                  <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem;">Detailed Audit</div>
+                  <div id="probe-res-detailed" style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.5;"></div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem;">Remediation Recommendation</div>
+                  <div id="probe-res-remediation" style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.5;"></div>
+                </div>
+                <div>
+                  <div style="font-size: 0.75rem; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem;">Quantum Cryptanalysis Explainer</div>
+                  <div id="probe-res-explainer" style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.5;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Scan Progress Bar & Ticker -->
+      <div class="scan-progress-box" id="scan-progress-box">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem;">
+          <span style="font-size: 0.84rem; font-weight: 600; color: var(--accent-cyan); display: flex; align-items: center; gap: 0.4rem;">
+            <span class="host-dot" style="display: inline-block;"></span> Active Cryptographic Audit in Progress
+          </span>
+          <button class="btn btn-secondary" id="btn-cancel-scan" onclick="cancelScan()" style="padding: 0.25rem 0.75rem; font-size: 0.76rem; color: #f87171; border-color: rgba(239, 68, 68, 0.4); cursor: pointer;">
+            🛑 Cancel Scan
+          </button>
+        </div>
+        <div class="progress-bar-bg">
+          <div class="progress-bar-fill" id="progress-fill"></div>
+        </div>
+        <div class="scan-ticker" id="scan-ticker" style="font-family: monospace; font-size: 0.78rem; color: #e2e8f0; word-break: break-all; margin-top: 0.6rem;">Initializing scanner engine...</div>
+        <div class="scan-stats-row" style="margin-top: 0.4rem; display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-dim);">
+          <span id="files-scanned-count">Files Checked: 0</span>
+          <span id="assets-found-count">Cryptographic Assets Discovered: 0</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Threat Status Banner (Shown after scan) -->
+    <div id="threat-banner" style="display: none;" class="threat-banner critical">
+      <div class="threat-banner-left">
+        <div class="threat-icon" id="threat-icon">⚠️</div>
+        <div>
+          <div style="font-weight: 700; font-size: 1.05rem;" id="threat-title">Post-Quantum Cryptographic Vulnerability Assessment</div>
+          <div style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.45;" id="threat-desc">
+            Evaluating exposure against Shor's Algorithm (asymmetric factorization), Grover's Algorithm (symmetric key halving to 64 bits), and Harvest Now Decrypt Later (HNDL).
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button class="btn btn-secondary" onclick="openHistoryModal()" style="font-size: 0.82rem; padding: 0.5rem 0.9rem; border-color: rgba(168, 85, 247, 0.45); color: #c084fc; background: rgba(168, 85, 247, 0.08); font-weight: 600;" title="View all locally archived scans">
+          📜 Prior Scans (<span class="history-count-tag">0</span>)
+        </button>
+        <button class="btn btn-secondary" onclick="exportCycloneDX()" style="font-size: 0.82rem; padding: 0.5rem 0.9rem;">
+          📥 Export CBOM JSON
+        </button>
+        <button class="btn btn-primary" onclick="openSyncModal()" style="font-size: 0.82rem; padding: 0.5rem 0.9rem;">
+          📡 Sync to Cloud Fleet
+        </button>
+      </div>
+    </div>
+
+    <!-- Metrics Summary Cards (Threat & Asset Breakdown) -->
+    <div class="metrics-grid" id="metrics-grid" style="display: none; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));">
+      <div class="glass metric-card clickable-card" onclick="setFilterTab('all')" title="Click to show All findings in CBOM table">
+        <div class="metric-header">
+          <span>Total Assets</span>
+          <span>📁</span>
+        </div>
+        <div class="metric-value" id="m-total-assets">0</div>
+        <div class="metric-sub">Discovered across target dirs</div>
+      </div>
+
+      <div class="glass metric-card clickable-card" onclick="setFilterTab('shor')" title="Click to filter CBOM to Shor's Risk asymmetric keys" style="border-left: 3px solid var(--accent-red);">
+        <div class="metric-header">
+          <span style="color: #f87171;">Shor's Risk</span>
+          <span>🚨</span>
+        </div>
+        <div class="metric-value" style="color: #f87171;" id="m-shor-assets">0</div>
+        <div class="metric-sub">RSA, ECDSA, Ed25519</div>
+      </div>
+
+      <div class="glass metric-card clickable-card" onclick="setFilterTab('config')" title="Click to filter CBOM to Configuration Violations" style="border-left: 3px solid #f97316;">
+        <div class="metric-header">
+          <span style="color: #fb923c;">Config Violations</span>
+          <span>⚠️</span>
+        </div>
+        <div class="metric-value" style="color: #fb923c;" id="m-config-violations">0</div>
+        <div class="metric-sub">Schannel, SSH & TLS Policy</div>
+      </div>
+
+      <div class="glass metric-card clickable-card" onclick="setFilterTab('hndl')" title="Click to filter CBOM to Active HNDL session exposures" style="border-left: 3px solid #c084fc;">
+        <div class="metric-header">
+          <span style="color: #c084fc;">Active HNDL</span>
+          <span>📡</span>
+        </div>
+        <div class="metric-value" style="color: #c084fc;" id="m-hndl-assets">0</div>
+        <div class="metric-sub">Recorded TLS/SSH/VPN traffic</div>
+      </div>
+
+      <div class="glass metric-card clickable-card" onclick="setFilterTab('grover')" title="Click to filter CBOM to Grover's 64-bit weakened ciphers" style="border-left: 3px solid var(--accent-amber);">
+        <div class="metric-header">
+          <span style="color: #fbbf24;">Grover's 64-bit</span>
+          <span>⚡</span>
+        </div>
+        <div class="metric-value" style="color: #fbbf24;" id="m-grover-assets">0</div>
+        <div class="metric-sub">AES-128 halved / 3DES / SHA-1</div>
+      </div>
+
+      <div class="glass metric-card clickable-card" onclick="setFilterTab('secure')" title="Click to filter CBOM to Quantum Safe assets" style="border-left: 3px solid var(--accent-emerald);">
+        <div class="metric-header">
+          <span style="color: #34d399;">Post-Quantum Safe</span>
+          <span>🛡️</span>
+        </div>
+        <div class="metric-value" style="color: #34d399;" id="m-secure-assets">0</div>
+        <div class="metric-sub">ML-KEM / ML-DSA / Hybrid</div>
+      </div>
+    </div>
+
+    <!-- CBOM Explorer Table -->
+    <section class="glass cbom-section" id="cbom-section" style="display: none;">
+      <div class="cbom-toolbar">
+        <div class="cbom-title">
+          <span>📋 Cryptographic Bill of Materials (CBOM)</span>
+          <span class="badge badge-type" id="cbom-badge-count">0 Items</span>
+        </div>
+        <div style="display: flex; gap: 0.75rem; align-items: center;">
+          <input type="text" id="cbom-search" class="search-input" placeholder="Search keys, algorithms, paths..." oninput="filterFindings()">
+          <button class="btn btn-secondary" onclick="openHistoryModal()" style="padding: 0.5rem 0.85rem; font-size: 0.8rem; border-color: rgba(168, 85, 247, 0.45); color: #c084fc; background: rgba(168, 85, 247, 0.08); font-weight: 600;" title="View all locally archived scans">
+            📜 Prior Scans (<span class="history-count-tag">0</span>)
+          </button>
+          <button class="btn btn-secondary" onclick="exportCycloneDX()" style="padding: 0.5rem 0.85rem; font-size: 0.8rem;">
+            Export CycloneDX 1.6
+          </button>
+        </div>
+      </div>
+
+      <!-- One-Click Quick Filter Tabs -->
+      <div class="cbom-filter-tabs" id="cbom-filter-tabs">
+        <button class="filter-tab active" data-tab="all" onclick="setFilterTab('all')">
+          📁 All Findings <span class="tab-count" id="tab-count-all">0</span>
+        </button>
+        <button class="filter-tab" data-tab="certs" onclick="setFilterTab('certs')">
+          🔑 Certs & Keys <span class="tab-count" id="tab-count-certs">0</span>
+        </button>
+        <button class="filter-tab" data-tab="shor" onclick="setFilterTab('shor')">
+          🚨 Shor's Risk <span class="tab-count" id="tab-count-shor">0</span>
+        </button>
+        <button class="filter-tab" data-tab="config" onclick="setFilterTab('config')">
+          ⚠️ Config Violations <span class="tab-count" id="tab-count-config">0</span>
+        </button>
+        <button class="filter-tab" data-tab="hndl" onclick="setFilterTab('hndl')">
+          📡 Active HNDL <span class="tab-count" id="tab-count-hndl">0</span>
+        </button>
+        <button class="filter-tab" data-tab="grover" onclick="setFilterTab('grover')">
+          ⚡ Grover's 64-bit <span class="tab-count" id="tab-count-grover">0</span>
+        </button>
+        <button class="filter-tab" data-tab="secure" onclick="setFilterTab('secure')">
+          🛡️ Quantum Safe <span class="tab-count" id="tab-count-secure">0</span>
+        </button>
+      </div>
+
+      <div class="table-container">
+        <table style="table-layout: fixed; width: 100%;">
+          <colgroup>
+            <col style="width: 32%;">
+            <col style="width: 10%;">
+            <col style="width: 13%;">
+            <col style="width: 13%;">
+            <col style="width: 32%;">
+          </colgroup>
+          <thead>
+            <tr>
+              <th onclick="sortFindingsTable('name')" style="cursor: pointer; user-select: none;" title="Click to sort by Asset & Path">
+                Cryptographic Asset & Path <span id="sort-icon-name" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('type')" style="cursor: pointer; user-select: none;" title="Click to sort by Type">
+                Type <span id="sort-icon-type" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('algorithm')" style="cursor: pointer; user-select: none;" title="Click to sort by Algorithm">
+                Algorithm <span id="sort-icon-algorithm" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('threat')" style="cursor: pointer; user-select: none;" title="Click to sort by Threat Vector">
+                Threat Vector <span id="sort-icon-threat" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('recommendation')" style="cursor: pointer; user-select: none;" title="Click to sort by Recommendation">
+                NIST FIPS 203/204 Recommendation <span id="sort-icon-recommendation" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody id="findings-table-body">
+            <!-- Findings injected here -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Pagination Toolbar -->
+      <div class="pagination-bar" id="pagination-bar" style="display: flex; justify-content: space-between; align-items: center; padding: 0.9rem 0.5rem; border-top: 1px solid rgba(255,255,255,0.06); font-size: 0.8rem; color: var(--text-dim); margin-top: 0.5rem;">
+        <div id="pagination-info">Showing 0 of 0 items</div>
+        <div style="display: flex; align-items: center; gap: 0.85rem;">
+          <span>Rows per page:</span>
+          <select id="page-size-select" onchange="changePageSize(this.value)" style="background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.15); color: #fff; padding: 0.25rem 0.6rem; border-radius: 6px; font-size: 0.78rem; outline: none; cursor: pointer;">
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+            <option value="all">All</option>
+          </select>
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <button class="btn btn-secondary" id="btn-prev-page" onclick="prevPage()" style="padding: 0.25rem 0.7rem; font-size: 0.75rem;">◀ Prev</button>
+            <span id="page-indicator" style="padding: 0.2rem 0.5rem; color: #fff; font-weight: 600; font-size: 0.78rem;">1 / 1</span>
+            <button class="btn btn-secondary" id="btn-next-page" onclick="nextPage()" style="padding: 0.25rem 0.7rem; font-size: 0.75rem;">Next ▶</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Local Scan History Modal -->
+  <div class="modal-overlay" id="history-modal" style="display: none;">
+    <div class="modal-card" style="max-width: 820px; width: 94%; max-height: 88vh; display: flex; flex-direction: column;">
+      <div class="modal-title" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.75rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <span style="font-size: 1.1rem; font-weight: 700; color: #ffffff;">📜 Local Scan History & Archives</span>
+          <span id="history-modal-count" style="font-size: 0.75rem; background: rgba(167, 139, 250, 0.15); color: #c084fc; border: 1px solid rgba(167, 139, 250, 0.3); padding: 2px 8px; border-radius: 10px;">0 archived scans</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <button class="btn btn-primary" onclick="syncLatestArchivedScan()" style="padding: 0.35rem 0.8rem; font-size: 0.78rem;" title="Sync the latest saved scan to central fleet">
+            📡 Sync Latest to Fleet
+          </button>
+          <button onclick="closeHistoryModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; padding: 0.2rem 0.5rem;">✕</button>
+        </div>
+      </div>
+
+      <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.45; margin-top: 0.75rem; margin-bottom: 0.5rem;">
+        Every audit conducted on this machine is archived locally in your secure store. You can reload prior audit results into the active dashboard or synchronize findings with the centralized QuarkShield Cloud Fleet.
+      </p>
+
+      <div style="flex: 1; overflow-y: auto; margin-top: 0.5rem; padding-right: 0.3rem;">
+        <div id="history-list-container" style="display: flex; flex-direction: column; gap: 0.75rem;">
+          <!-- Historical scans rendered here -->
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.25rem; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 0.75rem;">
+        <div style="font-size: 0.75rem; color: var(--text-dim);">
+          💾 Storage location: <code id="history-storage-path" style="color: var(--accent-cyan); font-size: 0.73rem;">~/.quarkshield/scans/</code>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button class="btn btn-secondary" onclick="closeHistoryModal()">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Connect to Cloud Fleet Modal -->
+  <div class="modal-overlay" id="sync-modal" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>🌐 Connect to QuarkShield Fleet</span>
+        <button onclick="closeSyncModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; padding: 0.2rem 0.5rem;">✕</button>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.4; margin-top: 0.4rem;">
+        Sync this workstation's CBOM inventory with your centralized QuarkShield dashboard at <code style="color: var(--accent-cyan);">quarkshield.ai</code>.
+      </p>
+
+      <!-- Hardware Device Identity Card -->
+      <div id="device-identity-badge" style="margin: 0.8rem 0; padding: 0.75rem 0.9rem; background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; font-size: 0.78rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <span style="color: var(--text-muted);">Computer Name:</span>
+          <span style="font-weight: 600; color: #fff;" id="sync-display-name">Ganapati’s MacBook Pro</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+          <span style="color: var(--text-muted);">Permanent Hardware UUID:</span>
+          <span style="font-family: monospace; color: var(--accent-cyan); font-size: 0.74rem;" id="sync-hardware-uuid">...</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="color: var(--text-muted);">Fleet Enrollment Status:</span>
+          <span style="font-weight: 600;" id="sync-enrollment-status">Checking...</span>
+        </div>
+      </div>
+
+      <div id="sync-license-warning" style="display: none;"></div>
+
+      <div class="form-group">
+        <label class="form-label">QuarkShield Central Server URL</label>
+        <input type="text" id="fleet-server-url" class="form-input" value="https://quarkshield.ai">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Fleet Enrollment Token</label>
+        <input type="password" id="fleet-token" class="form-input" placeholder="pqc_agent_...">
+        <span style="font-size: 0.72rem; color: var(--text-dim);" id="fleet-token-help">Token is saved permanently on this computer. You only need to enter it once.</span>
+      </div>
+
+      <div class="form-group" style="margin-top: 0.8rem;">
+        <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: #e2e8f0; cursor: pointer;">
+          <input type="checkbox" id="fleet-auto-sync" checked style="accent-color: var(--accent-cyan); width: 16px; height: 16px;">
+          <span>Enable Automated Daily Background Sync (2:00 AM)</span>
+        </label>
+      </div>
+
+      <div id="sync-status-msg" style="margin-top: 1rem; font-size: 0.82rem; display: none;"></div>
+
+      <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+        <button class="btn btn-secondary" onclick="closeSyncModal()">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-sync" onclick="submitSync()">
+          Sync Telemetry Now
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workstation Licensing & Partner Activation Modal -->
+  <div class="modal-overlay" id="license-modal" style="display: none;">
+    <div class="modal-card" style="max-width: 540px;">
+      <div class="modal-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span>🛡️ Workstation Licensing & Partner Activation</span>
+        <button onclick="closeLicenseModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; padding: 0.2rem 0.5rem;">✕</button>
+      </div>
+      <p style="font-size: 0.82rem; color: var(--text-muted); line-height: 1.45; margin-top: 0.35rem;">
+        QuarkShield provides an automatic 7-day workstation trial. Enter a partner evaluation code or corporate multi-seat license key to extend testing or unlock full fleet compliance.
+      </p>
+
+      <div style="margin-top: 1.2rem; padding: 1rem; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; font-size: 0.84rem;">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.45rem;">
+          <span style="color: var(--text-muted);">Current Tier:</span>
+          <span style="font-weight: 600; text-transform: uppercase;" id="lic-info-tier">Trial</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.45rem;">
+          <span style="color: var(--text-muted);">Status:</span>
+          <span style="font-weight: 600;" id="lic-info-status">Active (7 Days Remaining)</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; margin-bottom: 0.45rem;">
+          <span style="color: var(--text-muted);">Expiration Date:</span>
+          <span style="font-weight: 600; font-family: monospace;" id="lic-info-expires">2026-09-15</span>
+        </div>
+        <div style="display: flex; justify-content: space-between;" id="lic-info-tenant-row">
+          <span style="color: var(--text-muted);">Organization / Enrolled Tenant:</span>
+          <span style="font-weight: 600; color: var(--accent-cyan);" id="lic-info-tenant">Complimentary Standalone Trial</span>
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top: 1.25rem;">
+        <label class="form-label">Activate Partner Key or Corporate License</label>
+        <input type="text" id="lic-input-key" class="form-input" placeholder="e.g. QS-PARTNER-DEMO-67CE3400-8F9A12B3">
+        <span style="font-size: 0.72rem; color: var(--text-dim); margin-top: 0.35rem;">
+          Enter your license key issued by the QuarkShield Fleet Admin Console. Works 100% offline.
+        </span>
+      </div>
+
+      <div id="lic-status-msg" style="margin-top: 1rem; font-size: 0.82rem; display: none; padding: 0.6rem 0.85rem; border-radius: 8px;"></div>
+
+      <div id="lic-modal-actions" style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+        <button class="btn btn-secondary" onclick="closeLicenseModal()">Cancel</button>
+        <button class="btn btn-primary" id="btn-submit-activate" onclick="activateLicenseKey()">
+          🔑 Activate License Key
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Remediation Action Plan Modal -->
+  <div class="modal-overlay" id="remediation-modal" style="display: none;">
+    <div class="modal-card" style="max-width: 680px; width: 92%; max-height: 88vh; overflow-y: auto;">
+      <div class="modal-title" style="display: flex; justify-content: space-between; align-items: center;">
+        <span id="rem-modal-title">🛠️ Remediation Action Plan</span>
+        <button onclick="closeRemediationModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; padding: 0.2rem 0.5rem;">✕</button>
+      </div>
+
+      <div id="rem-modal-body" style="margin-top: 1rem;">
+        <!-- Injected dynamically -->
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 1.5rem;">
+        <button class="btn btn-primary" onclick="closeRemediationModal()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Workstation User Guide Modal -->
+  <div class="modal-overlay" id="guide-modal" style="display: none;">
+    <div class="modal-card" style="max-width: 780px; width: 94%; max-height: 88vh; display: flex; flex-direction: column;">
+      <div class="modal-title" style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.75rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 1.1rem; font-weight: 700; color: #ffffff;">📖 Post-Quantum Guard User Guide & Manual</span>
+        </div>
+        <button onclick="closeGuideModal()" style="background: none; border: none; color: var(--text-muted); font-size: 1.3rem; cursor: pointer; padding: 0.2rem 0.5rem;">✕</button>
+      </div>
+
+      <!-- OS Navigation Tabs -->
+      <div style="display: flex; gap: 0.5rem; margin-top: 0.85rem; border-bottom: 1px solid rgba(255, 255, 255, 0.08); padding-bottom: 0.6rem;">
+        <button id="guide-tab-btn-windows" onclick="switchGuideTab('windows')" class="filter-tab" style="font-size: 0.82rem; padding: 0.4rem 0.9rem;">
+          🪟 Windows Guide
+        </button>
+        <button id="guide-tab-btn-mac" onclick="switchGuideTab('mac')" class="filter-tab" style="font-size: 0.82rem; padding: 0.4rem 0.9rem;">
+          🍎 macOS Guide
+        </button>
+        <button id="guide-tab-btn-linux" onclick="switchGuideTab('linux')" class="filter-tab" style="font-size: 0.82rem; padding: 0.4rem 0.9rem;">
+          🐧 Linux Guide
+        </button>
+      </div>
+
+      <!-- Scrollable Body -->
+      <div style="flex: 1; overflow-y: auto; margin-top: 1rem; padding-right: 0.5rem; font-size: 0.86rem; line-height: 1.6; color: var(--text-muted);">
+        
+        <!-- WINDOWS PANE -->
+        <div id="guide-pane-windows" style="display: none;">
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">1. Where to Download & Checksums</h4>
+          <p style="margin: 0 0 0.75rem 0;">Download official signed binaries at: <code style="color: var(--accent-cyan);">https://quarkshield.ai/downloads/pqc-scanner-windows-amd64.exe</code></p>
+          <div style="background: rgba(0,0,0,0.4); padding: 0.5rem 0.75rem; border-radius: 6px; font-family: monospace; font-size: 0.8rem; color: var(--accent-cyan); margin-bottom: 1rem;">
+            Invoke-WebRequest -Uri "https://quarkshield.ai/downloads/pqc-scanner-windows-amd64.exe" -OutFile "pqc-scanner.exe"<br/>
+            .\pqc-scanner.exe
+          </div>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">2. Installation & Windows SmartScreen Trust</h4>
+          <p style="margin: 0 0 1rem 0;">Signed by <strong>Fedmitigate LLC</strong> (Azure Trusted Signing). If SmartScreen displays "Windows protected your PC", click <strong>"More info"</strong> and then <strong>"Run anyway"</strong>, or run <code style="color: var(--accent-cyan);">Unblock-File -Path .\pqc-scanner.exe</code> in PowerShell.</p>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">3. What All You Can Scan</h4>
+          <ul style="margin: 0 0 1rem 1.25rem; padding: 0;">
+            <li><strong>Windows Certificate Stores:</strong> Cert:\CurrentUser\My, LocalMachine\Root, LocalMachine\CA.</li>
+            <li><strong>SSH & GPG Keys:</strong> User keys in %USERPROFILE%\.ssh (id_rsa, id_ecdsa, id_ed25519).</li>
+            <li><strong>Java Keystores:</strong> cacerts, .jks files, and enterprise PKCS#12 bundles.</li>
+            <li><strong>Authenticode Signatures:</strong> Embedded digital signatures in DLLs, EXEs, and system drivers.</li>
+          </ul>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">4. Scan Modes: Quick Scan vs. Custom Path vs. Probe TLS</h4>
+          <ul style="margin: 0 0 1rem 1.25rem; padding: 0;">
+            <li><strong>⚡ Quick Scan Workstation:</strong> Audits standard Windows cert stores and user SSH keys in 5-15 seconds.</li>
+            <li><strong>📁 Custom Path Scan:</strong> Recursively audits any folder, UNC network share, or external drive.</li>
+            <li><strong>🌐 Probe TLS / Endpoint:</strong> Probes remote endpoints (e.g. <code>api.company.com:443</code>) for TLSv1.3 and hybrid X25519MLKEM768 key exchange without an agent.</li>
+          </ul>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">5. How to Read Results</h4>
+          <ul style="margin: 0 0 1rem 1.25rem; padding: 0;">
+            <li><span style="color: #f87171; font-weight: 600;">Shor's Risk:</span> Classical RSA and ECC asymmetric keys vulnerable to quantum factorization.</li>
+            <li><span style="color: #fbbf24; font-weight: 600;">Grover's Risk:</span> Symmetric keys/hashes requiring upgrade to AES-256 / SHA-384+.</li>
+            <li><span style="color: #38bdf8; font-weight: 600;">HNDL Threat:</span> Key exchanges at risk of "Harvest Now, Decrypt Later".</li>
+            <li><span style="color: var(--status-secure); font-weight: 600;">Quantum Resilient:</span> Fully compliant with NIST FIPS 203/204/205.</li>
+          </ul>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">6. Cloud Fleet Sync & CBOM Export</h4>
+          <p style="margin: 0;">Click <strong>"🌐 Connect to Fleet"</strong> in the header and paste your enrollment token to ingest telemetry into QuarkShield Central. Click <strong>"📥 Export CBOM JSON"</strong> to download a CycloneDX 1.6 Cryptographic Bill of Materials.</p>
+        </div>
+
+        <!-- MACOS PANE -->
+        <div id="guide-pane-mac" style="display: none;">
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">1. Where to Download & Verify</h4>
+          <p style="margin: 0 0 0.75rem 0;">Download official Apple Developer ID signed DMG: <code style="color: var(--accent-cyan);">https://quarkshield.ai/downloads/QuarkShield-macOS.dmg</code></p>
+          <div style="background: rgba(0,0,0,0.4); padding: 0.5rem 0.75rem; border-radius: 6px; font-family: monospace; font-size: 0.8rem; color: #d8b4fe; margin-bottom: 1rem;">
+            # Terminal Universal CLI:<br/>
+            curl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner-darwin-universal -o quarkshield-scanner && chmod +x quarkshield-scanner && ./quarkshield-scanner
+          </div>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">2. Installation & Gatekeeper Trust</h4>
+          <p style="margin: 0 0 1rem 0;">Mount DMG and drag <strong>QuarkShield.app</strong> to /Applications. Signed with Apple Developer ID (<strong>4ADVSK467Z</strong>). If Gatekeeper prevents opening on first launch, right-click and select <strong>Open</strong>, double-click the included <strong>Trust-QuarkShield.command</strong>, or run <code style="color: var(--accent-cyan);">xattr -cr /Applications/QuarkShield.app</code>.</p>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">3. What All You Can Scan on macOS</h4>
+          <ul style="margin: 0 0 1rem 1.25rem; padding: 0;">
+            <li><strong>Apple Keychain Services:</strong> User login keychain (login.keychain-db) and System keychain.</li>
+            <li><strong>SSH & GPG Keys:</strong> ~/.ssh/id_* keys and ~/.gnupg/ keyrings.</li>
+            <li><strong>Homebrew OpenSSL:</strong> Root certs in /opt/homebrew/etc/openssl and /usr/local/etc/openssl.</li>
+            <li><strong>Developer Signatures:</strong> Apple Developer ID certs and provisioning profiles.</li>
+          </ul>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">4. Scan Modes & Probing</h4>
+          <ul style="margin: 0 0 1rem 1.25rem; padding: 0;">
+            <li><strong>⚡ Quick Scan Workstation:</strong> Fast 5-10s audit of macOS Keychain and user SSH keys.</li>
+            <li><strong>📁 Custom Path Scan:</strong> Click Browse Folder to audit specific source code or mounted volumes.</li>
+            <li><strong>🌐 Probe TLS / Endpoint:</strong> Direct outbound handshake probe testing external servers for ML-KEM support.</li>
+          </ul>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">5. Cloud Sync & CBOM Export</h4>
+          <p style="margin: 0;">Use <strong>"🌐 Connect to Fleet"</strong> to sync with QuarkShield Central, and <strong>"📥 Export CBOM JSON"</strong> to generate CycloneDX 1.6 compliance documentation.</p>
+        </div>
+
+        <!-- LINUX PANE -->
+        <div id="guide-pane-linux" style="display: none;">
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">1. Where to Download</h4>
+          <p style="margin: 0 0 0.75rem 0;">Static zero-dependency binaries for x86_64 and ARM64 (Graviton):</p>
+          <div style="background: rgba(0,0,0,0.4); padding: 0.5rem 0.75rem; border-radius: 6px; font-family: monospace; font-size: 0.8rem; color: #fbbf24; margin-bottom: 1rem;">
+            # Instant 1-Line Installer (detects arch, installs systemd service):<br/>
+            curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash
+          </div>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">2. What All You Can Scan on Linux</h4>
+          <ul style="margin: 0 0 1rem 1.25rem; padding: 0;">
+            <li><strong>System Trust Stores:</strong> /etc/ssl/certs, /etc/pki/tls/certs.</li>
+            <li><strong>SSH Host & User Keys:</strong> /etc/ssh/ssh_host_*_key and ~/.ssh/authorized_keys.</li>
+            <li><strong>Web Server TLS:</strong> Nginx (/etc/nginx), Apache (/etc/apache2), HAProxy certs.</li>
+            <li><strong>Container & Kubernetes Secret Mounts:</strong> /var/run/secrets/kubernetes.io.</li>
+          </ul>
+
+          <h4 style="color: #ffffff; margin: 0 0 0.4rem 0; font-size: 1rem;">3. Scan Modes & Headless Automation</h4>
+          <ul style="margin: 0 0 1rem 1.25rem; padding: 0;">
+            <li><strong>⚡ Quick Scan:</strong> Run <code>./pqc-scanner --quick</code> or use GUI button.</li>
+            <li><strong>📁 Custom Path:</strong> Run <code>./pqc-scanner --path /var/www</code>.</li>
+            <li><strong>🌐 Probe TLS:</strong> Run <code>./pqc-scanner --probe api.prod:443</code>.</li>
+            <li><strong>📡 Continuous Fleet Telemetry:</strong> <code>./pqc-scanner --server https://quarkshield.ai --token &lt;TOKEN&gt; --quick</code></li>
+          </ul>
+        </div>
+
+      </div>
+
+      <!-- Modal Footer -->
+      <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 0.85rem; margin-top: 1rem;">
+        <a id="guide-online-link" href="https://quarkshield.ai/docs/WINDOWS_USER_GUIDE.md" target="_blank" rel="noreferrer" style="color: var(--accent-cyan); font-size: 0.82rem; text-decoration: none; display: flex; align-items: center; gap: 0.35rem;">
+          📄 Open Full Online Documentation &rarr;
+        </a>
+        <button class="btn btn-secondary" onclick="closeGuideModal()" style="font-size: 0.82rem; padding: 0.45rem 1rem;">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <div>QuarkShield.AI Endpoint Security &bull; Zero-Dependency Post-Quantum Cryptographic Scanner</div>
+    <div>Copyright: &copy; 2026 FedMitigate LLC. All rights reserved.</div>
+  </footer>
+
+  <script>
+    let currentFindings = [];
+    let hostInfo = {};
+    let currentLicenseInfo = {};
+
+    // 1. Initialize Host Metadata & License State
+    async function fetchHostStatus() {
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) {
+          hostInfo = await res.json();
+          document.getElementById('header-host').textContent = 
+            `${hostInfo.hostname} (${hostInfo.os}/${hostInfo.arch}) • ${hostInfo.ip}`;
+          updateAppBranding(hostInfo.os);
+          renderQuickTargets(hostInfo.os, hostInfo.home);
+          if (hostInfo.license) {
+            currentLicenseInfo = hostInfo.license;
+            updateLicenseUI(currentLicenseInfo);
+          }
+        }
+      } catch (e) {
+        console.warn('Status lookup failed:', e);
+      }
+      await loadLicenseStatus();
+      fetchScanHistory();
+      loadLatestScanOnStartup();
+    }
+
+    async function loadLicenseStatus() {
+      try {
+        const res = await fetch('/api/license');
+        if (res.ok) {
+          currentLicenseInfo = await res.json();
+          updateLicenseUI(currentLicenseInfo);
+        }
+      } catch (e) {
+        console.warn('License status fetch error:', e);
+      }
+    }
+
+    function updateLicenseUI(lic) {
+      if (!lic) return;
+      const badge = document.getElementById('license-badge');
+      if (badge) {
+        if (lic.isLicensed) {
+          const tierName = lic.tier === 'corporate' ? 'Corporate' : 'Partner';
+          badge.innerHTML = `🛡️ ${tierName} Licensed (${escapeHtml(lic.tenantName || 'Enterprise')})`;
+          badge.style.color = '#34d399';
+          badge.style.borderColor = 'rgba(52, 211, 153, 0.4)';
+          badge.style.background = 'rgba(52, 211, 153, 0.12)';
+        } else if (lic.isExpired) {
+          badge.innerHTML = `⚠️ Trial Expired (Click to Activate)`;
+          badge.style.color = '#f87171';
+          badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+          badge.style.background = 'rgba(239, 68, 68, 0.15)';
+          
+          document.getElementById('btn-quick-scan').disabled = true;
+          document.getElementById('btn-full-scan').disabled = true;
+          document.getElementById('scan-desc').textContent = 
+            'Your 7-day complimentary trial has expired. Enter a partner evaluation code or corporate license key to resume scanning.';
+        } else {
+          badge.innerHTML = `⏱️ 7-Day Trial (${lic.daysRemaining} Days Left)`;
+          badge.style.color = '#fbbf24';
+          badge.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+          badge.style.background = 'rgba(245, 158, 11, 0.12)';
+        }
+      }
+
+      // Update Modal Info
+      const elTier = document.getElementById('lic-info-tier');
+      const elStatus = document.getElementById('lic-info-status');
+      const elExpires = document.getElementById('lic-info-expires');
+      const elTenant = document.getElementById('lic-info-tenant');
+      const elTenantRow = document.getElementById('lic-info-tenant-row');
+
+      if (elTier) elTier.textContent = lic.tier || 'Trial';
+      if (elStatus) elStatus.textContent = lic.isExpired ? 'Expired' : `Active (${lic.daysRemaining} Days Remaining)`;
+      if (elExpires) elExpires.textContent = lic.expiresAt || '-';
+      if (elTenant) {
+        if (lic.tenantName) {
+          elTenant.textContent = `${lic.tenantName} (${lic.seats || 0} seats)`;
+          if (elTenantRow) elTenantRow.style.display = 'flex';
+        } else {
+          elTenant.textContent = 'Complimentary Standalone Trial';
+        }
+      }
+    }
+
+    function openLicenseModal() {
+      document.getElementById('license-modal').style.display = 'flex';
+      const msg = document.getElementById('lic-status-msg');
+      if (msg) msg.style.display = 'none';
+      const input = document.getElementById('lic-input-key');
+      if (input) input.value = '';
+      const actions = document.getElementById('lic-modal-actions');
+      if (actions) {
+        actions.innerHTML = `
+          <button class="btn btn-secondary" onclick="closeLicenseModal()">Cancel</button>
+          <button class="btn btn-primary" id="btn-submit-activate" onclick="activateLicenseKey()">
+            🔑 Activate License Key
+          </button>
+        `;
+      }
+      loadLicenseStatus();
+    }
+
+    function closeLicenseModal() {
+      document.getElementById('license-modal').style.display = 'none';
+    }
+
+    async function activateLicenseKey() {
+      const input = document.getElementById('lic-input-key');
+      const msg = document.getElementById('lic-status-msg');
+      const btn = document.getElementById('btn-submit-activate');
+      const key = (input.value || '').trim();
+
+      if (!key) {
+        msg.style.display = 'block';
+        msg.style.background = 'rgba(239, 68, 68, 0.15)';
+        msg.style.color = '#f87171';
+        msg.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        msg.textContent = 'Please enter a valid license key (e.g. QS-PARTNER-... or QS-CORP-...).';
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Verifying...';
+      }
+
+      try {
+        const res = await fetch('/api/license/activate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key })
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'License key verification failed');
+        }
+
+        msg.style.display = 'block';
+        msg.style.background = 'rgba(16, 185, 129, 0.15)';
+        msg.style.color = '#34d399';
+        msg.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+        msg.textContent = `✓ ${data.message || 'License activated successfully!'}`;
+
+        // Swap action buttons to a clean "Close" button upon successful activation
+        const actions = document.getElementById('lic-modal-actions');
+        if (actions) {
+          actions.innerHTML = `
+            <button class="btn btn-primary" style="min-width: 130px; font-weight: 600;" onclick="closeLicenseModal()">
+              ✓ Close
+            </button>
+          `;
+        }
+
+        currentLicenseInfo = data.license;
+        updateLicenseUI(currentLicenseInfo);
+        
+        // Re-enable scanning if previously expired
+        document.getElementById('btn-quick-scan').disabled = false;
+        document.getElementById('btn-full-scan').disabled = false;
+      } catch (err) {
+        msg.style.display = 'block';
+        msg.style.background = 'rgba(239, 68, 68, 0.15)';
+        msg.style.color = '#f87171';
+        msg.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        msg.textContent = `Error: ${err.message}`;
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '🔑 Activate License Key';
+        }
+      }
+    }
+
+    // 2. Scan Triggers & Folder Selection
+    function toggleCustomScan() {
+      const box = document.getElementById('custom-path-box');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+      if (box.style.display === 'block') {
+        document.getElementById('custom-path-input').focus();
+        document.getElementById('network-probe-box').style.display = 'none';
+      }
+    }
+
+    function toggleProbeBox() {
+      const box = document.getElementById('network-probe-box');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+      if (box.style.display === 'block') {
+        document.getElementById('probe-target-input').focus();
+        document.getElementById('custom-path-box').style.display = 'none';
+      }
+    }
+
+    let lastProbeFindings = [];
+
+    function clearProbeResult() {
+      const card = document.getElementById('probe-result-card');
+      if (card) card.style.display = 'none';
+      lastProbeFindings = [];
+    }
+
+    function trackProbeInInventory() {
+      if (!lastProbeFindings || lastProbeFindings.length === 0) return;
+      const existingIds = new Set((currentFindings || []).map(f => f.id));
+      const newItems = lastProbeFindings.filter(f => !existingIds.has(f.id));
+      if (newItems.length > 0) {
+        currentFindings = [...(currentFindings || []), ...newItems];
+        renderScanResults({ findings: currentFindings });
+      }
+      const trackBtn = document.getElementById('btn-track-inventory');
+      if (trackBtn) {
+        const orig = trackBtn.innerHTML;
+        trackBtn.innerHTML = '✓ Tracked in Inventory';
+        trackBtn.disabled = true;
+        setTimeout(() => {
+          trackBtn.innerHTML = orig;
+          trackBtn.disabled = false;
+        }, 2500);
+      }
+    }
+
+    async function triggerProbe() {
+      const input = document.getElementById('probe-target-input');
+      const authCheck = document.getElementById('probe-auth-check');
+      if (authCheck && !authCheck.checked) {
+        alert('Please check the authorization box to allow the outbound TLS probe.');
+        return;
+      }
+
+      const target = input.value.trim() || 'cloudflare.com';
+      const btn = document.getElementById('btn-run-probe');
+      const origText = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Scanning...';
+
+      // Set scanner UI state using actual element ID 'scan-ticker'
+      const progBox = document.getElementById('scan-progress-box');
+      const ticker = document.getElementById('scan-ticker');
+      const fill = document.getElementById('progress-fill');
+      progBox.style.display = 'block';
+      ticker.textContent = `Initiating direct outbound TLS socket to ${target}...`;
+      fill.style.width = '45%';
+
+      try {
+        const res = await fetch('/api/probe', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target: target })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || 'Network probe failed');
+        }
+
+        fill.style.width = '100%';
+        ticker.textContent = `TLS probe complete for ${data.host || target}. Handshake evaluated.`;
+        setTimeout(() => {
+          progBox.style.display = 'none';
+        }, 800);
+
+        // Populate dedicated Remote TLS Handshake Auditor Card matching Image 3
+        lastProbeFindings = data.findings || [];
+        const card = document.getElementById('probe-result-card');
+        const hostEl = document.getElementById('probe-res-host');
+        const badgeEl = document.getElementById('probe-res-badge');
+        const protoEl = document.getElementById('probe-res-protocol');
+        const keySizeEl = document.getElementById('probe-res-keysize');
+        const threatEl = document.getElementById('probe-res-threat');
+        const detailedEl = document.getElementById('probe-res-detailed');
+        const remEl = document.getElementById('probe-res-remediation');
+        const explEl = document.getElementById('probe-res-explainer');
+
+        hostEl.textContent = data.host || target;
+        protoEl.textContent = data.protocolSuite || 'TLS 1.3 / AES-256-GCM / Hybrid KEM';
+        keySizeEl.textContent = data.publicKeySize || '256-bit';
+
+        if (data.isSecure) {
+          card.style.borderColor = 'rgba(16, 185, 129, 0.5)';
+          card.style.boxShadow = '0 0 24px rgba(16, 185, 129, 0.15)';
+          badgeEl.textContent = 'Post-Quantum Secure';
+          badgeEl.style.background = 'rgba(16, 185, 129, 0.2)';
+          badgeEl.style.color = '#34d399';
+          badgeEl.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+          threatEl.textContent = 'SECURE';
+          threatEl.style.color = '#34d399';
+        } else {
+          card.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+          card.style.boxShadow = '0 0 24px rgba(239, 68, 68, 0.15)';
+          badgeEl.textContent = 'Quantum Vulnerable';
+          badgeEl.style.background = 'rgba(239, 68, 68, 0.2)';
+          badgeEl.style.color = '#f87171';
+          badgeEl.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+          threatEl.textContent = data.quantumThreatLevel || 'CRITICAL';
+          threatEl.style.color = '#f87171';
+        }
+
+        detailedEl.textContent = data.detailedAudit || (data.isSecure 
+          ? `Secure TLS handshake establishing a Post-Quantum hybrid exchange with ${data.host || target}.`
+          : `Outbound TLS handshake fell back to classical algorithms with ${data.host || target}. Traffic is vulnerable to HNDL recording.`);
+
+        remEl.textContent = data.remediation || (data.isSecure
+          ? 'Excellent setup. Target server supports modern PQ cipher exchanges natively.'
+          : 'Upgrade server TLS configuration to negotiate NIST FIPS 203 ML-KEM hybrid key exchange.');
+
+        explEl.textContent = data.explainer || (data.isSecure
+          ? 'The TLS handshake utilizes a lattice-based post-quantum key encapsulation algorithm (ML-KEM) combined with classical Curve25519. This protects historical logs from Store-Now, Decrypt-Later (SNDL) attacks.'
+          : 'Classical ECDH key exchange is vulnerable to Shor\'s Algorithm, allowing quantum adversaries to decrypt recorded sessions.');
+
+        card.style.display = 'block';
+
+      } catch (err) {
+        alert(`Probe Error: ${err.message}`);
+        progBox.style.display = 'none';
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+      }
+    }
+
+    function updateAppBranding(osName) {
+      const brandSub = document.getElementById('brand-sub-title');
+      const osPill = document.getElementById('os-badge-pill');
+      const heroBadge = document.getElementById('hero-platform-badge');
+      
+      let osLabel = 'for Mac';
+      let pillText = '🍎 macOS';
+      let titleText = 'QuarkShield.AI — Post-Quantum Guard for Mac';
+
+      if (osName === 'windows') {
+        osLabel = 'for Windows';
+        pillText = '🪟 Windows';
+        titleText = 'QuarkShield.AI — Post-Quantum Guard for Windows';
+      } else if (osName === 'linux') {
+        osLabel = 'for Linux';
+        pillText = '🐧 Linux';
+        titleText = 'QuarkShield.AI — Post-Quantum Guard for Linux';
+      }
+
+      if (brandSub) brandSub.textContent = `Post-Quantum Guard ${osLabel}`;
+      if (osPill) osPill.innerHTML = pillText;
+      if (heroBadge) heroBadge.innerHTML = `${pillText.split(' ')[0]} Post-Quantum Guard ${osLabel}`;
+      document.title = titleText;
+    }
+
+    function renderQuickTargets(osName, homeDir) {
+      const container = document.getElementById('quick-preset-chips');
+      const input = document.getElementById('custom-path-input');
+      const hintText = document.getElementById('browse-hint-text');
+      if (!container) return;
+
+      const cleanHome = homeDir || (osName === 'windows' ? 'C:\\Users' : '~');
+      let presets = [];
+
+      if (osName === 'darwin') {
+        presets = [
+          { label: 'Applications', path: '/Applications', icon: '🍎' },
+          { label: 'User Home', path: cleanHome, icon: '👤' },
+          { label: 'Downloads', path: cleanHome ? cleanHome + '/Downloads' : '~/Downloads', icon: '📥' },
+          { label: 'SSH Keys', path: cleanHome ? cleanHome + '/.ssh' : '~/.ssh', icon: '🔑' },
+          { label: 'Keychains', path: '/Library/Keychains', icon: '🛡️' }
+        ];
+        if (input && (!input.value || input.value.startsWith('C:\\'))) {
+          input.placeholder = 'Select or enter folder path (e.g. /Applications, ~/Downloads, or ~/.ssh)...';
+        }
+        if (hintText) hintText.innerHTML = 'macOS folder picker opened. Select a folder to audit.';
+      } else if (osName === 'linux') {
+        presets = [
+          { label: 'System SSL', path: '/etc/ssl', icon: '🛡️' },
+          { label: 'SSH Config', path: '/etc/ssh', icon: '🔑' },
+          { label: 'User Home', path: cleanHome, icon: '👤' },
+          { label: 'User SSH', path: cleanHome ? cleanHome + '/.ssh' : '~/.ssh', icon: '🔑' },
+          { label: 'Web Root', path: '/var/www', icon: '🌐' }
+        ];
+        if (input && (!input.value || input.value.startsWith('C:\\'))) {
+          input.placeholder = 'Select or enter folder path (e.g. /etc/ssl, /etc/ssh, or ~/.ssh)...';
+        }
+        if (hintText) hintText.innerHTML = 'Folder picker opened. Select a folder to audit.';
+      } else {
+        // Windows
+        presets = [
+          { label: 'Drive C:\\', path: 'C:\\', icon: '💻' },
+          { label: 'C:\\Users', path: 'C:\\Users', icon: '📁' },
+          { label: 'C:\\Windows', path: 'C:\\Windows', icon: '🛡️' },
+          { label: 'C:\\Program Files', path: 'C:\\Program Files', icon: '📦' }
+        ];
+        if (input && !input.value) {
+          input.placeholder = 'Select or enter folder path (e.g. C:\\, C:\\Users, or C:\\Program Files)...';
+        }
+        if (hintText) hintText.innerHTML = '<strong>Windows dialog opened:</strong> If it appears behind this browser window, click the folder icon on your Windows taskbar or press <kbd style="background: rgba(255,255,255,0.15); padding: 1px 4px; border-radius: 3px;">Alt+Tab</kbd>.';
+      }
+
+      container.innerHTML = presets.map(p => 
+        `<button type="button" class="preset-chip" onclick="setCustomTarget('${p.path.replace(/\\/g, '\\\\')}')">${p.icon} ${p.label}</button>`
+      ).join(' ');
+    }
+
+    function setCustomTarget(targetPath) {
+      const input = document.getElementById('custom-path-input');
+      input.value = targetPath;
+      input.focus();
+      input.style.borderColor = 'var(--accent-cyan)';
+      input.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.4)';
+      setTimeout(() => {
+        input.style.borderColor = '';
+        input.style.boxShadow = '';
+      }, 1000);
+    }
+
+    async function openFolderPicker() {
+      const btn = document.getElementById('btn-browse-folder');
+      const input = document.getElementById('custom-path-input');
+      const hint = document.getElementById('browse-hint');
+      const origHtml = btn.innerHTML;
+      
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Waiting for selection...';
+      if (hint) hint.style.display = 'block';
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+      try {
+        const res = await fetch('/api/browse', { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.path) {
+            input.value = data.path;
+            input.focus();
+            input.style.borderColor = 'var(--accent-cyan)';
+            input.style.boxShadow = '0 0 10px rgba(0, 242, 254, 0.4)';
+            setTimeout(() => {
+              input.style.borderColor = '';
+              input.style.boxShadow = '';
+            }, 1200);
+          }
+        }
+      } catch (e) {
+        if (e.name !== 'AbortError') {
+          console.error('Browse dialog error:', e);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+        if (hint) hint.style.display = 'none';
+      }
+    }
+
+    let scanPollTimer = null;
+    let currentPage = 1;
+    let pageSize = 25;
+    let displayFindings = [];
+
+    async function cancelScan() {
+      try {
+        document.getElementById('scan-ticker').textContent = '🛑 Halting audit and canceling scan...';
+        await fetch('/api/scan/cancel', { method: 'POST' });
+      } catch (e) {
+        console.warn('Cancel call failed:', e);
+      }
+    }
+
+    async function triggerScan(isQuick) {
+      let targetPath = '';
+      if (!isQuick) {
+        targetPath = document.getElementById('custom-path-input').value.trim();
+        if (!targetPath) {
+          alert('Please enter a directory path to scan.');
+          return;
+        }
+      }
+
+      // UI State: Scanning
+      document.getElementById('btn-quick-scan').disabled = true;
+      document.getElementById('btn-full-scan').disabled = true;
+      document.getElementById('btn-cancel-scan').disabled = false;
+      document.getElementById('scan-progress-box').style.display = 'block';
+      document.getElementById('threat-banner').style.display = 'none';
+      document.getElementById('metrics-grid').style.display = 'none';
+      document.getElementById('cbom-section').style.display = 'none';
+
+      const pulse = document.getElementById('shield-pulse');
+      pulse.className = 'shield-pulse scanning';
+      document.getElementById('shield-icon').setAttribute('stroke', 'var(--accent-cyan)');
+
+      document.getElementById('scan-heading').textContent = 'Auditing Workstation...';
+      document.getElementById('scan-desc').textContent = isQuick 
+        ? 'Inspecting SSH keys, certificates, GPG keyrings, VPN configs, and keystores...'
+        : `Recursively crawling and auditing cryptographic assets in: ${targetPath}...`;
+
+      const fill = document.getElementById('progress-fill');
+      const ticker = document.getElementById('scan-ticker');
+      const filesCountEl = document.getElementById('files-scanned-count');
+      const assetsCountEl = document.getElementById('assets-found-count');
+      
+      fill.style.width = '10%';
+      ticker.textContent = 'Initiating scan engine...';
+      filesCountEl.textContent = 'Files Checked: 0';
+      assetsCountEl.textContent = 'Cryptographic Assets Discovered: 0';
+
+      if (scanPollTimer) clearInterval(scanPollTimer);
+
+      try {
+        // 1. Start asynchronous background scan
+        const startRes = await fetch('/api/scan/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ quick: isQuick, path: targetPath })
+        });
+
+        if (!startRes.ok) {
+          throw new Error(`Failed to start scan (HTTP ${startRes.status})`);
+        }
+
+        let progressPct = 15;
+
+        // 2. Poll live scan progress every 200ms
+        scanPollTimer = setInterval(async () => {
+          try {
+            const pRes = await fetch('/api/scan/progress');
+            if (!pRes.ok) return;
+            const data = await pRes.json();
+
+            // Update real-time path & stats
+            if (data.currentPath) {
+              ticker.textContent = `📂 ${data.currentPath}`;
+            }
+            filesCountEl.textContent = `Files Checked: ${(data.scannedFiles || 0).toLocaleString()}`;
+            assetsCountEl.textContent = `Cryptographic Assets Discovered: ${(data.foundAssets || 0).toLocaleString()}`;
+
+            if (progressPct < 90) {
+              progressPct += Math.min(2, Math.max(0.3, 15 / (data.scannedFiles + 10)));
+              fill.style.width = `${progressPct}%`;
+            }
+
+            // Check if user canceled
+            if (data.canceled) {
+              clearInterval(scanPollTimer);
+              fill.style.width = '100%';
+              ticker.textContent = '🛑 Scan canceled by user.';
+              resetScanUI();
+              if (data.findings && data.findings.length > 0) {
+                currentFindings = data.findings;
+                renderScanResults(data);
+              }
+              return;
+            }
+
+            // Check if scan completed
+            if (data.complete) {
+              clearInterval(scanPollTimer);
+              fill.style.width = '100%';
+              ticker.textContent = `Audit complete! Discovered ${(data.findings || []).length} cryptographic items.`;
+              currentFindings = data.findings || [];
+              renderScanResults(data);
+              fetchScanHistory();
+              setTimeout(() => {
+                document.getElementById('scan-progress-box').style.display = 'none';
+              }, 1200);
+              resetScanUI();
+              return;
+            }
+
+            // Check if error occurred
+            if (data.error) {
+              clearInterval(scanPollTimer);
+              ticker.textContent = `Scan error: ${data.error}`;
+              alert(`Scan encountered an error: ${data.error}`);
+              resetScanUI();
+              return;
+            }
+          } catch (pollErr) {
+            console.warn('Progress poll issue:', pollErr);
+          }
+        }, 200);
+
+      } catch (err) {
+        if (scanPollTimer) clearInterval(scanPollTimer);
+        ticker.textContent = `Scan error: ${err.message}`;
+        alert(`Scan failed: ${err.message}`);
+        resetScanUI();
+      }
+    }
+
+    function resetScanUI() {
+      document.getElementById('btn-quick-scan').disabled = false;
+      document.getElementById('btn-full-scan').disabled = false;
+      document.getElementById('btn-cancel-scan').disabled = true;
+    }
+
+    // 3. Render Results with Post-Quantum Threat & Configuration Assessment
+    function renderScanResults(data) {
+      const findings = data.findings || [];
+      const vulnerableCount = findings.filter(f => f.isVulnerable).length;
+      const secureCount = findings.filter(f => !f.isVulnerable && f.type !== 'config').length;
+
+      // Calculate Breakdown across Shor's, Config Violations, HNDL, and Grover's
+      let shorCount = 0;
+      let groverCount = 0;
+      let hndlCount = 0;
+      let configCount = 0;
+      let certsCount = 0;
+
+      findings.forEach(f => {
+        const threat = (f.quantumThreat || '').toLowerCase();
+        const algo = (f.algorithm || '').toLowerCase();
+        const desc = (f.description || '').toLowerCase();
+        const expl = (f.explainer || '').toLowerCase();
+        const name = (f.name || '').toLowerCase();
+        const type = (f.type || '').toLowerCase();
+
+        // 0. Certs & Keys count
+        if (type === 'certificate' || type === 'key' || type === 'ssh_key' || /rsa|ecdsa|dsa|ed25519/i.test(algo)) {
+          certsCount++;
+        }
+
+        // 1. Config Violations
+        if (type === 'config' || name.includes('schannel') || name.includes('line ') || algo.includes('config') || algo.includes('protocol')) {
+          configCount++;
+        }
+
+        // 2. Shor's Algorithm Risk (Asymmetric Factorization / Discrete Log)
+        if (f.isVulnerable && (type === 'certificate' || type === 'key' || type === 'ssh_key' || threat.includes('shor') || /rsa|ecdsa|dsa|ed25519|ecc|elliptic/i.test(algo))) {
+          shorCount++;
+        }
+
+        // 3. Grover's Algorithm Risk (Symmetric Key Halving to 64-bit / 3DES / RC4)
+        if (threat.includes('grover') || algo.includes('aes-128') || algo.includes('aes128') || algo.includes('3des') || algo.includes('rc4') || desc.includes('grover') || desc.includes('aes-128') || expl.includes('grover')) {
+          groverCount++;
+        }
+
+        // 4. Harvest Now, Decrypt Later (HNDL) Session Exposure
+        if (threat.includes('hndl') || threat.includes('harvest') || name.includes('schannel') || name.includes('tls') || name.includes('kex') || algo.includes('protocol') || desc.includes('harvest')) {
+          hndlCount++;
+        }
+      });
+
+      // Update Shield & Heading
+      const pulse = document.getElementById('shield-pulse');
+      const icon = document.getElementById('shield-icon');
+      const heading = document.getElementById('scan-heading');
+      const desc = document.getElementById('scan-desc');
+
+      if (vulnerableCount > 0) {
+        pulse.className = 'shield-pulse vulnerable';
+        icon.setAttribute('stroke', 'var(--accent-red)');
+        heading.textContent = `${vulnerableCount} Quantum Vulnerabilities Detected`;
+        desc.textContent = `Audit completed. ${findings.length} total cryptographic artifacts identified.`;
+
+        // Banner
+        const banner = document.getElementById('threat-banner');
+        banner.className = 'threat-banner critical';
+        banner.style.display = 'flex';
+        document.getElementById('threat-icon').textContent = '🚨';
+        document.getElementById('threat-title').textContent = 'Active Post-Quantum Exposure Identified';
+        document.getElementById('threat-desc').textContent = 
+          `${shorCount} asymmetric keys vulnerable to Shor's factorization, ${configCount} configuration violations, ${hndlCount} session endpoints exposed to Harvest Now Decrypt Later, and ${groverCount} symmetric ciphers weakened under Grover's search.`;
+      } else {
+        pulse.className = 'shield-pulse secure';
+        icon.setAttribute('stroke', 'var(--accent-emerald)');
+        heading.textContent = 'Post-Quantum Protected';
+        desc.textContent = `Audit completed. No classical Shor-vulnerable or Grover-weakened keys detected.`;
+
+        const banner = document.getElementById('threat-banner');
+        banner.className = 'threat-banner secure';
+        banner.style.display = 'flex';
+        document.getElementById('threat-icon').textContent = '🛡️';
+        document.getElementById('threat-title').textContent = 'Cryptographically Sound';
+        document.getElementById('threat-desc').textContent = 'All inspected keys and protocols utilize post-quantum or hybrid security architectures.';
+      }
+
+      // Metrics Grid (Threat & Compliance Cards)
+      document.getElementById('metrics-grid').style.display = 'grid';
+      document.getElementById('m-total-assets').textContent = findings.length;
+      document.getElementById('m-shor-assets').textContent = shorCount;
+      document.getElementById('m-config-violations').textContent = configCount;
+      document.getElementById('m-hndl-assets').textContent = hndlCount;
+      document.getElementById('m-grover-assets').textContent = groverCount;
+      document.getElementById('m-secure-assets').textContent = secureCount;
+
+      // Update One-Click Filter Tab Counts
+      const elTabAll = document.getElementById('tab-count-all');
+      const elTabCerts = document.getElementById('tab-count-certs');
+      const elTabShor = document.getElementById('tab-count-shor');
+      const elTabConfig = document.getElementById('tab-count-config');
+      const elTabHndl = document.getElementById('tab-count-hndl');
+      const elTabGrover = document.getElementById('tab-count-grover');
+      const elTabSecure = document.getElementById('tab-count-secure');
+      if (elTabAll) elTabAll.textContent = findings.length;
+      if (elTabCerts) elTabCerts.textContent = certsCount;
+      if (elTabShor) elTabShor.textContent = shorCount;
+      if (elTabConfig) elTabConfig.textContent = configCount;
+      if (elTabHndl) elTabHndl.textContent = hndlCount;
+      if (elTabGrover) elTabGrover.textContent = groverCount;
+      if (elTabSecure) elTabSecure.textContent = secureCount;
+
+      // CBOM Section & Pagination
+      document.getElementById('cbom-section').style.display = 'block';
+      document.getElementById('cbom-badge-count').textContent = `${findings.length} Items`;
+      
+      currentFilterTab = 'all';
+      const tabBtns = document.querySelectorAll('.filter-tab');
+      tabBtns.forEach(btn => {
+        if (btn.getAttribute('data-tab') === 'all') btn.classList.add('active');
+        else btn.classList.remove('active');
+      });
+
+      filterFindings();
+    }
+
+    // 4. Pagination & Responsive CBOM Table Rendering
+    function changePageSize(val) {
+      pageSize = val === 'all' ? 'all' : parseInt(val, 10);
+      currentPage = 1;
+      renderCurrentPage();
+    }
+
+    function prevPage() {
+      if (currentPage > 1) {
+        currentPage--;
+        renderCurrentPage();
+      }
+    }
+
+    function nextPage() {
+      const totalPages = pageSize === 'all' ? 1 : Math.ceil(displayFindings.length / pageSize);
+      if (currentPage < totalPages) {
+        currentPage++;
+        renderCurrentPage();
+      }
+    }
+
+    function renderCurrentPage() {
+      const tbody = document.getElementById('findings-table-body');
+      tbody.innerHTML = '';
+
+      const total = displayFindings.length;
+      if (total === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 2rem;">No matching cryptographic assets found.</td></tr>`;
+        document.getElementById('pagination-info').textContent = 'Showing 0 items';
+        document.getElementById('page-indicator').textContent = '1 / 1';
+        document.getElementById('btn-prev-page').disabled = true;
+        document.getElementById('btn-next-page').disabled = true;
+        return;
+      }
+
+      let items = displayFindings;
+      let start = 0;
+      let end = total;
+      let totalPages = 1;
+
+      if (pageSize !== 'all') {
+        totalPages = Math.ceil(total / pageSize);
+        if (currentPage > totalPages) currentPage = totalPages;
+        start = (currentPage - 1) * pageSize;
+        end = Math.min(start + pageSize, total);
+        items = displayFindings.slice(start, end);
+      }
+
+      document.getElementById('pagination-info').textContent = 
+        `Showing ${start + 1}-${end} of ${total} cryptographic assets`;
+      document.getElementById('page-indicator').textContent = `${currentPage} / ${totalPages}`;
+      document.getElementById('btn-prev-page').disabled = currentPage <= 1;
+      document.getElementById('btn-next-page').disabled = currentPage >= totalPages;
+
+      items.forEach((item, relativeIdx) => {
+        const globalIdx = currentFindings.indexOf(item);
+        const tr = document.createElement('tr');
+        
+        // Threat Vector Badging
+        let threatBadge = '';
+        const threatLower = (item.quantumThreat || '').toLowerCase();
+        const algoLower = (item.algorithm || '').toLowerCase();
+
+        if (!item.isVulnerable) {
+          threatBadge = `<span class="badge badge-secure" style="display: block; text-align: center;">🛡️ Quantum Safe</span>`;
+        } else if (threatLower.includes('grover') || algoLower.includes('aes-128') || algoLower.includes('aes128') || algoLower.includes('3des')) {
+          threatBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); display: block; text-align: center;" title="Halved symmetric security to 64-bit under Grover search">⚡ Grover's 64-bit</span>`;
+        } else if (threatLower.includes('hndl') || threatLower.includes('harvest') || (item.name || '').includes('Schannel')) {
+          threatBadge = `<span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); display: block; text-align: center;" title="Data intercepted today can be decrypted retrospectively">📡 Active HNDL</span>`;
+        } else if (item.type === 'config') {
+          threatBadge = `<span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.4); display: block; text-align: center;" title="Configuration policy violation">⚠️ Config Policy</span>`;
+        } else {
+          threatBadge = `<span class="badge badge-critical" style="display: block; text-align: center;" title="Vulnerable to polynomial-time factorization via Shor's Algorithm">🚨 Shor's Risk</span>`;
+        }
+
+        let complianceTags = (item.complianceViolations || []).map(c => 
+          `<span class="badge badge-high" style="font-size: 0.65rem;">${escapeHtml(c)}</span>`
+        ).join(' ');
+
+        let remediationBtn = (item.remediationSteps && item.remediationSteps.length > 0) || item.codeSnippet
+          ? `<button class="btn btn-secondary" onclick="openRemediationModal(${globalIdx})" style="padding: 0.25rem 0.6rem; font-size: 0.72rem; color: var(--accent-cyan); border-color: rgba(0, 242, 254, 0.35); display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap;">
+              🛠️ View Remediation Plan
+            </button>`
+          : '';
+
+        tr.innerHTML = `
+          <td style="word-break: break-word;">
+            <div style="font-weight: 600; font-size: 0.86rem; color: #fff;">${escapeHtml(item.name)}</div>
+            <div style="font-family: monospace; font-size: 0.72rem; color: var(--accent-cyan); word-break: break-all; margin-top: 0.3rem;">
+              📂 ${escapeHtml(item.path || item.name)}
+            </div>
+            ${item.type === 'certificate' && item.description && item.description.includes('Subject:') ? 
+              `<div style="font-size: 0.70rem; color: var(--text-dim); margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.description)}</div>` : ''}
+          </td>
+          <td><span class="badge badge-type">${escapeHtml(item.type)}</span></td>
+          <td>
+            <div style="font-family: monospace; font-weight: 600; font-size: 0.82rem;">${escapeHtml(item.algorithm)}</div>
+            ${item.keySize ? `<div style="font-size: 0.7rem; color: var(--text-dim);">(${item.keySize}-bit)</div>` : ''}
+          </td>
+          <td>${threatBadge}</td>
+          <td style="word-break: break-word; color: #cbd5e1; font-size: 0.8rem; line-height: 1.45;">
+            <div>${escapeHtml(item.recommendation || 'Standard maintenance.')}</div>
+            <div style="margin-top: 0.45rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;">
+              ${remediationBtn}
+              ${complianceTags}
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function openRemediationModal(idx) {
+      const item = currentFindings[idx];
+      if (!item) return;
+
+      document.getElementById('rem-modal-title').textContent = `🛠️ Remediation: ${item.name}`;
+
+      let stepsHtml = '';
+      if (item.remediationSteps && item.remediationSteps.length > 0) {
+        stepsHtml = `
+          <div style="margin-top: 1.1rem;">
+            <div style="font-weight: 600; color: #fff; margin-bottom: 0.5rem; font-size: 0.88rem;">Step-by-Step Remediation Action Plan:</div>
+            <ol style="margin-left: 1.25rem; color: #cbd5e1; font-size: 0.84rem; line-height: 1.65;">
+              ${item.remediationSteps.map(s => `<li style="margin-bottom: 0.4rem;">${escapeHtml(s)}</li>`).join('')}
+            </ol>
+          </div>
+        `;
+      }
+
+      let codeHtml = '';
+      if (item.codeSnippet) {
+        codeHtml = `
+          <div style="margin-top: 1.1rem;">
+            <div style="font-weight: 600; color: #fff; margin-bottom: 0.4rem; font-size: 0.88rem;">Remediation & Verification Command:</div>
+            <pre style="background: rgba(0,0,0,0.6); padding: 0.85rem; border-radius: 6px; font-size: 0.78rem; color: var(--accent-cyan); overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); font-family: monospace; white-space: pre-wrap;"><code>${escapeHtml(item.codeSnippet)}</code></pre>
+          </div>
+        `;
+      }
+
+      const threatHeading = item.quantumThreat ? item.quantumThreat : "Quantum Vulnerability Assessment";
+
+      document.getElementById('rem-modal-body').innerHTML = `
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 0.9rem; margin-bottom: 1rem;">
+          <div style="font-weight: 600; color: #f87171; font-size: 0.92rem; margin-bottom: 0.3rem;">
+            Threat Assessment: ${escapeHtml(threatHeading)}
+          </div>
+          <div style="font-size: 0.82rem; color: #94a3b8; line-height: 1.45;">${escapeHtml(item.description || '')}</div>
+          <div style="margin-top: 0.4rem; font-family: monospace; font-size: 0.75rem; color: var(--accent-cyan);">Location: ${escapeHtml(item.path || item.name)}</div>
+          <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #fca5a5;"><strong>Quantum Impact:</strong> ${escapeHtml(item.explainer || 'Breakable via cryptanalytically relevant quantum computers.')}</div>
+        </div>
+
+        <div style="background: rgba(0, 242, 254, 0.06); border: 1px solid rgba(0, 242, 254, 0.2); border-radius: 8px; padding: 0.9rem;">
+          <div style="font-weight: 600; color: var(--accent-cyan); font-size: 0.92rem; margin-bottom: 0.3rem;">NIST FIPS 203/204 Architectural Recommendation</div>
+          <div style="font-size: 0.84rem; color: #e2e8f0; line-height: 1.5;">${escapeHtml(item.recommendation || '')}</div>
+        </div>
+
+        ${stepsHtml}
+        ${codeHtml}
+      `;
+
+      document.getElementById('remediation-modal').style.display = 'flex';
+    }
+
+    function closeRemediationModal() {
+      document.getElementById('remediation-modal').style.display = 'none';
+    }
+
+    let currentFilterTab = 'all';
+
+    function setFilterTab(tab) {
+      currentFilterTab = tab;
+
+      // Update active state on tab buttons
+      const tabBtns = document.querySelectorAll('.filter-tab');
+      tabBtns.forEach(btn => {
+        if (btn.getAttribute('data-tab') === tab) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+
+      filterFindings();
+    }
+
+    function filterFindings() {
+      const q = document.getElementById('cbom-search').value.toLowerCase();
+      
+      displayFindings = currentFindings.filter(f => {
+        const type = (f.type || '').toLowerCase();
+        const algo = (f.algorithm || '').toLowerCase();
+        const threat = (f.quantumThreat || '').toLowerCase();
+        const name = (f.name || '').toLowerCase();
+        const desc = (f.description || '').toLowerCase();
+        const expl = (f.explainer || '').toLowerCase();
+
+        // 1. Filter Tab Match
+        let tabMatch = true;
+        if (currentFilterTab === 'certs') {
+          tabMatch = type === 'certificate' || type === 'key' || type === 'ssh_key' || /rsa|ecdsa|dsa|ed25519/i.test(algo);
+        } else if (currentFilterTab === 'shor') {
+          tabMatch = f.isVulnerable && (type === 'certificate' || type === 'key' || type === 'ssh_key' || threat.includes('shor') || /rsa|ecdsa|dsa|ed25519|ecc|elliptic/i.test(algo));
+        } else if (currentFilterTab === 'config') {
+          tabMatch = type === 'config' || name.includes('schannel') || name.includes('line ') || algo.includes('config') || algo.includes('protocol');
+        } else if (currentFilterTab === 'hndl') {
+          tabMatch = threat.includes('hndl') || threat.includes('harvest') || name.includes('schannel') || name.includes('tls') || name.includes('kex') || algo.includes('protocol') || desc.includes('harvest');
+        } else if (currentFilterTab === 'grover') {
+          tabMatch = threat.includes('grover') || algo.includes('aes-128') || algo.includes('aes128') || algo.includes('3des') || algo.includes('rc4') || desc.includes('grover') || desc.includes('aes-128') || expl.includes('grover');
+        } else if (currentFilterTab === 'secure') {
+          tabMatch = !f.isVulnerable;
+        }
+
+        if (!tabMatch) return false;
+
+        // 2. Search Query Match
+        if (!q) return true;
+        return (
+          (f.name && f.name.toLowerCase().includes(q)) ||
+          (f.path && f.path.toLowerCase().includes(q)) ||
+          (f.algorithm && f.algorithm.toLowerCase().includes(q)) ||
+          (f.type && f.type.toLowerCase().includes(q)) ||
+          (f.quantumThreat && f.quantumThreat.toLowerCase().includes(q)) ||
+          (f.recommendation && f.recommendation.toLowerCase().includes(q))
+        );
+      });
+
+      applySorting();
+      currentPage = 1;
+      renderCurrentPage();
+    }
+
+    // Column Sorting
+    let sortColumn = null;
+    let sortDirection = 'asc';
+
+    function sortFindingsTable(col) {
+      if (sortColumn === col) {
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortColumn = col;
+        sortDirection = 'asc';
+      }
+      updateSortIcons();
+      applySorting();
+      currentPage = 1;
+      renderCurrentPage();
+    }
+
+    function updateSortIcons() {
+      const cols = ['name', 'type', 'algorithm', 'threat', 'recommendation'];
+      cols.forEach(c => {
+        const el = document.getElementById(`sort-icon-${c}`);
+        if (!el) return;
+        if (sortColumn === c) {
+          el.textContent = sortDirection === 'asc' ? '▲' : '▼';
+          el.style.color = 'var(--accent-cyan)';
+        } else {
+          el.textContent = '↕';
+          el.style.color = 'var(--text-dim)';
+        }
+      });
+    }
+
+    function applySorting() {
+      if (!sortColumn) return;
+      displayFindings.sort((a, b) => {
+        let valA = '';
+        let valB = '';
+        if (sortColumn === 'name') {
+          valA = (a.name || a.path || '').toLowerCase();
+          valB = (b.name || b.path || '').toLowerCase();
+        } else if (sortColumn === 'type') {
+          valA = (a.type || '').toLowerCase();
+          valB = (b.type || '').toLowerCase();
+        } else if (sortColumn === 'algorithm') {
+          valA = (a.algorithm || '').toLowerCase();
+          valB = (b.algorithm || '').toLowerCase();
+        } else if (sortColumn === 'threat') {
+          valA = (!a.isVulnerable ? 'aaa_safe' : (a.quantumThreat || 'vulnerable')).toLowerCase();
+          valB = (!b.isVulnerable ? 'aaa_safe' : (b.quantumThreat || 'vulnerable')).toLowerCase();
+        } else if (sortColumn === 'recommendation') {
+          valA = (a.recommendation || '').toLowerCase();
+          valB = (b.recommendation || '').toLowerCase();
+        }
+        if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+        if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    // 4. CycloneDX CBOM Export
+    async function exportCycloneDX() {
+      try {
+        const res = await fetch('/api/cbom');
+        if (!res.ok) throw new Error('Failed to generate CBOM');
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `cyclonedx-cbom-${hostInfo.hostname || 'workstation'}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } catch (e) {
+        alert(`Export failed: ${e.message}`);
+      }
+    }
+
+    // Guide Modal Controller
+    function openGuideModal(preferredOs) {
+      const detectedOs = hostInfo && hostInfo.os ? hostInfo.os.toLowerCase() : '';
+      const os = preferredOs || (detectedOs.includes('darwin') || detectedOs.includes('mac') ? 'mac' : (detectedOs.includes('windows') ? 'windows' : 'linux'));
+      switchGuideTab(os);
+      document.getElementById('guide-modal').style.display = 'flex';
+    }
+
+    function closeGuideModal() {
+      document.getElementById('guide-modal').style.display = 'none';
+    }
+
+    function switchGuideTab(os) {
+      const tabs = ['windows', 'mac', 'linux'];
+      tabs.forEach(t => {
+        const btn = document.getElementById('guide-tab-btn-' + t);
+        const pane = document.getElementById('guide-pane-' + t);
+        if (btn) {
+          if (t === os) {
+            btn.style.borderColor = 'var(--accent-cyan)';
+            btn.style.color = '#ffffff';
+            btn.style.background = 'rgba(56, 189, 248, 0.15)';
+          } else {
+            btn.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+            btn.style.color = 'var(--text-muted)';
+            btn.style.background = 'transparent';
+          }
+        }
+        if (pane) {
+          pane.style.display = (t === os) ? 'block' : 'none';
+        }
+      });
+      const onlineLink = document.getElementById('guide-online-link');
+      if (onlineLink) {
+        const docName = os === 'windows' ? 'WINDOWS' : (os === 'mac' ? 'MACOS' : 'LINUX');
+        onlineLink.href = `https://quarkshield.ai/docs/${docName}_USER_GUIDE.md`;
+      }
+    }
+
+    // 5. Cloud Fleet Sync
+    async function openSyncModal() {
+      // Refresh host status for hardware UUID & permanent enrollment
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) {
+          hostInfo = await res.json();
+        }
+      } catch (e) {}
+
+      const dispName = hostInfo.computerName || hostInfo.hostname || 'Workstation';
+      const hwUUID = hostInfo.hardwareUuid || 'Hardware Bound';
+      const isEnrolled = hostInfo.isEnrolled || !!hostInfo.token;
+      
+      const elDisp = document.getElementById('sync-display-name');
+      const elHw = document.getElementById('sync-hardware-uuid');
+      const elStatus = document.getElementById('sync-enrollment-status');
+      if (elDisp) elDisp.textContent = dispName;
+      if (elHw) elHw.textContent = hwUUID;
+      if (elStatus) {
+        if (isEnrolled) {
+          elStatus.innerHTML = `<span style="color: #34d399;">● Permanently Enrolled (${escapeHtml(hostInfo.license?.tenantName || 'Corporate Fleet')})</span>`;
+        } else {
+          elStatus.innerHTML = `<span style="color: #fbbf24;">○ Ready to Enroll</span>`;
+        }
+      }
+
+      if (hostInfo.serverUrl) {
+        document.getElementById('fleet-server-url').value = hostInfo.serverUrl;
+      }
+      if (hostInfo.token) {
+        document.getElementById('fleet-token').value = hostInfo.token;
+      } else {
+        const savedToken = localStorage.getItem('qs_fleet_token');
+        if (savedToken) document.getElementById('fleet-token').value = savedToken;
+      }
+
+      const elAuto = document.getElementById('fleet-auto-sync');
+      if (elAuto && hostInfo.autoSync !== undefined) {
+        elAuto.checked = !!hostInfo.autoSync;
+      }
+      
+      const warn = document.getElementById('sync-license-warning');
+      const btn = document.getElementById('btn-submit-sync');
+      const isTrialOrUnlicensed = !currentLicenseInfo || !currentLicenseInfo.isLicensed || currentLicenseInfo.tier === 'trial' || currentLicenseInfo.isExpired;
+
+      if (isTrialOrUnlicensed) {
+        if (warn) {
+          warn.style.display = 'block';
+          warn.innerHTML = `
+            <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 0.8rem; margin-bottom: 1rem; font-size: 0.82rem; color: #fca5a5; line-height: 1.45;">
+              <div style="font-weight: 700; color: #f87171; margin-bottom: 0.25rem; display: flex; align-items: center; gap: 0.4rem;">
+                ⚠️ Cloud Fleet Sync Restricted
+              </div>
+              Telemetry synchronization with QuarkShield Central is only available for active <strong>Corporate</strong> or <strong>Partner</strong> licenses.
+              Trial instances cannot sync to central fleet to prevent cross-tenant data pollination.
+              <div style="margin-top: 0.5rem;">
+                <button class="btn btn-secondary" onclick="closeSyncModal(); openLicenseModal();" style="padding: 0.25rem 0.65rem; font-size: 0.75rem; border-color: rgba(56, 189, 248, 0.4); color: var(--accent-cyan);">
+                  🔑 Activate License Key
+                </button>
+              </div>
+            </div>
+          `;
+        }
+        if (btn) {
+          btn.disabled = true;
+          btn.style.opacity = '0.5';
+          btn.style.cursor = 'not-allowed';
+          btn.title = 'Active Corporate or Partner License required';
+        }
+      } else {
+        if (warn) {
+          warn.style.display = 'none';
+          warn.innerHTML = '';
+        }
+        if (btn) {
+          btn.disabled = false;
+          btn.style.opacity = '1';
+          btn.style.cursor = 'pointer';
+          btn.title = '';
+        }
+      }
+
+      document.getElementById('sync-modal').style.display = 'flex';
+    }
+
+    function closeSyncModal() {
+      document.getElementById('sync-modal').style.display = 'none';
+      document.getElementById('sync-status-msg').style.display = 'none';
+    }
+
+    async function submitSync() {
+      const isTrialOrUnlicensed = !currentLicenseInfo || !currentLicenseInfo.isLicensed || currentLicenseInfo.tier === 'trial' || currentLicenseInfo.isExpired;
+      if (isTrialOrUnlicensed) {
+        alert('Fleet synchronization is strictly reserved for active Corporate or Partner licensed endpoints. Please activate a valid license key.');
+        return;
+      }
+
+      const serverUrl = document.getElementById('fleet-server-url').value.trim();
+      const token = document.getElementById('fleet-token').value.trim();
+      const autoSync = document.getElementById('fleet-auto-sync')?.checked ?? true;
+      const msg = document.getElementById('sync-status-msg');
+      const btn = document.getElementById('btn-submit-sync');
+
+      if (!token) {
+        alert('Please enter a valid QuarkShield Fleet Enrollment Token.');
+        return;
+      }
+
+      localStorage.setItem('qs_fleet_token', token);
+      btn.disabled = true;
+      btn.textContent = 'Transmitting...';
+      msg.style.display = 'block';
+      msg.style.color = 'var(--text-muted)';
+      msg.textContent = `Pushing ${currentFindings.length} assets to ${serverUrl}...`;
+
+      try {
+        // Save permanent enrollment & auto-sync configuration on local agent
+        await fetch('/api/enrollment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serverUrl, token, autoSyncEnabled: autoSync, syncIntervalMinutes: 1440 })
+        }).catch(() => {});
+
+        const res = await fetch('/api/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ serverUrl, token, findings: currentFindings })
+        });
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Server rejected telemetry');
+
+        msg.style.color = '#34d399';
+        const dispName = hostInfo.computerName || hostInfo.hostname || 'this workstation';
+        msg.textContent = `✓ Successfully synchronized '${dispName}'! Latest posture updated in Fleet Console.`;
+        setTimeout(() => closeSyncModal(), 1800);
+      } catch (err) {
+        msg.style.color = '#f87171';
+        msg.textContent = `Sync Error: ${err.message}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Sync Telemetry Now';
+      }
+    }
+
+    // 6. Local Scan History & Archives
+    let scanHistoryList = [];
+
+    function openHistoryModal() {
+      document.getElementById('history-modal').style.display = 'flex';
+      const os = hostInfo && hostInfo.os ? hostInfo.os.toLowerCase() : '';
+      const storageEl = document.getElementById('history-storage-path');
+      if (storageEl) {
+        storageEl.textContent = os.includes('windows') ? '%LOCALAPPDATA%\\QuarkShield\\scans\\' : '~/.quarkshield/scans/';
+      }
+      fetchScanHistory();
+    }
+
+    function closeHistoryModal() {
+      document.getElementById('history-modal').style.display = 'none';
+    }
+
+    async function fetchScanHistory() {
+      try {
+        const res = await fetch('/api/scans');
+        if (res.ok) {
+          scanHistoryList = await res.json() || [];
+          const count = scanHistoryList.length;
+          const tags = document.querySelectorAll('.history-count-tag');
+          tags.forEach(t => t.textContent = count);
+          const badge = document.getElementById('history-badge-count');
+          if (badge) badge.textContent = count;
+          const countEl = document.getElementById('history-modal-count');
+          if (countEl) countEl.textContent = `${count} archived scans`;
+          renderScanHistory();
+        }
+      } catch (e) {
+        console.warn('Failed to load scan history:', e);
+      }
+    }
+
+    function renderScanHistory() {
+      const container = document.getElementById('history-list-container');
+      if (!container) return;
+      if (scanHistoryList.length === 0) {
+        container.innerHTML = `
+          <div style="text-align: center; color: var(--text-dim); padding: 2.5rem 1rem; background: rgba(255,255,255,0.02); border-radius: 8px; border: 1px dashed rgba(255,255,255,0.08);">
+            <div style="font-size: 1.5rem; margin-bottom: 0.5rem;">📂</div>
+            <div style="font-size: 0.88rem; color: #fff; font-weight: 600;">No local scans archived yet</div>
+            <div style="font-size: 0.78rem; margin-top: 0.25rem;">Run a Quick or Custom Path Scan to save your first scan record locally.</div>
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = scanHistoryList.map(s => {
+        const timeFormatted = s.dateFormatted || s.display_time || (s.timestamp ? new Date(s.timestamp).toLocaleString() : 'Recent Scan');
+        const vulnCount = s.vulnerableCount !== undefined ? s.vulnerableCount : (s.vulnerabilities || 0);
+        const isClean = vulnCount === 0;
+        const score = s.quantumRiskScore !== undefined ? s.quantumRiskScore : (s.risk_score || 0);
+        const scoreColor = score > 60 ? '#f87171' : (score > 20 ? '#fbbf24' : '#34d399');
+        const target = s.targetPath || s.target_dir || 'Workstation Audit';
+        const filesCount = s.scannedFiles !== undefined ? s.scannedFiles : (s.files_scanned || 0);
+        const assetsCount = s.foundAssets !== undefined ? s.foundAssets : (s.findings ? s.findings.length : 0);
+        
+        return `
+          <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; padding: 0.9rem 1rem; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 240px;">
+              <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.25rem;">
+                <span style="font-weight: 600; color: #fff; font-size: 0.88rem;">${escapeHtml(timeFormatted)}</span>
+                <span style="font-size: 0.72rem; padding: 2px 7px; border-radius: 10px; font-weight: 600; background: ${isClean ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)'}; color: ${isClean ? '#34d399' : '#f87171'}; border: 1px solid ${isClean ? 'rgba(52, 211, 153, 0.3)' : 'rgba(239, 68, 68, 0.3)'};">
+                  ${isClean ? '🛡️ Quantum Safe' : `🚨 ${vulnCount} Vulnerable`}
+                </span>
+                <span style="font-size: 0.72rem; color: var(--text-dim); background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">
+                  ${escapeHtml(s.scanType || 'audit')}
+                </span>
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-dim); display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.3rem;">
+                <span>Target: <code style="color: var(--accent-cyan);">${escapeHtml(target)}</code></span>
+                <span>Files Analyzed: <strong>${filesCount}</strong></span>
+                <span>Assets Discovered: <strong>${assetsCount}</strong></span>
+                <span>Quantum Risk: <strong style="color: ${scoreColor};">${score}/100</strong></span>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0;">
+              <button class="btn btn-secondary" onclick="loadHistoricalScan('${s.id}')" style="padding: 0.35rem 0.75rem; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 0.3rem; border-color: rgba(56, 189, 248, 0.4); color: var(--accent-cyan);" title="Load results into active dashboard">
+                👁️ Load Results
+              </button>
+              <button class="btn btn-primary" onclick="syncSpecificScan('${s.id}')" style="padding: 0.35rem 0.75rem; font-size: 0.78rem; display: inline-flex; align-items: center; gap: 0.3rem;" title="Sync to central fleet">
+                📡 Sync Fleet
+              </button>
+              <button class="btn btn-secondary" onclick="deleteHistoricalScan('${s.id}')" style="padding: 0.35rem 0.6rem; font-size: 0.78rem; display: inline-flex; align-items: center; color: #f87171; border-color: rgba(248, 113, 113, 0.3);" title="Delete archive from disk">
+                🗑️
+              </button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function loadHistoricalScan(id) {
+      try {
+        const res = await fetch('/api/scans/load', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        if (!res.ok) throw new Error('Failed to load historical scan');
+        const raw = await res.json();
+        const scanData = raw.record || raw;
+        currentFindings = scanData.findings || raw.findings || [];
+        renderScanResults({ findings: currentFindings, ...scanData });
+        closeHistoryModal();
+      } catch (e) {
+        alert('Error loading historical scan: ' + e.message);
+      }
+    }
+
+    async function syncSpecificScan(id) {
+      const isTrialOrUnlicensed = !currentLicenseInfo || !currentLicenseInfo.isLicensed || currentLicenseInfo.tier === 'trial' || currentLicenseInfo.isExpired;
+      if (isTrialOrUnlicensed) {
+        closeHistoryModal();
+        openSyncModal();
+        return;
+      }
+      await loadHistoricalScan(id);
+      openSyncModal();
+    }
+
+    async function syncLatestArchivedScan() {
+      if (!scanHistoryList || scanHistoryList.length === 0) {
+        alert('No local scan archives found. Run a Quick or Path Scan first.');
+        return;
+      }
+      const latest = scanHistoryList[0];
+      await syncSpecificScan(latest.id);
+    }
+
+    async function deleteHistoricalScan(id) {
+      if (!confirm('Are you sure you want to delete this locally archived scan record?')) return;
+      try {
+        const res = await fetch('/api/scans/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        if (res.ok) {
+          await fetchScanHistory();
+        } else {
+          alert('Failed to delete scan record');
+        }
+      } catch (e) {
+        alert('Error deleting scan: ' + e.message);
+      }
+    }
+
+    async function loadLatestScanOnStartup() {
+      try {
+        const res = await fetch('/api/scans/latest');
+        if (res.ok) {
+          const raw = await res.json();
+          const scanData = raw.record || raw;
+          const findings = scanData.findings || raw.findings || [];
+          if (findings.length > 0) {
+            currentFindings = findings;
+            renderScanResults({ findings: currentFindings, ...scanData });
+          }
+        }
+      } catch (e) {
+        console.debug('No previous scan stored on disk');
+      }
+    }
+
+    async function uninstallApp() {
+      const os = hostInfo.os || (navigator.userAgent.toLowerCase().includes('mac') ? 'darwin' : 'windows');
+      const osLabel = os === 'darwin' ? 'for Mac' : (os === 'windows' ? 'for Windows' : 'for Linux');
+      const extraMsg = os === 'windows' ? ', delete Windows registrations,' : '';
+      if (confirm(`Uninstall QuarkShield Post-Quantum Guard ${osLabel} from this workstation?\n\nThis will terminate the background service${extraMsg} and remove local application files.`)) {
+        try {
+          await fetch('/api/uninstall', { method: 'POST' });
+        } catch (e) {}
+        document.body.innerHTML = `
+          <div style="height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; color: #94a3b8; background: #07090e; text-align: center; padding: 2rem;">
+            <div style="font-size: 3.5rem; margin-bottom: 1rem;">🛡️</div>
+            <h2 style="color: #fff; margin-bottom: 0.75rem; font-size: 1.6rem;">QuarkShield Post-Quantum Guard ${osLabel} Uninstalled</h2>
+            <p style="max-width: 480px; line-height: 1.6; color: #94a3b8; font-size: 0.95rem;">
+              The background scanner service and local application files have been completely uninstalled from this workstation.
+            </p>
+            <p style="margin-top: 1.5rem; color: #64748b; font-size: 0.85rem;">You may now safely close this browser tab.</p>
+          </div>
+        `;
+      }
+    }
+
+    async function exitApp() {
+      const os = hostInfo.os || (navigator.userAgent.toLowerCase().includes('mac') ? 'darwin' : 'windows');
+      const osLabel = os === 'darwin' ? 'for Mac' : (os === 'windows' ? 'for Windows' : 'for Linux');
+      if (confirm(`Close QuarkShield Post-Quantum Guard ${osLabel} and terminate local scanner background service?`)) {
+        try {
+          await fetch('/api/exit', { method: 'POST' });
+        } catch (e) {}
+        document.body.innerHTML = `
+          <div style="height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; font-family: sans-serif; color: #94a3b8; background: #07090e;">
+            <h2 style="color: #fff; margin-bottom: 0.5rem;">QuarkShield Scanner Stopped</h2>
+            <p>You may now safely close this browser window.</p>
+          </div>
+        `;
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+
+    // Auto-run on mount
+    try {
+      const ua = (navigator.userAgent || '').toLowerCase();
+      const plat = (navigator.platform || '').toLowerCase();
+      const prelimOS = (ua.includes('mac') || plat.includes('mac')) ? 'darwin' : (ua.includes('linux') || plat.includes('linux') ? 'linux' : 'windows');
+      updateAppBranding(prelimOS);
+      renderQuickTargets(prelimOS, '');
+    } catch(e) {}
+    fetchHostStatus();
+  </script>
+</body>
+</html>

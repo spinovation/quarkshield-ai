@@ -1,0 +1,56 @@
+# Operating System Files
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# Node Dependencies and Build Artifacts
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+build/
+.next/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Go Binaries and Local Build Outputs
+*.syso
+quarkshield-scanner
+quarkshield-scanner-*
+pqc-scanner
+pqc-scanner-*
+*.exe
+*.zip
+*.dmg
+*.app/
+agent/scratch/
+agent/test_dmg/
+agent/dmg_stage_*/
+agent/zip_stage_*/
+agent/binaries/*.zip
+agent/binaries/*.dmg
+agent/binaries/*.exe
+agent/binaries/quarkshield-scanner*
+agent/binaries/pqc-scanner*
+ui/public/downloads/*.zip
+ui/public/downloads/*.dmg
+ui/public/downloads/*.exe
+ui/public/downloads/quarkshield-scanner*
+ui/public/downloads/pqc-scanner*
+
+# Local Environment Configs & Private Secrets
+.env*
+!.env*.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# IDE & Editor Configs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
