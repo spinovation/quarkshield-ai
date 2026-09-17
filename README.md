@@ -151,5 +151,5 @@ chmod +x /usr/local/bin/quarkshield-scanner
 
 ## 📄 License & Compliance
 
-© 2026 QuarkShield.ai / Spinovation Corp. All rights reserved.
+© 2026 QuarkShield.ai / FedMitigate LLC All rights reserved.
 Compliant with NIST FIPS 203 (ML-KEM), NIST FIPS 204 (ML-DSA), NIST FIPS 205 (SLH-DSA), and CycloneDX 1.6 CBOM specifications.
