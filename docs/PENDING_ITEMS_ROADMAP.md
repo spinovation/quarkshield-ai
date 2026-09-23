@@ -10,7 +10,7 @@
 ### 1. Remote Git Repository & DevOps Connectors (GitHub, GitLab, Bitbucket, Azure DevOps)
 * **Origin**: User request to audit source code repositories and CI/CD pipelines via user ID, API keys, or Personal Access Tokens (PAT).
 * **Scope**:
-  * **Option A (Central Cloud Platform - Wiz Model Pillar 3)**:
+  * **Option A (Central Cloud Platform - API-First Pillar 3)**:
     * Organization-level OAuth and App Connectors in `quarkshield.ai` / `quarkshield.ai` under **"Integrations"**.
     * Automatic scanning of 100+ repositories simultaneously for hardcoded PEM, DER, private keys, SSH deploy keys, and cryptographic dependency manifests (`pom.xml`, `package.json`, `go.mod`).
     * Pre-commit and pull-request cryptographic security gates.

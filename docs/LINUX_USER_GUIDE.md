@@ -17,7 +17,7 @@
    - [Interactive Web GUI Mode](#interactive-web-gui-mode)
    - [Headless CLI Audit Mode](#headless-cli-audit-mode)
    - [Automated 1-Line Installer Script](#automated-1-line-installer-script)
-4. [What Assets QuarkShield Audits on Linux](#4-what-assets-quarkshield-audits-on-linux)
+4. [What Assets QuarkShield Audits on Linux & The Zero-Exfiltration Guarantee](#4-what-assets-quarkshield-audits-on-linux--the-zero-exfiltration-guarantee)
 5. [Scan Operations Explained](#5-scan-operations-explained)
    - [Quick Scan Host](#quick-scan-host)
    - [Custom Path Scan & Linux Quick Targets](#custom-path-scan--linux-quick-targets)
@@ -26,7 +26,8 @@
 7. [Exporting CBOM (CycloneDX 1.6) & Audit JSON](#7-exporting-cbom-cyclonedx-16--audit-json)
 8. [Connecting & Synchronizing with QuarkShield Cloud Fleet](#8-connecting--synchronizing-with-quarkshield-cloud-fleet)
 9. [Automated Infrastructure Deployment (systemd, Ansible, Docker, Kubernetes)](#9-automated-infrastructure-deployment-systemd-ansible-docker-kubernetes)
-10. [Uninstallation & Troubleshooting](#10-uninstallation--troubleshooting)
+10. [Preparing Linux Server Fleets for OS & Library PQC Trust Roots](#10-preparing-linux-server-fleets-for-os--library-pqc-trust-roots)
+11. [Uninstallation & Troubleshooting](#11-uninstallation--troubleshooting)
 
 ---
 
@@ -95,7 +96,7 @@ On cloud servers, headless VPS instances, or CI/CD pipelines:
 
 ---
 
-## 4. What Assets QuarkShield Audits on Linux
+## 4. What Assets QuarkShield Audits on Linux & The Zero-Exfiltration Guarantee
 
 QuarkShield scans both system configuration directories and runtime application stores:
 
@@ -120,6 +121,27 @@ QuarkShield scans both system configuration directories and runtime application 
 - Docker daemon certificates: `/etc/docker/certs.d/`
 - WireGuard VPN keys: `/etc/wireguard/`
 - Java Keystores: `/etc/ssl/certs/java/cacerts`
+
+### 5. Understanding "Keys" in QuarkShield & The Zero-Exfiltration Guarantee
+
+In QuarkShield's Linux dashboards, CLI logs, and CBOM inventory, **"Keys"** refers exclusively to **Cryptographic Assets and Public Algorithm Primitives**—specifically:
+- **Public Certificates:** X.509 server and CA certificates in `/etc/ssl/certs` and `/etc/pki`.
+- **Asymmetric Key Parameters:** RSA public moduli (2048/4096-bit), Elliptic Curve public coordinates and curve identifiers (secp256r1/P-256, secp384r1/P-384, Ed25519).
+- **Host Identities & Cipher Suites:** SSH public host keys and TLS cipher configurations.
+
+> **CRITICAL SECURITY PROMISE: Zero-Exfiltration Guarantee**  
+> QuarkShield operates strictly on a **local-in-RAM inspection model**:
+> - **Private Keys Are NEVER Exfiltrated:** Private key files (`BEGIN RSA PRIVATE KEY`, `BEGIN EC PRIVATE KEY`, PKCS#8), passphrases, seed material, or decrypted plaintexts are **NEVER captured, stored, uploaded, or transmitted** to any remote server.
+> - **Volatile Memory Execution:** File and certificate parsing takes place strictly inside temporary local volatile RAM. As soon as public cryptographic metadata (algorithm name, bit length, validity dates, issuer DN) is extracted, working memory is cleared.
+> - **Privacy-Preserving Telemetry:** Telemetry synchronized with the QuarkShield Cloud Fleet contains solely non-sensitive public metadata structured according to the CycloneDX 1.6 CBOM standard.
+
+---
+
+### 6. Quantum Vulnerability of Discovered Keys: Shor's Algorithm
+
+Virtually all server keys and TLS certificates discovered across Linux distributions today rely on classical asymmetric mathematics:
+- **RSA Factorization:** RSA-2048 and RSA-4096 rely on prime integer factorization. Shor's algorithm running on a Cryptanalytically Relevant Quantum Computer (CRQC) solves prime factorization in polynomial time ($O((\log N)^3)$).
+- **Elliptic Curve Collapse (~2,300 Logical Qubits):** Linux SSH host keys, WireGuard VPNs, and modern TLS certificates heavily favor ECDSA (P-256) and Ed25519. Because elliptic curve groups are much smaller than RSA moduli, **ECC collapses even faster on quantum hardware—requiring only ~2,300 logical qubits** compared to ~4,096 for RSA-2048.
 
 ---
 
@@ -284,9 +306,31 @@ docker run --rm \
   "curl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner-linux-amd64 -o /tmp/qs && chmod +x /tmp/qs && /tmp/qs --path /scan"
 ```
 
+### 4. Enterprise Non-Root / Zero-Reboot Alternative: OpenTelemetry (OTel) & Cloud Snapshots
+For mission-critical production servers subject to strict change freezes or where operational teams resist resident agent installations:
+- **OpenTelemetry Telemetry (Tier 3)**: Utilize your existing **OpenTelemetry (OTel) Collector** to forward OpenSSL, GnuTLS, and `auditd` cryptographic logs to QuarkShield with 0% risk of system reboot and unprivileged non-root execution.
+- **Agentless Cloud Volume Snapshots (Tier 1)**: For AWS EC2, Azure VMs, and GCP instances, leverage out-of-band disk snapshot auditing. The disk volume is audited in an ephemeral analysis container—guaranteeing **0% CPU, 0 MB RAM overhead on the production host**.
+- **Detailed Blueprint**: See the [QuarkShield Enterprise Post-Quantum Cryptographic Deployment Guide](ENTERPRISE_AGENT_DEPLOYMENT_GUIDE.md).
+
 ---
 
-## 10. Uninstallation & Troubleshooting
+## 10. Preparing Linux Server Fleets for OS & Library PQC Trust Roots
+
+Major Linux enterprise distributions (Ubuntu 24.04+, RHEL 9.4+, Debian 13) and upstream cryptographic libraries are actively adopting NIST FIPS 203/204/205 post-quantum trust roots:
+- **OpenSSL 3.5+ & OQS Provider:** Upstream OpenSSL is integrating native post-quantum key exchange (`ML-KEM-768`) and signatures (`ML-DSA-65`).
+- **OpenSSH 9.8+ Post-Quantum Hybrid KEX:** OpenSSH defaults to `sntrup761x25519-sha512@openssh.com` and `mlkem768x25519-sha256` for key exchange to eliminate HNDL threats.
+- **Enterprise Linux Trust Stores:** `/etc/pki/ca-trust` and `/etc/ssl/certs` will introduce hybrid and PQC root authorities, mandating modernization for web ingress and internal microservice mTLS.
+
+### Recommended Customer Action Plan:
+1. **Continuous CBOM Discovery:** Deploy QuarkShield via Ansible or systemd timers across all server instances to maintain a real-time CycloneDX 1.6 CBOM.
+2. **Audit Web Ingress & Reverse Proxies:** Configure NGINX, HAProxy, and Envoy proxies with hybrid `X25519MLKEM768` TLS 1.3 ciphers to immediately defend against Harvest Now, Decrypt Later adversaries.
+3. **Upgrade OpenSSH Host Configurations:** Audit `/etc/ssh/sshd_config` across your server fleet with QuarkShield to ensure post-quantum hybrid KEX algorithms are prioritized.
+4. **Internal Microservices & mTLS:** Transition internal service mesh certificates (Consul, Istio, Linkerd) and Vault PKI engines toward hybrid certificate signing.
+5. **Enforce Automated Drift Monitoring:** Use QuarkShield's Cloud Fleet plane to alert SecOps and SRE teams whenever newly spun up VMs or containers introduce obsolete RSA-1024/2048 or legacy SHA-1 certificates.
+
+---
+
+## 11. Uninstallation & Troubleshooting
 
 ### How to Uninstall
 - **Via GUI:** Click **🗑️ Uninstall** in the top bar.
@@ -299,7 +343,7 @@ sudo rm -f /etc/systemd/system/quarkshield-audit.*
 ### Troubleshooting Common Issues
 | Issue | Cause | Solution |
 | :--- | :--- | :--- |
-| **Permission denied on private keys** | Scanned directories (`/etc/ssh`, `/etc/ssl/private`) require elevated permissions. | Run with `sudo ./quarkshield-scanner --quick` to grant read access to system private keys. |
+| **Permission denied on system stores** | Scanned directories (`/etc/ssh`, `/etc/ssl/certs`) require elevated permissions. | Run with `sudo ./quarkshield-scanner --quick`. QuarkShield reads public metadata in volatile memory only and never exfiltrates private key content. |
 | **Port 48291 in use** | Another service or instance is using port 48291. | QuarkShield will automatically try ports 48292-48295. |
 | **Corporate proxy blocking sync** | Outbound traffic to port 443 intercepted. | Export `https_proxy="http://proxy:8080"` in your environment before running. |
 

@@ -389,13 +389,39 @@ export const toggleUserWeb3 = async (req: Request, res: Response) => {
 export const resetUserPassword = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const userRes = await pool.query('SELECT email FROM admin_users WHERE id = $1', [id]);
+    const { password } = req.body;
+
+    const userRes = await pool.query('SELECT id, email FROM admin_users WHERE id = $1', [id]);
     if (userRes.rowCount === 0) return res.status(404).json({ error: 'User not found' });
     
-    const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+    const targetEmail = userRes.rows[0].email;
+    const targetPassword = (password && typeof password === 'string' && password.trim().length >= 6)
+      ? password.trim()
+      : ('QS-' + crypto.randomBytes(4).toString('hex').toUpperCase());
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = crypto.createHash('sha256').update(targetPassword + salt).digest('hex');
+
+    // Update in admin_users
+    await pool.query(
+      'UPDATE admin_users SET password_hash = $1, salt = $2 WHERE id = $3',
+      [passwordHash, salt, id]
+    );
+
+    // Also synchronize password to tenant_users if this user exists in a tenant pod
+    try {
+      await pool.query(
+        'UPDATE tenant_users SET password_hash = $1, salt = $2 WHERE LOWER(email) = LOWER($3)',
+        [passwordHash, salt, targetEmail]
+      );
+    } catch (tuErr) {
+      console.warn('Syncing password reset to tenant_users notice:', tuErr);
+    }
+
     res.json({
       success: true,
-      message: `Secure password reset dispatched for ${userRes.rows[0].email}. Temporary password: ${tempPassword}`
+      message: `Password successfully reset for ${targetEmail}. Temporary/New password: ${targetPassword}`,
+      password: targetPassword
     });
   } catch (err: any) {
     console.error('Error resetting password:', err);
@@ -1040,6 +1066,309 @@ License@quarkshield.ai
   }
 };
 
+export const sendNextStepsEmail = async (req: Request, res: Response) => {
+  try {
+    const {
+      email,
+      tenantName,
+      contactName,
+      customerId,
+      tempPassword = 'QS-Amberoon7033!',
+      licenseKey
+    } = req.body;
+
+    let targetEmail = email ? email.trim().toLowerCase() : '';
+    let targetName = contactName ? contactName.trim() : '';
+    let targetOrg = tenantName || '';
+    let targetCustId = customerId || '';
+    let targetLicense = licenseKey || '';
+
+    // Lookup client/tenant if needed
+    if (!targetEmail || !targetCustId || !targetLicense) {
+      const clientLookup = await pool.query(`
+        SELECT c.*, l.license_key, l.tier as license_tier, l.seats as license_seats
+        FROM admin_clients c
+        LEFT JOIN admin_licenses l ON LOWER(l.tenant_name) = LOWER(c.name)
+        WHERE LOWER(c.admin_email) = LOWER($1) OR LOWER(c.name) = LOWER($2) OR c.customer_id = $3
+        LIMIT 1
+      `, [targetEmail || 'shirish.netke@amberoon.com', targetOrg || 'amberoon', targetCustId || 'PART-7033']);
+
+      if (clientLookup.rows.length > 0) {
+        const row = clientLookup.rows[0];
+        targetEmail = targetEmail || row.admin_email;
+        targetName = targetName || row.contact_name || row.display_name || 'Partner Admin';
+        targetOrg = targetOrg || row.display_name || row.name;
+        targetCustId = targetCustId || row.customer_id;
+        targetLicense = targetLicense || row.license_key || 'QS-PARTNER-AMBEROON-6B273FAD-218F40C9';
+      }
+    }
+
+    if (!targetEmail) {
+      targetEmail = 'shirish.netke@amberoon.com';
+    }
+    if (!targetName) targetName = 'Shirish Netke';
+    if (!targetOrg) targetOrg = 'Amberoon';
+    if (!targetCustId) targetCustId = 'PART-7033';
+    if (!targetLicense) targetLicense = 'QS-PARTNER-AMBEROON-6B273FAD-218F40C9';
+
+    const tenantWorkspace = targetOrg.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const portalUrl = `https://${tenantWorkspace}.quarkshield.ai`;
+    const emailSubject = `Welcome to QuarkShield — Next Steps: Admin Login, First Desktop Scan & Team Setup [Partner ID: ${targetCustId}]`;
+
+    const plainTextBody = `Hello ${targetName},
+
+Welcome to the QuarkShield Post-Quantum Cryptography (PQC) Security Plane!
+
+Now that your organization (${targetOrg}) and official Partner License Key have been provisioned, here are your administrative login credentials and the exact next steps to activate your workspace, perform your first cryptographic desktop scan, and onboard your team.
+
+================================================================================
+ADMINISTRATIVE ACCOUNT CREDENTIALS & WORKSPACE
+================================================================================
+• Organization:                ${targetOrg}
+• Partner ID:                  ${targetCustId}
+• Subscription Tier:           MSP PARTNER PRO (100 Endpoint Capacity)
+• Primary Admin User ID:       ${targetEmail}
+• Initial Temporary Password:  ${tempPassword}
+• Dedicated Tenant Portal:     ${portalUrl} (or https://quarkshield.ai)
+• Active License Key:          ${targetLicense}
+================================================================================
+* Security Note: Upon your first sign-in, you can change your password at any time by navigating to Settings -> Users & Access.
+
+--------------------------------------------------------------------------------
+STEP 1: LOG IN TO YOUR PARTNER CONSOLE
+--------------------------------------------------------------------------------
+1. Open your browser and navigate to ${portalUrl} (or https://quarkshield.ai).
+2. Click "Sign In" in the header.
+3. Enter your User ID (${targetEmail}) and Temporary Password (${tempPassword}).
+4. You will be routed directly to your ${targetOrg} MSP Partner Dashboard.
+
+--------------------------------------------------------------------------------
+STEP 2: RUN YOUR FIRST DESKTOP CRYPTOGRAPHIC SCAN
+--------------------------------------------------------------------------------
+Discover vulnerable RSA/ECC algorithms, uncataloged certificates, and generate your first Cryptographic Bill of Materials (CBOM) in under 3 minutes:
+
+Option A — Desktop GUI Application (QuarkShield Guard):
+1. In your management portal, navigate to the "Downloads" tab to download QuarkShield Guard for Windows or macOS.
+2. Open the application.
+3. Click the Shield badge in the header or select "Activate License".
+4. Enter your license key: ${targetLicense}
+5. Click "Run Instant Cryptographic Scan" to inventory your system's SSH keys, SSL/TLS certificates, crypto libraries, and code repositories.
+
+Option B — Silent Enterprise CLI / MDM Deployment:
+• Windows (PowerShell / Intune / GPO):
+  quarkshield-scanner-windows-amd64.exe --token "${targetLicense}"
+
+• macOS (Terminal / Jamf):
+  ./quarkshield-scanner --token "${targetLicense}"
+
+• Linux Workstations & Servers (1-Click Auto-Deploy):
+  curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash
+
+Scan results stream automatically to your central dashboard in real time.
+
+--------------------------------------------------------------------------------
+STEP 3: ONBOARD YOUR STAFF & DELEGATE ACCESS
+--------------------------------------------------------------------------------
+As a Partner Administrator, you can invite and manage your own team members without contacting support:
+
+1. In your tenant console (${portalUrl}), navigate to "Settings" in the left menu.
+2. Select "Users & Access".
+3. Click "+ Add Team Member".
+4. Enter your colleague's business email address (their email serves as their User ID) and select their role:
+   - Admin: Full tenant configuration, policy settings, and license management
+   - SecOps: View scans, run diagnostics, and download CBOM audit artifacts
+   - Auditor: Read-only access for compliance reporting (NIST, ISO, SOC 2)
+5. Your staff can immediately sign in to view and manage endpoints.
+
+--------------------------------------------------------------------------------
+STEP 4: ONLINE HELP & TECHNICAL DOCUMENTATION
+--------------------------------------------------------------------------------
+Access our technical documentation, migration runbooks, and enterprise deployment guides:
+• Portal Knowledge Base: https://quarkshield.ai (Docs & Compliance Playbooks)
+• Enterprise Silent Deployment & Intune Setup Guide
+• PQC Transition Timelines & Algorithmic Deprecation Schedules (NIST SP 800-53, CNSA 2.0)
+• Dedicated Technical Support: support@quarkshield.ai (Monitored 24/7 by SecOps)
+
+--------------------------------------------------------------------------------
+STEP 5: GET INSTANT ASSISTANCE WITH QUARKSHIELD PQC CO-PILOT
+--------------------------------------------------------------------------------
+Have questions during your rollout? Your portal includes an embedded, AI-powered PQC Co-Pilot (accessible via the "Copilot" tab or the AI Shield badge in the header). 
+
+You and your team can ask it anything in natural language, including:
+• "How do I configure TLS 1.3 with hybrid post-quantum ciphers on NGINX or Apache?"
+• "What are the requirements of NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), and FIPS 205 (SLH-DSA)?"
+• "What cybersecurity standards apply to our cryptographic audit (ISO 27001, SOC 2, PCI DSS v4.0)?"
+• "How do I remediate the vulnerable RSA 2048 keys flagged on workstation endpoints?"
+
+The PQC Co-Pilot provides instant configuration snippets, architectural guidance, and remediation commands tailored to your exact scan findings.
+
+--------------------------------------------------------------------------------
+
+We are excited to partner with ${targetOrg} to lead the transition to quantum-safe security. If you would like a brief 15-minute technical walkthrough with our engineering team, simply reply directly to this email.
+
+Sincerely,
+
+QuarkShield Security Operations & Technical Support
+Support@quarkshield.ai
+https://quarkshield.ai
+`;
+
+    const htmlBody = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b1120; color: #f1f5f9; padding: 36px 16px;">
+        <div style="max-width: 620px; margin: 0 auto; background: #0f172a; border: 1px solid #1e293b; border-radius: 14px; padding: 36px; box-shadow: 0 16px 40px rgba(0,0,0,0.7);">
+          <div style="text-align: center; margin-bottom: 28px;">
+            <div style="font-size: 28px; font-weight: 800; color: #00f2fe; letter-spacing: 0.05em;">QUARKSHIELD</div>
+            <div style="color: #94a3b8; font-size: 13px; margin-top: 4px; letter-spacing: 0.02em;">Enterprise Post-Quantum Cryptography (PQC) Security Plane</div>
+          </div>
+
+          <p style="font-size: 16px; color: #e2e8f0; margin-bottom: 12px;">Hello <strong>${targetName}</strong>,</p>
+          <p style="font-size: 14px; color: #94a3b8; line-height: 1.6; margin-bottom: 24px;">
+            Welcome to the QuarkShield Post-Quantum Security Plane. Your organization (<strong>${targetOrg}</strong>) has been successfully provisioned. Below are your administrative login credentials, your first scan instructions, and team onboarding guides.
+          </p>
+
+          <!-- Credentials Box -->
+          <div style="background: #030712; border: 1px solid rgba(0, 242, 254, 0.5); border-radius: 10px; padding: 22px; margin: 24px 0;">
+            <div style="font-size: 11px; color: #00f2fe; text-transform: uppercase; font-weight: 700; letter-spacing: 0.08em; margin-bottom: 14px; text-align: center;">Your Administrative Access Credentials</div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 13px;">
+              <tr><td style="padding: 6px 0; color: #64748b;">Organization</td><td style="padding: 6px 0; color: #ffffff; font-weight: 600; text-align: right;">${targetOrg}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b;">Partner ID</td><td style="padding: 6px 0; color: #ffffff; font-weight: 600; text-align: right;">${targetCustId}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b;">Admin User ID</td><td style="padding: 6px 0; color: #38bdf8; font-weight: 700; text-align: right;">${targetEmail}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b;">Initial Temporary Password</td><td style="padding: 6px 0; font-family: monospace; color: #4ade80; font-weight: 700; font-size: 14px; text-align: right;">${tempPassword}</td></tr>
+              <tr><td style="padding: 6px 0; color: #64748b;">License Key</td><td style="padding: 6px 0; font-family: monospace; color: #cbd5e1; font-size: 11px; text-align: right; word-break: break-all;">${targetLicense}</td></tr>
+            </table>
+          </div>
+
+          <div style="text-align: center; margin: 24px 0 32px 0;">
+            <a href="${portalUrl}" style="display: inline-block; background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%); color: #000; font-weight: 700; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-size: 14px;">Sign In to Partner Console &rarr;</a>
+          </div>
+
+          <!-- Step 1 -->
+          <div style="margin-bottom: 24px; border-left: 3px solid #00f2fe; padding-left: 16px;">
+            <div style="font-size: 14px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px;">Step 1: Perform Your First Desktop Cryptographic Scan</div>
+            <div style="font-size: 13px; color: #94a3b8; line-height: 1.6;">
+              Open <strong>QuarkShield Guard</strong> (available under Downloads in your portal), paste your license key, and click <strong>"Run Instant Cryptographic Scan"</strong>. It inventories vulnerable RSA/ECC algorithms, uncataloged certificates, and generates your Cryptographic Bill of Materials (CBOM) in under 3 minutes.
+            </div>
+            <div style="background: #000; padding: 10px; border-radius: 6px; font-family: monospace; font-size: 12px; color: #38bdf8; margin-top: 8px; word-break: break-all;">
+              quarkshield-scanner-windows-amd64.exe --token "${targetLicense}"
+            </div>
+          </div>
+
+          <!-- Step 2 -->
+          <div style="margin-bottom: 24px; border-left: 3px solid #38bdf8; padding-left: 16px;">
+            <div style="font-size: 14px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px;">Step 2: Onboard Your Staff & Delegate Roles</div>
+            <div style="font-size: 13px; color: #94a3b8; line-height: 1.6;">
+              Navigate to <strong>Settings &rarr; Users & Access</strong> inside your portal. Click <strong>"+ Add Team Member"</strong> to invite colleagues by their corporate email and assign roles (<em>Admin</em>, <em>SecOps</em>, or <em>Auditor</em>).
+            </div>
+          </div>
+
+          <!-- Step 3 -->
+          <div style="margin-bottom: 24px; border-left: 3px solid #a855f7; padding-left: 16px;">
+            <div style="font-size: 14px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px;">Step 3: Online Documentation & 24/7 Support</div>
+            <div style="font-size: 13px; color: #94a3b8; line-height: 1.6;">
+              Access official guides and compliance playbooks anytime at <a href="https://quarkshield.ai" style="color: #38bdf8; text-decoration: none;">quarkshield.ai</a>. If you have questions, our technical team is reachable directly at <a href="mailto:Support@quarkshield.ai" style="color: #38bdf8; text-decoration: none;">Support@quarkshield.ai</a>.
+            </div>
+          </div>
+
+          <!-- Step 4 -->
+          <div style="margin-bottom: 28px; border-left: 3px solid #10b981; padding-left: 16px;">
+            <div style="font-size: 14px; font-weight: 700; color: #f1f5f9; margin-bottom: 6px;">Step 4: AI PQC Co-Pilot for Interactive Guidance</div>
+            <div style="font-size: 13px; color: #94a3b8; line-height: 1.6;">
+              Click the <strong>Copilot</strong> tab or the AI Shield in your portal. Ask it any technical questions about NIST FIPS 203/204/205 standards, TLS 1.3 post-quantum configurations, or finding remediation steps.
+            </div>
+          </div>
+
+          <div style="border-top: 1px solid #1e293b; padding-top: 20px; text-align: center; font-size: 12px; color: #64748b; line-height: 1.6;">
+            QuarkShield Security Operations &bull; Support: <a href="mailto:Support@quarkshield.ai" style="color: #64748b; text-decoration: underline;">Support@quarkshield.ai</a><br>
+            Official Portal: <a href="https://quarkshield.ai" style="color: #64748b; text-decoration: underline;">https://quarkshield.ai</a>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Dispatch via Resend API
+    let resendApiKey = process.env.RESEND_API_KEY || '';
+    if (!resendApiKey) {
+      try {
+        const sRes = await pool.query("SELECT value FROM tenant_settings WHERE key = 'RESEND_API_KEY' LIMIT 1");
+        if (sRes.rows.length > 0 && sRes.rows[0].value) {
+          resendApiKey = sRes.rows[0].value;
+        }
+      } catch (err) {
+        // ignore
+      }
+    }
+
+    let sentViaResend = false;
+    let resendMessageId: string | null = null;
+    let resendError: string | null = null;
+
+    if (resendApiKey) {
+      try {
+        const fromEmail = 'QuarkShield Support <Support@quarkshield.ai>';
+        const resendRes = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${resendApiKey.trim()}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            from: fromEmail,
+            to: [targetEmail],
+            subject: emailSubject,
+            html: htmlBody,
+            text: plainTextBody,
+            reply_to: 'Support@quarkshield.ai'
+          })
+        });
+
+        if (resendRes.ok) {
+          const resendData: any = await resendRes.json();
+          sentViaResend = true;
+          resendMessageId = resendData.id;
+          console.log(`[Resend API] Next steps email successfully dispatched to ${targetEmail} (ID: ${resendData.id})`);
+        } else {
+          const errText = await resendRes.text();
+          console.error(`[Resend API Error ${resendRes.status}]:`, errText);
+          resendError = errText;
+        }
+      } catch (e: any) {
+        console.error('[Resend Network Error]:', e);
+        resendError = e.message;
+      }
+    }
+
+    // Log to audit_logs
+    await pool.query(`
+      INSERT INTO audit_logs (id, action, actor, details, ip_address)
+      VALUES ($1, $2, $3, $4, $5)
+    `, [
+      'log-' + crypto.randomUUID().substring(0, 8),
+      sentViaResend ? 'NEXT_STEPS_EMAIL_DISPATCHED_RESEND' : 'NEXT_STEPS_EMAIL_DISPATCH_ATTEMPT',
+      'Support@quarkshield.ai',
+      sentViaResend
+        ? `Delivered Next Steps onboarding email to ${targetEmail} via Resend API (ID: ${resendMessageId})`
+        : `Next Steps email dispatch to ${targetEmail} attempted (Error: ${resendError || 'No key'})`,
+      req.ip || '127.0.0.1'
+    ]);
+
+    return res.json({
+      success: sentViaResend,
+      messageId: resendMessageId,
+      recipient: targetEmail,
+      contactName: targetName,
+      tenantName: targetOrg,
+      customerId: targetCustId,
+      error: resendError,
+      message: sentViaResend
+        ? `Next Steps email successfully dispatched to ${targetEmail} from Support@quarkshield.ai`
+        : `Dispatch error: ${resendError}`
+    });
+  } catch (err: any) {
+    console.error('Error dispatching next steps email:', err);
+    res.status(500).json({ error: 'Failed to dispatch next steps email: ' + err.message });
+  }
+};
+
 export const getMailSettings = async (req: Request, res: Response) => {
   try {
     let apiKey = process.env.RESEND_API_KEY || '';
@@ -1444,20 +1773,32 @@ export const onboardUser = async (req: Request, res: Response) => {
       accountType, customerId, cleanStripeLink, stripePaymentStatus
     ]);
 
-    // Also register user into tenant_users with customer_id
+    // Generate initial secure temporary password
+    const initialTempPassword = `QS-${cleanTenant.charAt(0).toUpperCase() + cleanTenant.slice(1)}-${Math.floor(1000 + Math.random() * 9000)}!`;
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = crypto.createHash('sha256').update(initialTempPassword + salt).digest('hex');
+
+    // Also register user into tenant_users with customer_id and credentials
     const userId = 'tu-' + crypto.randomUUID().substring(0, 8);
     await pool.query(`
-      INSERT INTO tenant_users (id, tenant_name, email, first_name, last_name, role, two_factor_enabled, status, customer_id)
-      VALUES ($1, $2, $3, $4, $5, 'admin', false, 'active', $6)
-      ON CONFLICT (tenant_name, email) DO UPDATE SET customer_id = $6
-    `, [userId, cleanTenant, adminEmail.toLowerCase().trim(), (contactName || 'Admin').split(' ')[0], (contactName || 'User').split(' ').slice(1).join(' ') || 'User', customerId]);
+      INSERT INTO tenant_users (id, tenant_name, email, first_name, last_name, role, two_factor_enabled, status, customer_id, password_hash, salt)
+      VALUES ($1, $2, $3, $4, $5, 'admin', false, 'active', $6, $7, $8)
+      ON CONFLICT (tenant_name, email) DO UPDATE SET 
+        customer_id = $6,
+        password_hash = COALESCE(tenant_users.password_hash, $7),
+        salt = COALESCE(tenant_users.salt, $8)
+    `, [userId, cleanTenant, adminEmail.toLowerCase().trim(), (contactName || 'Admin').split(' ')[0], (contactName || 'User').split(' ').slice(1).join(' ') || 'User', customerId, passwordHash, salt]);
 
     // Ensure user exists in admin_users so they appear across both Tenant & User registries
     await pool.query(`
-      INSERT INTO admin_users (id, email, role, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, row_locked, company, last_login)
-      VALUES ($1, $2, 'admin', true, true, true, false, false, $3, NOW())
-      ON CONFLICT (email) DO UPDATE SET company = $3, role = 'admin'
-    `, ['usr-' + crypto.randomUUID().substring(0, 8), adminEmail.toLowerCase().trim(), orgName]);
+      INSERT INTO admin_users (id, email, role, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, row_locked, company, last_login, password_hash, salt)
+      VALUES ($1, $2, 'admin', true, true, true, false, false, $3, NOW(), $4, $5)
+      ON CONFLICT (email) DO UPDATE SET 
+        company = $3, 
+        role = 'admin',
+        password_hash = COALESCE(admin_users.password_hash, $4),
+        salt = COALESCE(admin_users.salt, $5)
+    `, ['usr-' + crypto.randomUUID().substring(0, 8), adminEmail.toLowerCase().trim(), orgName, passwordHash, salt]);
 
     // Automated Onboarding Confirmation Email Dispatch via License@Quarkshield.ai
     const emailSubject = `Welcome to QuarkShield PQC [${orgName}] - Customer ID: ${customerId}`;
@@ -1468,13 +1809,14 @@ Welcome to QuarkShield Enterprise Post-Quantum Cryptography (PQC) Security Plane
 Your organization and primary administrative tenant have been successfully registered:
 
 ============================================================
-ORGANIZATION:    ${orgName}
-CUSTOMER ID:     ${customerId}
-ACCOUNT TYPE:    ${String(accountType).toUpperCase()}
-TIER:            ${String(tier).toUpperCase()}
-ENDPOINT SEATS:  ${seats} Seats
-ADMIN EMAIL:     ${adminEmail.toLowerCase().trim()}
-STATUS:          ONBOARDED - PROVISIONING LICENSE
+ORGANIZATION:      ${orgName}
+CUSTOMER ID:       ${customerId}
+ACCOUNT TYPE:      ${String(accountType).toUpperCase()}
+TIER:              ${String(tier).toUpperCase()}
+ENDPOINT SEATS:    ${seats} Seats
+ADMIN USER ID:     ${adminEmail.toLowerCase().trim()}
+INITIAL PASSWORD:  ${initialTempPassword}
+STATUS:            ONBOARDED - PROVISIONING LICENSE
 ============================================================
 
 WHAT HAPPENS NEXT:
@@ -1771,32 +2113,81 @@ export const unifiedLogin = async (req: Request, res: Response) => {
 
     const cleanId = identifier.trim().toLowerCase();
 
-    // 1. Check if identifier is in admin_users (Central Control Plane / Super Admin / Platform Admin)
+    // 1. Check if identifier matches a registered Tenant / Client workspace or admin email in admin_clients
+    try {
+      const clientResult = await pool.query(
+        `SELECT name, display_name, subscription_tier, account_type, customer_id, status 
+         FROM admin_clients 
+         WHERE LOWER(name) = $1 OR LOWER(display_name) = $1 OR LOWER(admin_email) = $1`,
+        [cleanId]
+      );
+
+      if (clientResult.rows.length > 0) {
+        const c = clientResult.rows[0];
+
+        // Enforce password verification against admin_users or tenant_users
+        const passCheck = await pool.query(
+          `SELECT password_hash, salt FROM admin_users WHERE LOWER(email) = $1
+           UNION
+           SELECT password_hash, salt FROM tenant_users WHERE LOWER(email) = $1 AND password_hash IS NOT NULL
+           LIMIT 1`,
+          [cleanId]
+        );
+
+        if (passCheck.rows.length > 0 && passCheck.rows[0].password_hash && passCheck.rows[0].salt) {
+          if (!password) {
+            return res.status(401).json({ error: 'Password is required to authenticate.' });
+          }
+          const testHash = crypto.createHash('sha256').update(password + passCheck.rows[0].salt).digest('hex');
+          if (testHash !== passCheck.rows[0].password_hash) {
+            return res.status(401).json({ error: 'Invalid password. Please check your credentials or reset your password.' });
+          }
+        }
+
+        const isPartner = c.account_type === 'partner' || c.subscription_tier === 'partner' || c.subscription_tier === 'corp';
+        const customerId = c.customer_id || (isPartner ? 'PART-9148' : 'CORP-4821');
+        const licenseTier = isPartner ? 'MSP PARTNER PRO' : (c.subscription_tier === 'enterprise' ? 'CORPORATE ENTERPRISE' : 'CORPORATE PRO');
+        const customerName = (c.display_name || c.name || (isPartner ? 'MSP PARTNER' : 'CORPORATE CLIENT')).toUpperCase();
+
+        return res.json({
+          success: true,
+          accountType: isPartner ? 'partner' : 'corporate',
+          role: isPartner ? 'Partner Admin' : 'Corporate Admin',
+          customerId,
+          customerName,
+          licenseTier,
+          userEmail: cleanId,
+          workspace: c.name,
+          redirectUrl: `https://${c.name}.quarkshield.ai`,
+          message: `Redirecting to ${isPartner ? 'Partner' : 'Corporate'} Workspace.`
+        });
+      }
+    } catch (dbErr) {
+      console.warn('DB check for admin_clients skipped/fallback:', dbErr);
+    }
+
+    // 2. Check if identifier is in admin_users (Central Control Plane / Internal Super Admin)
     try {
       const adminUserResult = await pool.query(
-        'SELECT id, email, role, company FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
+        'SELECT id, email, role, company, password_hash, salt FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
         [cleanId]
       );
 
       if (adminUserResult.rows.length > 0) {
         const u = adminUserResult.rows[0];
-        if (u.role === 'superadmin' || u.role === 'admin') {
-          // If role or company is designated as partner
-          if (u.role === 'partner' || (u.company && u.company.toLowerCase().includes('partner')) || cleanId === 'sridhargs@algomeld.ai') {
-            return res.json({
-              success: true,
-              accountType: 'partner',
-              target: 'console',
-              initialTab: 'dashboard',
-              role: 'Partner Admin',
-              customerId: 'PART-9148',
-              customerName: (u.company || 'ALGO MELD MSP').toUpperCase(),
-              licenseTier: 'MSP PARTNER PRO',
-              userEmail: cleanId,
-              message: 'Authenticated as Partner Workspace Administrator.'
-            });
+
+        // Enforce password verification if user has password_hash and salt configured
+        if (u.password_hash && u.salt) {
+          if (!password) {
+            return res.status(401).json({ error: 'Password is required to authenticate this administrator account.' });
           }
-          // Authenticated to Central Control Plane (INTERNAL SUPER ADMIN)
+          const testHash = crypto.createHash('sha256').update(password + u.salt).digest('hex');
+          if (testHash !== u.password_hash) {
+            return res.status(401).json({ error: 'Invalid password. Please check your credentials or reset your password.' });
+          }
+        }
+
+        if (u.role === 'superadmin' || cleanId.includes('@quarkshield.ai') || cleanId === 'sridhargs@gmail.com') {
           const adminId = u.id ? ('QS-' + u.id.replace(/^usr-/, '').toUpperCase()) : 'QS-ADMIN-001';
           return res.json({
             success: true,
@@ -1817,44 +2208,10 @@ export const unifiedLogin = async (req: Request, res: Response) => {
       console.warn('DB check for admin_users skipped/fallback:', dbErr);
     }
 
-    // 2. Check if identifier matches a registered Tenant / Client workspace or admin email
-    try {
-      const clientResult = await pool.query(
-        `SELECT name, display_name, subscription_tier, account_type, customer_id, status 
-         FROM admin_clients 
-         WHERE LOWER(name) = $1 OR LOWER(display_name) = $1 OR LOWER(admin_email) = $1`,
-        [cleanId]
-      );
-
-      if (clientResult.rows.length > 0) {
-        const c = clientResult.rows[0];
-        const isPartner = c.account_type === 'partner' || c.subscription_tier === 'partner' || c.subscription_tier === 'corp';
-        const customerId = c.customer_id || (isPartner ? 'PART-9148' : 'CORP-4821');
-        const licenseTier = isPartner ? 'MSP PARTNER PRO' : (c.subscription_tier === 'enterprise' ? 'CORPORATE ENTERPRISE' : 'CORPORATE PRO');
-
-        const customerName = (c.display_name || c.name || (isPartner ? 'MSP PARTNER' : 'CORPORATE CLIENT')).toUpperCase();
-
-        return res.json({
-          success: true,
-          accountType: isPartner ? 'partner' : 'corporate',
-          role: isPartner ? 'Partner Admin' : 'Corporate Admin',
-          customerId,
-          customerName,
-          licenseTier,
-          userEmail: cleanId,
-          workspace: c.name,
-          redirectUrl: `https://${c.name}.quarkshield.ai`,
-          message: `Redirecting to ${isPartner ? 'Partner' : 'Corporate'} Workspace.`
-        });
-      }
-    } catch (dbErr) {
-      console.warn('DB check for admin_clients skipped/fallback:', dbErr);
-    }
-
     // 3. Check if identifier matches tenant_users (Users belonging to a specific tenant pod)
     try {
       const tenantUserResult = await pool.query(
-        `SELECT tu.tenant_name, tu.role, c.customer_id, c.display_name, c.subscription_tier, c.account_type 
+        `SELECT tu.tenant_name, tu.role, tu.password_hash, tu.salt, c.customer_id, c.display_name, c.subscription_tier, c.account_type 
          FROM tenant_users tu 
          LEFT JOIN admin_clients c ON LOWER(c.name) = LOWER(tu.tenant_name) 
          WHERE LOWER(tu.email) = $1`,
@@ -1863,6 +2220,18 @@ export const unifiedLogin = async (req: Request, res: Response) => {
 
       if (tenantUserResult.rows.length > 0) {
         const tu = tenantUserResult.rows[0];
+
+        // Enforce password verification if tenant user has password configured
+        if (tu.password_hash && tu.salt) {
+          if (!password) {
+            return res.status(401).json({ error: 'Password is required to authenticate.' });
+          }
+          const testHash = crypto.createHash('sha256').update(password + tu.salt).digest('hex');
+          if (testHash !== tu.password_hash) {
+            return res.status(401).json({ error: 'Invalid password. Please check credentials or contact administrator.' });
+          }
+        }
+
         const isPartner = tu.account_type === 'partner' || tu.subscription_tier === 'partner';
         const customerId = tu.customer_id || (isPartner ? 'PART-9148' : 'CORP-4821');
         const customerName = (tu.display_name || tu.tenant_name || (isPartner ? 'MSP PARTNER' : 'CORPORATE CLIENT')).toUpperCase();
@@ -2035,19 +2404,27 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
 
     const machines = machinesQuery.rows;
 
-    // 3. Fetch Assets strictly for this tenant's machines
+    // 3. Fetch Assets strictly for this tenant's machines, deployed endpoints, and external repositories
     const assetsQuery = await pool.query(`
       SELECT 
         a.id, a.type, a.name, a.path, a.algorithm, a.key_size as "keySize", a.hash_algorithm as "hashAlgorithm",
         a.is_vulnerable as "isVulnerable", a.risk_level as "riskLevel", a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations as "complianceViolations", a.created_at as "createdAt",
-        a.machine_id as "machineId", m.hostname, m.computer_name as "computerName", m.os, m.arch
+        a.machine_id as "machineId", a.source, a.source_ref as "sourceRef",
+        COALESCE(m.hostname, a.source_ref, 'Remote Repository') as hostname,
+        COALESCE(m.computer_name, a.source_ref, 'Remote Asset') as "computerName",
+        COALESCE(m.os, 'cloud') as os,
+        COALESCE(m.arch, 'source') as arch
       FROM assets a
-      JOIN fleet_machines m ON a.machine_id = m.id
+      LEFT JOIN fleet_machines m ON a.machine_id = m.id
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
-      WHERE LOWER(m.tenant_name) = LOWER($1)
-         OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg'))
+      WHERE LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($1)
+         OR LOWER(REPLACE(COALESCE(a.tenant_name, m.tenant_name, ''), ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (
+               LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) LIKE '%spinovation%'
+               OR LOWER(t.name) = 'engg'
+               OR (a.tenant_name IS NULL AND m.id IS NOT NULL)
+            ))
       ORDER BY a.is_vulnerable DESC, a.created_at DESC;
     `, [tenantNameSearch]);
 
@@ -2107,14 +2484,35 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
     const onlineMachines = machines.filter((m: any) => m.status === 'online').length;
     const machineAssetsSum = machines.reduce((sum: number, m: any) => sum + (parseInt(m.assetCount, 10) || 0), 0);
     const machineVulnSum = machines.reduce((sum: number, m: any) => sum + (parseInt(m.vulnerableCount, 10) || 0), 0);
-    const totalAssets = Math.max(assets.length, machineAssetsSum);
-    const vulnerableAssets = Math.max(assets.filter((a: any) => a.isVulnerable).length, machineVulnSum);
+
+    const endpointAssets = assets.filter((a: any) => a.source !== 'git_repo');
+    const gitAssets = assets.filter((a: any) => a.source === 'git_repo');
+    const totalAssets = Math.max(endpointAssets.length, machineAssetsSum) + gitAssets.length;
+    const vulnerableAssets = Math.max(endpointAssets.filter((a: any) => a.isVulnerable).length, machineVulnSum) + gitAssets.filter((a: any) => a.isVulnerable).length;
+
     const totalSeats = activeLicenses.length > 0
       ? activeLicenses.reduce((sum: number, l: any) => sum + (l.seats || 100), 0)
       : (client?.mcaLimit || 100);
-    const avgRiskScore = totalMachines > 0 
-      ? Math.round(machines.reduce((sum: number, m: any) => sum + (m.quantumRiskScore || 0), 0) / totalMachines)
-      : 74;
+
+    // Factor in both workstation risk scores and git scan risk scores
+    let allRiskScores: number[] = machines.map(m => m.quantumRiskScore || 0).filter(s => s > 0);
+    try {
+      const gitScansRes = await pool.query(`
+        SELECT quantum_risk_score FROM git_scans 
+        WHERE LOWER(COALESCE(tenant_name, '')) = LOWER($1) 
+           OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(COALESCE(tenant_name, '')) LIKE '%spinovation%')
+        ORDER BY created_at DESC LIMIT 5
+      `, [tenantNameSearch]);
+      for (const row of gitScansRes.rows) {
+        if (row.quantum_risk_score) allRiskScores.push(row.quantum_risk_score);
+      }
+    } catch {
+      // ignore
+    }
+
+    const avgRiskScore = allRiskScores.length > 0
+      ? Math.round(allRiskScores.reduce((sum, s) => sum + s, 0) / allRiskScores.length)
+      : (totalMachines > 0 ? Math.round(machines.reduce((sum: number, m: any) => sum + (m.quantumRiskScore || 0), 0) / totalMachines) : 74);
 
     res.json({
       success: true,

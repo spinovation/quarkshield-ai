@@ -11,6 +11,7 @@ const pool = new Pool({
   database: process.env.DB_DATABASE || 'quarkshield_scanner',
   password: process.env.DB_PASSWORD || 'postgres',
   port: Number(process.env.DB_PORT) || 5432,
+  connectionTimeoutMillis: 2000,
 });
 
 export const initDb = async () => {

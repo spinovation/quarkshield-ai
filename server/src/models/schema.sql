@@ -47,6 +47,11 @@ CREATE TABLE IF NOT EXISTS assets (
 
 -- Ensure migration on existing tables
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS path TEXT;
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS source VARCHAR(100) DEFAULT 'endpoint';
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_ref VARCHAR(500);
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255) DEFAULT 'SPINOVATIONCORP';
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS last_sync TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
@@ -136,6 +141,8 @@ ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS customer_id VARCHAR(100);
 ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255);
 ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255);
 ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS customer_id VARCHAR(100);
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS salt VARCHAR(255);
 
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS salt VARCHAR(255);
@@ -324,4 +331,162 @@ FROM fleet_machines
 WHERE LOWER(tenant_name) LIKE '%spinovation%'
 ON CONFLICT (tenant_name, snapshot_date) DO NOTHING;
 
+-- Backfill existing assets with tenant_name, source, and source_ref from fleet_machines
+UPDATE assets 
+SET 
+  tenant_name = COALESCE(assets.tenant_name, m.tenant_name, 'SPINOVATIONCORP'),
+  source = COALESCE(assets.source, 'endpoint_deploy'),
+  source_ref = COALESCE(assets.source_ref, m.hostname, 'workstation')
+FROM fleet_machines m
+WHERE assets.machine_id = m.id AND (assets.tenant_name IS NULL OR assets.source IS NULL);
 
+-- =========================================================================
+-- 7. CI/CD PIPELINE CBOM SECURITY GATES
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS ci_security_gates (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_name VARCHAR(255) NOT NULL DEFAULT 'SPINOVATIONCORP',
+  provider VARCHAR(50) NOT NULL, -- 'github', 'gitlab', 'bitbucket', 'cli'
+  repo_name VARCHAR(255) NOT NULL,
+  repo_url VARCHAR(500),
+  branch VARCHAR(100) DEFAULT 'main',
+  pr_number VARCHAR(50),
+  commit_hash VARCHAR(100),
+  commit_author VARCHAR(255),
+  commit_message TEXT,
+  status VARCHAR(50) NOT NULL DEFAULT 'PASSED', -- 'PASSED', 'BLOCKED', 'WARNING'
+  violations_count INTEGER DEFAULT 0,
+  critical_count INTEGER DEFAULT 0,
+  high_count INTEGER DEFAULT 0,
+  medium_count INTEGER DEFAULT 0,
+  quantum_risk_score INTEGER DEFAULT 0,
+  policy_name VARCHAR(100) DEFAULT 'CNSA 2.0 Strict Gate',
+  findings JSONB DEFAULT '[]'::jsonb,
+  markdown_report TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ci_gate_policies (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_name VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  block_on_rsa BOOLEAN DEFAULT true,
+  block_on_ecc BOOLEAN DEFAULT true,
+  block_on_deprecated_hash BOOLEAN DEFAULT true, -- MD5, SHA1
+  block_on_hardcoded_keys BOOLEAN DEFAULT true,
+  max_quantum_risk_score INTEGER DEFAULT 45,
+  enforce_cnsa_2026 BOOLEAN DEFAULT true,
+  is_default BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(tenant_name, name)
+);
+
+-- =========================================================================
+-- 8. ENTERPRISE PKI & CLOUD VAULT CONNECTORS
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS pki_connectors (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_name VARCHAR(255) NOT NULL DEFAULT 'SPINOVATIONCORP',
+  name VARCHAR(255) NOT NULL,
+  provider VARCHAR(50) NOT NULL, -- 'aws_kms', 'azure_keyvault', 'hashicorp_vault', 'ad_cs'
+  endpoint_url VARCHAR(500),
+  auth_type VARCHAR(50) DEFAULT 'token', -- 'iam_role', 'service_principal', 'token', 'kerberos'
+  config_summary JSONB DEFAULT '{}'::jsonb,
+  sync_status VARCHAR(50) DEFAULT 'active', -- 'active', 'syncing', 'error', 'idle'
+  total_keys_discovered INTEGER DEFAULT 0,
+  vulnerable_keys_count INTEGER DEFAULT 0,
+  pqc_ready_count INTEGER DEFAULT 0,
+  last_sync_at TIMESTAMP WITH TIME ZONE,
+  last_error TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pki_synced_assets (
+  id VARCHAR(100) PRIMARY KEY,
+  connector_id VARCHAR(100) REFERENCES pki_connectors(id) ON DELETE CASCADE,
+  tenant_name VARCHAR(255) NOT NULL,
+  asset_name VARCHAR(255) NOT NULL,
+  asset_type VARCHAR(50) NOT NULL, -- 'asymmetric_key', 'symmetric_key', 'certificate', 'ca_root', 'template'
+  algorithm VARCHAR(100) NOT NULL,
+  key_size INTEGER,
+  curve VARCHAR(50),
+  is_vulnerable BOOLEAN DEFAULT true,
+  risk_level VARCHAR(50) NOT NULL DEFAULT 'critical',
+  quantum_threat VARCHAR(255),
+  status VARCHAR(100) DEFAULT 'Active',
+  rotation_enabled BOOLEAN DEFAULT false,
+  expires_at TIMESTAMP WITH TIME ZONE,
+  raw_metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================================
+-- 9. HYBRID QUANTUM TLS REVERSE PROXIES
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS pqc_proxies (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_name VARCHAR(255) NOT NULL DEFAULT 'SPINOVATIONCORP',
+  name VARCHAR(255) NOT NULL,
+  listen_port INTEGER NOT NULL,
+  upstream_url VARCHAR(500) NOT NULL,
+  tls_curve VARCHAR(100) DEFAULT 'X25519MLKEM768',
+  status VARCHAR(50) DEFAULT 'running', -- 'running', 'stopped', 'error'
+  handshake_count INTEGER DEFAULT 0,
+  active_connections INTEGER DEFAULT 0,
+  cert_expiry TIMESTAMP WITH TIME ZONE,
+  last_active_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- =========================================================================
+-- SEED INITIAL MOCK DATA FOR DEMONSTRATION & ENTERPRISE TESTING
+-- =========================================================================
+
+-- Seed sample CI/CD gates
+INSERT INTO ci_security_gates (id, tenant_name, provider, repo_name, repo_url, branch, pr_number, commit_hash, commit_author, commit_message, status, violations_count, critical_count, high_count, quantum_risk_score, policy_name, markdown_report)
+VALUES 
+  ('gate-pr-104', 'SPINOVATIONCORP', 'github', 'spinovation/payments-microservice', 'https://github.com/spinovation/payments-microservice', 'feature/stripe-v2', 'PR #104', 'e3a180b', 'alex.mercer@spinovation.com', 'feat: update payment signing and auth keys', 'BLOCKED', 3, 2, 1, 88, 'CNSA 2.0 Strict Gate', '### QuarkShield CI/CD Gate: FAILED\n\n**3 Quantum-Vulnerable Cryptographic Assets Detected**\n\n- **CRITICAL**: Hardcoded RSA-2048 private key in `src/auth/signer.ts:42`\n- **HIGH**: Deprecated SHA-1 signature algorithm in `config/token.json:12`\n- **CRITICAL**: Classical ECDSA secp256k1 signature without PQC ML-DSA fallback.\n\n*Please migrate keys to NIST FIPS 204 (ML-DSA) or hybrid X25519MLKEM768.*'),
+  ('gate-pr-105', 'SPINOVATIONCORP', 'github', 'spinovation/auth-service', 'https://github.com/spinovation/auth-service', 'fix/session-tokens', 'PR #105', '9bc231a', 'elena.rostova@spinovation.com', 'fix: migrate JWT to ML-DSA hybrid signature', 'PASSED', 0, 0, 0, 10, 'CNSA 2.0 Strict Gate', '### QuarkShield CI/CD Gate: PASSED\n\nAll commits verified compliant with NIST FIPS 203/204 and NSA CNSA 2.0 requirements. Zero classical vulnerabilities detected.'),
+  ('gate-pr-42', 'SPINOVATIONCORP', 'gitlab', 'spinovation/core-api-gateway', 'https://gitlab.com/spinovation/core-api-gateway', 'main', 'MR #42', 'f88219c', 'devops@spinovation.com', 'chore: update TLS ingress ciphers', 'PASSED', 0, 0, 0, 12, 'CNSA 2.0 Strict Gate', '### QuarkShield CI/CD Gate: PASSED\n\nTLS 1.3 hybrid curve X25519MLKEM768 enabled on all ingress listeners.'),
+  ('gate-pr-88', 'AMBEROON', 'github', 'amberoon/aml-risk-engine', 'https://github.com/amberoon/aml-risk-engine', 'feat/financial-tx-signer', 'PR #88', '2c4180d', 'shirish.netke@amberoon.com', 'feat: add transaction verification pipeline', 'BLOCKED', 2, 1, 1, 78, 'CNSA 2.0 Strict Gate', '### QuarkShield CI/CD Gate: FAILED\n\n- **CRITICAL**: RSA 2048 encryption key discovered in `services/encryptor.py:19`\n- **HIGH**: 3DES legacy encryption cipher in legacy adapter.\n\n*Action Required: Replace with AES-256-GCM and NIST FIPS 203 ML-KEM-768.*')
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed default CI Gate policies
+INSERT INTO ci_gate_policies (id, tenant_name, name, block_on_rsa, block_on_ecc, block_on_deprecated_hash, block_on_hardcoded_keys, max_quantum_risk_score, enforce_cnsa_2026, is_default)
+VALUES 
+  ('policy-cnsa-strict', 'global', 'CNSA 2.0 Strict Security Gate', true, true, true, true, 30, true, true),
+  ('policy-standard-migration', 'global', 'NIST PQC Transition Balanced Gate', true, false, true, true, 60, false, false),
+  ('policy-fips-zero-tolerance', 'global', 'Zero-Tolerance Quantum Resistant Gate', true, true, true, true, 10, true, false)
+ON CONFLICT (tenant_name, name) DO NOTHING;
+
+-- Seed sample PKI connectors
+INSERT INTO pki_connectors (id, tenant_name, name, provider, endpoint_url, auth_type, config_summary, sync_status, total_keys_discovered, vulnerable_keys_count, pqc_ready_count, last_sync_at)
+VALUES
+  ('conn-aws-kms', 'SPINOVATIONCORP', 'AWS KMS Production (us-east-1)', 'aws_kms', 'https://kms.us-east-1.amazonaws.com', 'iam_role', '{"region": "us-east-1", "role_arn": "arn:aws:iam::123456789012:role/QuarkShieldDiscoveryRole", "key_count": 28}'::jsonb, 'active', 28, 22, 6, CURRENT_TIMESTAMP - INTERVAL '14 minutes'),
+  ('conn-azure-kv', 'SPINOVATIONCORP', 'Azure Key Vault (East US)', 'azure_keyvault', 'https://spin-prod-vault.vault.azure.net', 'service_principal', '{"tenant_id": "72f988bf-86f1-41af-91ab-2d7cd011db47", "client_id": "e8910d-prod-sp", "vault_name": "spin-prod-vault"}'::jsonb, 'active', 19, 15, 4, CURRENT_TIMESTAMP - INTERVAL '32 minutes'),
+  ('conn-hashi-vault', 'SPINOVATIONCORP', 'HashiCorp Vault Enterprise (Datacenter A)', 'hashicorp_vault', 'https://vault.internal.spinovation.com:8200', 'token', '{"pki_engine_mount": "pki_v1", "transit_engine_mount": "transit", "auth_method": "approle"}'::jsonb, 'active', 44, 38, 6, CURRENT_TIMESTAMP - INTERVAL '1 hour'),
+  ('conn-ad-cs', 'SPINOVATIONCORP', 'Active Directory Certificate Services (AD CS)', 'ad_cs', 'ldap://ca01.corp.spinovation.local:389', 'kerberos', '{"ca_name": "Spinovation-Enterprise-Root-CA", "base_dn": "DC=corp,DC=spinovation,DC=local", "template_count": 14}'::jsonb, 'active', 62, 58, 4, CURRENT_TIMESTAMP - INTERVAL '2 hours'),
+  ('conn-amb-aws', 'AMBEROON', 'Amberoon AWS KMS (us-west-2)', 'aws_kms', 'https://kms.us-west-2.amazonaws.com', 'iam_role', '{"region": "us-west-2", "role_arn": "arn:aws:iam::987654321098:role/AmberoonQuarkShieldKmsRole"}'::jsonb, 'active', 16, 12, 4, CURRENT_TIMESTAMP - INTERVAL '40 minutes')
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed sample PKI assets
+INSERT INTO pki_synced_assets (id, connector_id, tenant_name, asset_name, asset_type, algorithm, key_size, is_vulnerable, risk_level, quantum_threat, status, rotation_enabled, expires_at)
+VALUES
+  ('pki-ast-01', 'conn-aws-kms', 'SPINOVATIONCORP', 'spin-payment-master-key', 'asymmetric_key', 'RSA-2048', 2048, true, 'critical', 'Shor''s Algorithm factorization risk. HNDL exposure.', 'Active', false, CURRENT_TIMESTAMP + INTERVAL '300 days'),
+  ('pki-ast-02', 'conn-aws-kms', 'SPINOVATIONCORP', 'spin-pqc-kem-hybrid', 'asymmetric_key', 'ML-KEM-768 + X25519', 768, false, 'secure', 'NIST FIPS 203 Post-Quantum Resilient.', 'Active', true, CURRENT_TIMESTAMP + INTERVAL '365 days'),
+  ('pki-ast-03', 'conn-azure-kv', 'SPINOVATIONCORP', 'ssl-wildcard-spinovation-com', 'certificate', 'ECDSA-P256', 256, true, 'critical', 'Discrete log vulnerability via Shor''s algorithm on CRQC.', 'Active', true, CURRENT_TIMESTAMP + INTERVAL '120 days'),
+  ('pki-ast-04', 'conn-hashi-vault', 'SPINOVATIONCORP', 'transit/keys/customer-pii-cipher', 'symmetric_key', 'AES-256-GCM', 256, false, 'secure', 'Grover resistant (128-bit quantum security strength).', 'Active', true, CURRENT_TIMESTAMP + INTERVAL '700 days'),
+  ('pki-ast-05', 'conn-ad-cs', 'SPINOVATIONCORP', 'Spinovation Enterprise Root CA', 'ca_root', 'RSA-4096', 4096, true, 'critical', 'Root of trust vulnerable to quantum factorization. Subordinate CAs compromised.', 'Active', false, CURRENT_TIMESTAMP + INTERVAL '1800 days'),
+  ('pki-ast-06', 'conn-ad-cs', 'SPINOVATIONCORP', 'Smartcard Logon Certificate Template', 'template', 'RSA-2048', 2048, true, 'critical', 'Workstation logon signatures vulnerable to identity forgery by CRQC.', 'Active', false, CURRENT_TIMESTAMP + INTERVAL '365 days')
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed sample PQC Proxy
+INSERT INTO pqc_proxies (id, tenant_name, name, listen_port, upstream_url, tls_curve, status, handshake_count, active_connections)
+VALUES
+  ('prx-api-ingress', 'SPINOVATIONCORP', 'API Ingress Quantum Hybrid Proxy', 5443, 'http://127.0.0.1:5050', 'X25519MLKEM768', 'running', 1420, 8),
+  ('prx-legacy-crm', 'SPINOVATIONCORP', 'Legacy Core Banking Gateway Proxy', 8443, 'http://127.0.0.1:8080', 'X25519MLKEM768', 'running', 389, 2),
+  ('prx-amb-gateway', 'AMBEROON', 'Amberoon Hybrid PQC Gateway', 9443, 'http://127.0.0.1:3000', 'X25519MLKEM768', 'running', 215, 3)
+ON CONFLICT (id) DO NOTHING;

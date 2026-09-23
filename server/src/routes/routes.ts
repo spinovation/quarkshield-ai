@@ -33,6 +33,7 @@ import {
   revokeLicense,
   verifyLicenseKey,
   sendLicenseEmail,
+  sendNextStepsEmail,
   getMailSettings,
   updateMailSettings,
   getTenantUsers,
@@ -56,6 +57,28 @@ import {
   exportGitCBOM
 } from '../controllers/gitScanController';
 import { getAIChatResponse } from '../controllers/aiController';
+import {
+  evaluateCIGate,
+  getCIGateHistory,
+  getCIGatePolicies,
+  getCITemplate
+} from '../controllers/ciGateController';
+import {
+  getPkiConnectors,
+  createPkiConnector,
+  testPkiConnector,
+  syncPkiConnector,
+  deletePkiConnector,
+  getPkiSyncedAssets
+} from '../controllers/pkiConnectorController';
+import {
+  getProxies,
+  createProxy,
+  toggleProxyState,
+  deleteProxy,
+  testProxyHandshake,
+  getProxyTemplate
+} from '../controllers/pqcProxyController';
 
 const router = Router();
 
@@ -111,6 +134,7 @@ router.post('/admin/licenses/generate', generateLicense);
 router.get('/admin/licenses', getLicenses);
 router.delete('/admin/licenses/:id', revokeLicense);
 router.post('/admin/licenses/send-email', sendLicenseEmail);
+router.post('/admin/clients/send-next-steps-email', sendNextStepsEmail);
 router.post('/scan/license/verify', verifyLicenseKey);
 router.get('/admin/settings/mail', getMailSettings);
 router.post('/admin/settings/mail', updateMailSettings);
@@ -148,6 +172,43 @@ router.post('/support/contact', submitSupportTicket);
 
 // PQC Copilot AI Assistant
 router.post('/ai/chat', getAIChatResponse);
+
+// ==========================================
+// 1. CI/CD PIPELINE CBOM SECURITY GATES
+// ==========================================
+router.post('/git/ci-gate/evaluate', evaluateCIGate);
+router.get('/git/ci-gate/history', getCIGateHistory);
+router.get('/git/ci-gate/policies', getCIGatePolicies);
+router.get('/git/ci-gate/templates/:provider', getCITemplate);
+router.get('/git/ci-gate/template', (req, res) => {
+  const provider = (req.query.provider as string) || 'github';
+  return getCITemplate({ ...req, params: { provider } } as any, res);
+});
+router.get('/git/ci-gate/runner.sh', (req, res) => getCITemplate({ ...req, params: { provider: 'runner' } } as any, res));
+
+// ==========================================
+// 2. ENTERPRISE PKI & CLOUD VAULT CONNECTORS
+// ==========================================
+router.get('/pki/connectors', getPkiConnectors);
+router.post('/pki/connectors', createPkiConnector);
+router.post('/pki/connectors/:id/test', testPkiConnector);
+router.post('/pki/connectors/:id/sync', syncPkiConnector);
+router.delete('/pki/connectors/:id', deletePkiConnector);
+router.get('/pki/assets', getPkiSyncedAssets);
+
+// ==========================================
+// 3. TRANSPARENT HYBRID QUANTUM TLS PROXY
+// ==========================================
+router.get('/proxy/instances', getProxies);
+router.post('/proxy/instances', createProxy);
+router.patch('/proxy/instances/:id/state', toggleProxyState);
+router.delete('/proxy/instances/:id', deleteProxy);
+router.post('/proxy/instances/:id/test', testProxyHandshake);
+router.get('/proxy/templates/:format', getProxyTemplate);
+router.get('/proxy/template', (req, res) => {
+  const format = (req.query.format as string) || 'nginx';
+  return getProxyTemplate({ ...req, params: { format } } as any, res);
+});
 
 export default router;
 

@@ -14,7 +14,7 @@
 1. [Introduction & Threat Context](#1-introduction--threat-context)
 2. [Download Locations & Package Formats](#2-download-locations--package-formats)
 3. [Installation & Windows Security Trust Setup](#3-installation--windows-security-trust-setup)
-4. [What Assets QuarkShield Audits on Windows](#4-what-assets-quarkshield-audits-on-windows)
+4. [What Assets QuarkShield Audits on Windows & The Zero-Exfiltration Guarantee](#4-what-assets-quarkshield-audits-on-windows--the-zero-exfiltration-guarantee)
 5. [Scan Operations Explained](#5-scan-operations-explained)
    - [Quick Scan Workstation](#quick-scan-workstation)
    - [Custom Path Scan & Quick Targets](#custom-path-scan--quick-targets)
@@ -23,7 +23,8 @@
 7. [Exporting CBOM (CycloneDX 1.6) & Audit JSON](#7-exporting-cbom-cyclonedx-16--audit-json)
 8. [Connecting & Synchronizing with QuarkShield Cloud Fleet](#8-connecting--synchronizing-with-quarkshield-cloud-fleet)
 9. [Automated Enterprise & MDM Deployment (Intune / SCCM / Group Policy)](#9-automated-enterprise--mdm-deployment-intune--sccm--group-policy)
-10. [Uninstallation & Troubleshooting](#10-uninstallation--troubleshooting)
+10. [Preparing for Microsoft OS-Level PQC Trust Roots (Windows 11, Server 2025 & Azure)](#10-preparing-for-microsoft-os-level-pqc-trust-roots-windows-11-server-2025--azure)
+11. [Uninstallation & Troubleshooting](#11-uninstallation--troubleshooting)
 
 ---
 
@@ -98,7 +99,7 @@ If your organization enforces strict Windows Defender SmartScreen or AppLocker p
 
 ---
 
-## 4. What Assets QuarkShield Audits on Windows
+## 4. What Assets QuarkShield Audits on Windows & The Zero-Exfiltration Guarantee
 
 QuarkShield deeply inspects both file-system assets and Windows native cryptographic stores:
 
@@ -120,6 +121,27 @@ QuarkShield deeply inspects both file-system assets and Windows native cryptogra
 
 ### 4. Binary & Library Signatures
 - Evaluates cryptographic signatures on installed DLLs and executables in `C:\Program Files` and `C:\Windows\System32` to detect deprecated SHA-1 or broken RSA-1024 code-signing certificates.
+
+### 5. Understanding "Keys" in QuarkShield & The Zero-Exfiltration Guarantee
+
+In QuarkShield's dashboards and CBOM inventory, **"Keys"** refers exclusively to **Cryptographic Assets and Public Algorithm Primitives**—specifically:
+- **Public Certificates:** X.509 certificates and root CA chains in Windows CAPI/CNG.
+- **Asymmetric Key Parameters:** RSA public moduli (2048/4096-bit), Elliptic Curve public points and curve names (secp256r1/P-256, secp384r1/P-384, Ed25519).
+- **Host Identities & Cipher Suites:** SSH public host keys and TLS cipher configurations.
+
+> **CRITICAL SECURITY PROMISE: Zero-Exfiltration Guarantee**  
+> QuarkShield operates strictly on a **local-in-RAM inspection model**:
+> - **Private Keys Are NEVER Exfiltrated:** Private key files (`BEGIN RSA PRIVATE KEY`, `BEGIN EC PRIVATE KEY`, PKCS#8), passphrases, seed material, or decrypted plaintexts are **NEVER captured, stored, uploaded, or transmitted** to any remote server.
+> - **Volatile Memory Execution:** File and certificate parsing takes place strictly inside temporary local volatile RAM. As soon as public cryptographic metadata (algorithm name, bit length, validity dates, issuer DN) is extracted, working memory is cleared.
+> - **Privacy-Preserving Telemetry:** Telemetry synchronized with the QuarkShield Cloud Fleet contains solely non-sensitive public metadata structured according to the CycloneDX 1.6 CBOM standard.
+
+---
+
+### 6. Quantum Vulnerability of Discovered Keys: Shor's Algorithm
+
+Virtually all keys discovered on Windows today rely on classical asymmetric mathematics:
+- **RSA Factorization:** RSA-2048 and RSA-4096 rely on prime integer factorization. Shor's algorithm running on a Cryptanalytically Relevant Quantum Computer (CRQC) solves prime factorization in polynomial time ($O((\log N)^3)$).
+- **Elliptic Curve Collapse (~2,300 Logical Qubits):** Windows CNG and SSH credentials frequently rely on ECDSA (P-256) and Ed25519. Because elliptic curve groups are much smaller than RSA moduli, **ECC collapses even faster on quantum hardware—requiring only ~2,300 logical qubits** compared to ~4,096 for RSA-2048.
 
 ---
 
@@ -259,9 +281,31 @@ $Trigger = New-ScheduledTaskTrigger -Daily -At 3:00AM
 Register-ScheduledTask -TaskName "QuarkShield-PQCAudit" -Action $Action -Trigger $Trigger -User "SYSTEM"
 ```
 
+### Enterprise Non-Root / Zero-Reboot Alternative: OpenTelemetry (OTel) Collector & CAPI2
+For enterprise environments seeking non-intrusive cryptographic visibility without dedicated host agent overhead:
+- **Zero-Reboot Telemetry**: Use your existing **OpenTelemetry (OTel) Collector** to stream cryptographic events directly from the `Microsoft-Windows-CAPI2/Operational` event log to QuarkShield.
+- **Unprivileged Execution**: Runs securely as `NT AUTHORITY\LOCAL SERVICE` with zero kernel drivers and 0% risk of system reboot.
+- **Detailed Blueprint**: See the [QuarkShield Enterprise Post-Quantum Cryptographic Deployment Guide](ENTERPRISE_AGENT_DEPLOYMENT_GUIDE.md) for ready-to-use `otel-collector-pqc.yaml` configurations and AD CS PowerShell connectors.
+
 ---
 
-## 10. Uninstallation & Troubleshooting
+## 10. Preparing for Microsoft OS-Level PQC Trust Roots (Windows 11, Server 2025 & Azure)
+
+Microsoft is transitioning Windows and Azure security infrastructures toward post-quantum cryptography under NIST FIPS 203/204/205 and NSA CNSA 2.0:
+- **Windows CNG & Schannel:** Windows 11 and Windows Server 2025 are adding native Cryptography Next Generation (CNG) algorithm providers for `ML-KEM` key exchange and `ML-DSA` signature validation.
+- **Azure Trusted Signing:** Cloud-based code-signing pipelines are incorporating hybrid signatures combining Authenticode RSA/ECC with post-quantum lattice signatures.
+- **Root Store Deprecation:** Microsoft's Root Certificate Program will begin enforcing PQC trust anchors, progressively flagging classical RSA-2048/SHA-256 certificates with deprecation warnings in Windows Event Logs and SmartScreen.
+
+### Recommended Customer Action Plan:
+1. **Continuous CBOM Discovery:** Deploy QuarkShield across your Windows domain via Microsoft Intune, SCCM, or Group Policy to discover every certificate in `Cert:\LocalMachine` and `Cert:\CurrentUser`.
+2. **Audit Active Directory Certificate Services (AD CS):** Plan the transition of your internal enterprise CA templates from classical RSA to hybrid or ML-DSA templates.
+3. **Enable Hybrid Schannel / IIS TLS:** Configure Windows Server IIS instances and Azure Application Gateways to negotiate hybrid `X25519MLKEM768` TLS 1.3 handshakes.
+4. **Transition Authenticode Signing Pipelines:** Adopt Azure Trusted Signing or hybrid signing tools to sign internal and commercial executables (`.exe`, `.dll`, `.msi`) with dual classical + PQC signatures.
+5. **Set Up Automated Drift Governance:** Utilize QuarkShield's Cloud Fleet plane to alert security teams when endpoints or developer environments introduce legacy, non-compliant keys.
+
+---
+
+## 11. Uninstallation & Troubleshooting
 
 ### How to Uninstall
 - **Via GUI (1-Click):** Click the red **🗑️ Uninstall** button in the top navigation bar. QuarkShield will prompt for confirmation, terminate its background service, delete Windows shortcuts, and clean up local files.

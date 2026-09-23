@@ -16,7 +16,7 @@ By initiating a direct outbound TCP connection and executing a customized **TLS 
 
 ## 1. Architectural Placement: Where Is Outbound Socket Scanning Done?
 
-In the QuarkShield **"Wiz Model" Agentless Architecture**, Active Outbound TCP/TLS Socket Probing is designated as **Pillar 5: Remote Network & Port PQC Prober**. 
+In the QuarkShield **Agentless Architecture**, Active Outbound TCP/TLS Socket Probing is designated as **Pillar 5: Remote Network & Port PQC Prober**. 
 
 To provide comprehensive visibility across both external perimeters and internal infrastructure, outbound socket probing is deployed across **two complementary operational environments**:
 

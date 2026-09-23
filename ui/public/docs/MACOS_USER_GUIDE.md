@@ -15,7 +15,7 @@
 1. [Introduction & Threat Context](#1-introduction--threat-context)
 2. [Download Locations & Package Formats](#2-download-locations--package-formats)
 3. [Installation & macOS Security Trust Setup](#3-installation--macos-security-trust-setup)
-4. [What Assets QuarkShield Audits on macOS](#4-what-assets-quarkshield-audits-on-macos)
+4. [What Assets QuarkShield Audits on macOS & The Zero-Exfiltration Guarantee](#4-what-assets-quarkshield-audits-on-macos--the-zero-exfiltration-guarantee)
 5. [Scan Operations Explained](#5-scan-operations-explained)
    - [Quick Scan Workstation](#quick-scan-workstation)
    - [Custom Path Scan & macOS Quick Targets](#custom-path-scan--macos-quick-targets)
@@ -24,7 +24,8 @@
 7. [Exporting CBOM (CycloneDX 1.6) & Audit JSON](#7-exporting-cbom-cyclonedx-16--audit-json)
 8. [Connecting & Synchronizing with QuarkShield Cloud Fleet](#8-connecting--synchronizing-with-quarkshield-cloud-fleet)
 9. [Enterprise Mac Fleet Deployment (Jamf / Kandji / Munki)](#9-enterprise-mac-fleet-deployment-jamf--kandji--munki)
-10. [Uninstallation & Troubleshooting](#10-uninstallation--troubleshooting)
+10. [Preparing for Apple OS-Level PQC Trust Roots (macOS & iOS)](#10-preparing-for-apple-os-level-pqc-trust-roots-macos--ios)
+11. [Uninstallation & Troubleshooting](#11-uninstallation--troubleshooting)
 
 ---
 
@@ -102,9 +103,9 @@ If you prefer not to run the trust script:
 
 ---
 
-## 4. What Assets QuarkShield Audits on macOS
+## 4. What Assets QuarkShield Audits on macOS & The Zero-Exfiltration Guarantee
 
-QuarkShield leverages native macOS APIs (`/usr/bin/security`) and file system evaluators to discover cryptographic assets:
+QuarkShield leverages native macOS APIs (`/usr/bin/security`) and file system evaluators to discover cryptographic assets across the operating system:
 
 ### 1. macOS System & User Keychains
 - **User Keychains:** `~/Library/Keychains/login.keychain-db`, `login.keychain`.
@@ -121,6 +122,27 @@ QuarkShield leverages native macOS APIs (`/usr/bin/security`) and file system ev
 ### 3. Application Bundles & Developer Certs
 - Xcode developer profiles, iOS/macOS distribution certificates, and provisioned entitlements.
 - Java keystores used by developer tools: `/Library/Java/JavaVirtualMachines/*/Contents/Home/lib/security/cacerts`.
+
+### 4. Understanding "Keys" in QuarkShield & The Zero-Exfiltration Guarantee
+
+In QuarkShield's dashboards and CBOM inventory, **"Keys"** refers exclusively to **Cryptographic Assets and Public Algorithm Primitives**—specifically:
+- **Public Certificates:** X.509 certificates and root CA chains.
+- **Asymmetric Key Parameters:** RSA public moduli (2048/4096-bit), Elliptic Curve public points and curve names (secp256r1/P-256, secp384r1/P-384, Ed25519).
+- **Host Identities & Cipher Suites:** SSH public host keys and TLS cipher configurations.
+
+> **CRITICAL SECURITY PROMISE: Zero-Exfiltration Guarantee**  
+> QuarkShield operates strictly on a **local-in-RAM inspection model**:
+> - **Private Keys Are NEVER Exfiltrated:** Private key files (`BEGIN RSA PRIVATE KEY`, `BEGIN EC PRIVATE KEY`, PKCS#8), passphrases, seed material, or decrypted plaintexts are **NEVER captured, stored, uploaded, or transmitted** to any remote server.
+> - **Volatile Memory Execution:** File and keychain parsing takes place strictly inside temporary local volatile RAM. As soon as public cryptographic metadata (algorithm name, bit length, validity dates, issuer DN) is extracted, working memory is cleared.
+> - **Privacy-Preserving Telemetry:** Telemetry synchronized with the QuarkShield Cloud Fleet contains solely non-sensitive public metadata structured according to the CycloneDX 1.6 CBOM standard.
+
+---
+
+### 5. Quantum Vulnerability of Discovered Keys: Shor's Algorithm
+
+Virtually all keys discovered on macOS today rely on classical asymmetric mathematics:
+- **RSA Factorization:** RSA-2048 and RSA-4096 rely on prime integer factorization. Shor's algorithm running on a Cryptanalytically Relevant Quantum Computer (CRQC) solves prime factorization in polynomial time ($O((\log N)^3)$).
+- **Elliptic Curve Collapse (~2,300 Logical Qubits):** Apple Keychain and developer credentials frequently rely on ECDSA (P-256) and Ed25519. Because elliptic curve groups are much smaller than RSA moduli, **ECC collapses even faster on quantum hardware—requiring only ~2,300 logical qubits** compared to ~4,096 for RSA-2048.
 
 ---
 
@@ -288,9 +310,30 @@ To run a periodic background audit every 24 hours, place a `.plist` in `/Library
 </plist>
 ```
 
+### Enterprise Agentless Alternative: Jamf Pro / Kandji API Connector
+Rather than pushing local daemons to tens of thousands of developer MacBooks:
+- **API-First Discovery**: QuarkShield connects directly to your Jamf Pro or Kandji REST API to audit configuration profiles, FileVault encryption settings, and installed system identity certificates out-of-band in seconds with zero endpoint software.
+- **Detailed Blueprint**: See the [QuarkShield Enterprise Post-Quantum Cryptographic Deployment Guide](ENTERPRISE_AGENT_DEPLOYMENT_GUIDE.md).
+
 ---
 
-## 10. Uninstallation & Troubleshooting
+## 10. Preparing for Apple OS-Level PQC Trust Roots (macOS & iOS)
+
+Apple is progressively embedding post-quantum cryptographic primitives into Darwin, macOS, and iOS:
+- **iMessage PQ3 Protocol:** Apple has already deployed post-quantum Kyber/ML-KEM in production for end-to-end messaging.
+- **Safari & WebKit Hybrid TLS:** macOS Sonoma and Sequoia support hybrid `X25519MLKEM768` for TLS 1.3 key exchange.
+- **Upcoming OS-Level Trust Roots:** In alignment with NIST FIPS 203/204/205 and NSA CNSA 2.0 timelines, Apple will introduce root Certificate Authorities based on ML-DSA (FIPS 204) and SLH-DSA (FIPS 205), eventually deprecating RSA-2048 and ECDSA P-256 code-signing trust.
+
+### Recommended Customer Action Plan:
+1. **Continuous CBOM Discovery:** Run QuarkShield via Jamf/Kandji across your Mac fleet to catalog all installed certificates, local identities, and developer profiles.
+2. **Audit Certificate Authorities (CAs):** Verify that your corporate PKI and external CAs (DigiCert, Let's Encrypt) are developing hybrid certificates that pair classical and PQC roots.
+3. **Deploy Hybrid TLS (ML-KEM-768):** Ensure your internal websites, API endpoints, and reverse proxies negotiate `X25519MLKEM768` with Safari and macOS clients.
+4. **Prepare Dual-Signature Code Signing:** Work with your Apple Developer account administrators to prepare hybrid signing architectures so your macOS software satisfies Gatekeeper when PQC signature validation is mandated.
+5. **Monitor Cryptographic Drift:** Use QuarkShield's Cloud Fleet plane to flag any endpoints or repos where developers introduce non-compliant classical keys.
+
+---
+
+## 11. Uninstallation & Troubleshooting
 
 ### How to Uninstall
 - **Via GUI (1-Click):** Click **🗑️ Uninstall** in the top navigation bar. QuarkShield will prompt for confirmation, terminate the background service, and remove local application files.

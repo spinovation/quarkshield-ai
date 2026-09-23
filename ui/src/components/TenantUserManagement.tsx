@@ -31,14 +31,24 @@ export interface TenantUser {
 
 interface TenantUserManagementProps {
   currentTenant?: string;
+  allowTenantSwitch?: boolean;
 }
 
-export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({ currentTenant = 'atrireshma' }) => {
+export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({ 
+  currentTenant = 'spinovationcorp',
+  allowTenantSwitch = false 
+}) => {
   const [selectedTenant, setSelectedTenant] = useState<string>(currentTenant);
   const [users, setUsers] = useState<TenantUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [twoFactorPolicy, setTwoFactorPolicy] = useState<'optional' | 'admins_only' | 'mandatory'>('optional');
   const [savingPolicy, setSavingPolicy] = useState(false);
+
+  useEffect(() => {
+    if (currentTenant && currentTenant !== selectedTenant) {
+      setSelectedTenant(currentTenant);
+    }
+  }, [currentTenant]);
 
   // New User Form State
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -51,6 +61,13 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({ curr
 
   // Available tenants for Super Admin switcher
   const tenantList = [
+    { name: 'spinovationcorp', display: 'Spinovation Corp' },
+    { name: 'amberoon', display: 'Amberoon Workspace' },
+    { name: 'algomeld', display: 'Algo Meld MSP' },
+    { name: 'democlient', display: 'Demo Client Workspace' },
+    { name: 'vanguard-logistics', display: 'Vanguard Global Logistics' },
+    { name: 'apex-cyber', display: 'Apex Cyber Defense MSP' },
+    { name: 'cybershield-partners', display: 'CyberShield Managed Security' },
     { name: 'atrireshma', display: 'Atri Reshma Enterprise' },
     { name: 'jhrzic', display: 'JHR Zic Labs' },
     { name: 'digitalbloodline', display: 'Digital Bloodline Workspace' },
@@ -80,7 +97,21 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({ curr
       }
     } catch (err) {
       console.warn('Backend unavailable, using simulated tenant users:', err);
-      if (tenant === 'jhrzic') {
+      if (tenant === 'spinovationcorp' || tenant.includes('spinovation')) {
+        setUsers([
+          { id: 'tu-sp-01', tenantName: tenant, email: 'sridhargs@spinovation.com', firstName: 'Ganapati', lastName: 'Sridhar', role: 'admin', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 1800000).toISOString(), createdAt: new Date(Date.now() - 30 * 86400000).toISOString() },
+          { id: 'tu-sp-02', tenantName: tenant, email: 'secops@spinovation.com', firstName: 'Elena', lastName: 'Rostova', role: 'secops', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 7200000).toISOString(), createdAt: new Date(Date.now() - 20 * 86400000).toISOString() },
+          { id: 'tu-sp-03', tenantName: tenant, email: 'auditor@spinovation.com', firstName: 'Marcus', lastName: 'Vance', role: 'auditor', twoFactorEnabled: false, status: 'active', lastLogin: new Date(Date.now() - 86400000).toISOString(), createdAt: new Date(Date.now() - 10 * 86400000).toISOString() }
+        ]);
+        setTwoFactorPolicy('admins_only');
+      } else if (tenant === 'algomeld' || tenant.includes('algomeld')) {
+        setUsers([
+          { id: 'tu-am-01', tenantName: tenant, email: 'sridhargs@algomeld.com', firstName: 'Ganapati', lastName: 'Sridhar', role: 'admin', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 1200000).toISOString(), createdAt: new Date(Date.now() - 45 * 86400000).toISOString() },
+          { id: 'tu-am-02', tenantName: tenant, email: 'ops@algomeld.com', firstName: 'Arun', lastName: 'Kumar', role: 'secops', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 5400000).toISOString(), createdAt: new Date(Date.now() - 25 * 86400000).toISOString() },
+          { id: 'tu-am-03', tenantName: tenant, email: 'compliance@algomeld.com', firstName: 'Sarah', lastName: 'Jenkins', role: 'auditor', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 86400000).toISOString(), createdAt: new Date(Date.now() - 15 * 86400000).toISOString() }
+        ]);
+        setTwoFactorPolicy('mandatory');
+      } else if (tenant === 'jhrzic') {
         setUsers([
           { id: 'tu-03', tenantName: 'jhrzic', email: 'lead@jhrzic.com', firstName: 'John', lastName: 'Zic', role: 'admin', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 3600000).toISOString(), createdAt: new Date().toISOString() },
           { id: 'tu-04', tenantName: 'jhrzic', email: 'auditor@jhrzic.com', firstName: 'Sarah', lastName: 'Connor', role: 'auditor', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 86400000).toISOString(), createdAt: new Date().toISOString() },
@@ -256,27 +287,46 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({ curr
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Target Tenant:</label>
-            <select
-              value={selectedTenant}
-              onChange={(e) => setSelectedTenant(e.target.value)}
-              style={{
-                padding: '0.5rem 0.8rem',
-                borderRadius: '6px',
-                background: 'rgba(255, 255, 255, 0.08)',
-                border: '1px solid var(--border-normal)',
-                color: 'var(--text-primary)',
-                fontSize: '0.88rem',
-                outline: 'none',
-                cursor: 'pointer'
-              }}
-            >
-              {tenantList.map(t => (
-                <option key={t.name} value={t.name} style={{ background: '#0f172a' }}>
-                  {t.display} ({t.name}.quarkshield.ai)
-                </option>
-              ))}
-            </select>
+            {allowTenantSwitch ? (
+              <>
+                <label style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Target Tenant:</label>
+                <select
+                  value={selectedTenant}
+                  onChange={(e) => setSelectedTenant(e.target.value)}
+                  style={{
+                    padding: '0.5rem 0.8rem',
+                    borderRadius: '6px',
+                    background: 'rgba(255, 255, 255, 0.08)',
+                    border: '1px solid var(--border-normal)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.88rem',
+                    outline: 'none',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {tenantList.map(t => (
+                    <option key={t.name} value={t.name} style={{ background: '#0f172a' }}>
+                      {t.display} ({t.name}.quarkshield.ai)
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{
+                  padding: '0.45rem 0.85rem',
+                  borderRadius: '6px',
+                  background: 'rgba(0, 242, 254, 0.1)',
+                  border: '1px solid rgba(0, 242, 254, 0.25)',
+                  color: 'var(--accent-cyan)',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                  fontFamily: 'monospace'
+                }}>
+                  https://{selectedTenant}.quarkshield.ai
+                </span>
+              </div>
+            )}
             <button
               onClick={() => fetchTenantUsers(selectedTenant)}
               className="btn-secondary"

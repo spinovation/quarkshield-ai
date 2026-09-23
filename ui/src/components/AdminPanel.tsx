@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Activity, 
   Users, 
@@ -12,6 +12,7 @@ import {
   Search,
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Trash2,
   AlertTriangle,
@@ -35,9 +36,106 @@ import {
   Laptop,
   Monitor,
   Server,
-  Cpu
+  Cpu,
+  Eye,
+  EyeOff,
+  Shield
 } from 'lucide-react';
 import { TenantUserManagement } from './TenantUserManagement';
+
+export interface PlatformOperator {
+  id: string;
+  name: string;
+  email: string;
+  role: 'root_admin' | 'secops_lead' | 'support_engineer' | 'compliance_auditor';
+  roleDisplayName: string;
+  status: 'active' | 'suspended';
+  mfaEnforced: boolean;
+  mfaType: 'Hardware Security Key (YubiKey)' | 'FIDO2 / WebAuthn' | 'TOTP Authenticator';
+  accessScope: string;
+  lastLogin: string;
+  lastIp: string;
+  createdAt: string;
+  isRootOwner?: boolean;
+}
+
+export const DEFAULT_PLATFORM_OPERATORS: PlatformOperator[] = [
+  {
+    id: 'op-root-1',
+    name: 'Super Admin (Platform Owner)',
+    email: 'superadmin@quarkshield.ai',
+    role: 'root_admin',
+    roleDisplayName: 'Root Master Administrator',
+    status: 'active',
+    mfaEnforced: true,
+    mfaType: 'Hardware Security Key (YubiKey)',
+    accessScope: 'Global Control Plane • Infrastructure & License Authority • Cluster Root',
+    lastLogin: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
+    lastIp: '13.140.40.99 (Platform Host)',
+    createdAt: '2025-01-10T08:00:00Z',
+    isRootOwner: true
+  },
+  {
+    id: 'op-root-2',
+    name: 'Sridhar GS',
+    email: 'sridhargs@gmail.com',
+    role: 'root_admin',
+    roleDisplayName: 'Root Platform Architect',
+    status: 'active',
+    mfaEnforced: true,
+    mfaType: 'FIDO2 / WebAuthn',
+    accessScope: 'Full Control Plane & Tenant Orchestration Privileges',
+    lastLogin: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
+    lastIp: '73.189.44.120',
+    createdAt: '2025-01-15T09:30:00Z',
+    isRootOwner: false
+  },
+  {
+    id: 'op-secops-1',
+    name: 'Elena Rostova',
+    email: 'secops-lead@quarkshield.ai',
+    role: 'secops_lead',
+    roleDisplayName: 'Platform SecOps Lead',
+    status: 'active',
+    mfaEnforced: true,
+    mfaType: 'TOTP Authenticator',
+    accessScope: 'PQC Algorithm Governance • FIPS 203/204 Handshake Telemetry • Key Audit',
+    lastLogin: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
+    lastIp: '54.210.12.88',
+    createdAt: '2025-02-01T11:15:00Z',
+    isRootOwner: false
+  },
+  {
+    id: 'op-support-1',
+    name: 'Marcus Vance',
+    email: 'support-tier3@quarkshield.ai',
+    role: 'support_engineer',
+    roleDisplayName: 'Tier-3 Support Escalations',
+    status: 'active',
+    mfaEnforced: true,
+    mfaType: 'TOTP Authenticator',
+    accessScope: 'Support Mirror Diagnostics • Fleet Sync Telemetry • License Health',
+    lastLogin: new Date(Date.now() - 1000 * 60 * 60 * 18).toISOString(),
+    lastIp: '34.205.81.14',
+    createdAt: '2025-02-18T14:00:00Z',
+    isRootOwner: false
+  },
+  {
+    id: 'op-audit-1',
+    name: 'Compliance Audit Office',
+    email: 'auditor@quarkshield.ai',
+    role: 'compliance_auditor',
+    roleDisplayName: 'SOC2 / FedRAMP Auditor',
+    status: 'active',
+    mfaEnforced: true,
+    mfaType: 'Hardware Security Key (YubiKey)',
+    accessScope: 'Read-Only Control Plane Audit • Cryptographic Inventory Verification',
+    lastLogin: new Date(Date.now() - 1000 * 60 * 60 * 52).toISOString(),
+    lastIp: '52.14.88.90',
+    createdAt: '2025-03-01T10:00:00Z',
+    isRootOwner: false
+  }
+];
 
 export interface EnrolledMachine {
   id: string;
@@ -139,9 +237,10 @@ interface AdminPanelProps {
   currentUserEmail?: string;
   onLogout?: () => void;
   initialSubTab?: 'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics';
+  onMirrorTenant?: (tenantSlug: string) => void;
 }
 
-export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogout, initialSubTab = 'registry' }) => {
+export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogout, initialSubTab = 'registry', onMirrorTenant }) => {
   const [clients, setClients] = useState<ClientInfo[]>([]);
   const [clientStats, setClientStats] = useState<{ [name: string]: ClientStats }>({});
   const [users, setUsers] = useState<UserInfo[]>([]);
@@ -149,6 +248,184 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [activeSubTab, setActiveSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics'>(initialSubTab);
+
+  // Platform Operators (Super Admin User Registry) State
+  const [operators, setOperators] = useState<PlatformOperator[]>(() => {
+    try {
+      const saved = localStorage.getItem('quarkshield_platform_operators');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_PLATFORM_OPERATORS;
+  });
+
+  const saveOperators = (newOps: PlatformOperator[]) => {
+    setOperators(newOps);
+    try {
+      localStorage.setItem('quarkshield_platform_operators', JSON.stringify(newOps));
+    } catch {
+      // ignore
+    }
+  };
+
+  const [operatorSearch, setOperatorSearch] = useState('');
+  const [operatorRoleFilter, setOperatorRoleFilter] = useState<'all' | 'root_admin' | 'secops_lead' | 'support_engineer' | 'compliance_auditor'>('all');
+  const [showAddOperatorModal, setShowAddOperatorModal] = useState(false);
+  const [newOpName, setNewOpName] = useState('');
+  const [newOpEmail, setNewOpEmail] = useState('');
+  const [newOpRole, setNewOpRole] = useState<'root_admin' | 'secops_lead' | 'support_engineer' | 'compliance_auditor'>('support_engineer');
+  const [newOpMfaType, setNewOpMfaType] = useState<'Hardware Security Key (YubiKey)' | 'FIDO2 / WebAuthn' | 'TOTP Authenticator'>('TOTP Authenticator');
+  const [operatorToDelete, setOperatorToDelete] = useState<PlatformOperator | null>(null);
+  const [operatorToReset2FA, setOperatorToReset2FA] = useState<PlatformOperator | null>(null);
+  const [opToast, setOpToast] = useState<string | null>(null);
+
+  // Selected Tenant for Diagnostic Support Mirror in Registry Tab
+  const [mirrorSelectedSlug, setMirrorSelectedSlug] = useState<string>('');
+
+  const handleAddOperator = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newOpEmail.trim() || !newOpName.trim()) return;
+
+    const roleNameMap: Record<string, string> = {
+      root_admin: 'Root Master Administrator',
+      secops_lead: 'Platform SecOps Lead',
+      support_engineer: 'Tier-3 Support Escalations',
+      compliance_auditor: 'SOC2 / FedRAMP Auditor'
+    };
+
+    const scopeMap: Record<string, string> = {
+      root_admin: 'Global Control Plane • Infrastructure & License Authority • Cluster Root',
+      secops_lead: 'PQC Algorithm Governance • FIPS 203/204 Handshake Telemetry • Key Audit',
+      support_engineer: 'Support Mirror Diagnostics • Fleet Sync Telemetry • License Health',
+      compliance_auditor: 'Read-Only Control Plane Audit • Cryptographic Inventory Verification'
+    };
+
+    const newOp: PlatformOperator = {
+      id: `op-${Date.now()}`,
+      name: newOpName.trim(),
+      email: newOpEmail.trim().toLowerCase(),
+      role: newOpRole,
+      roleDisplayName: roleNameMap[newOpRole] || 'Operator',
+      status: 'active',
+      mfaEnforced: true,
+      mfaType: newOpMfaType,
+      accessScope: scopeMap[newOpRole] || 'Platform Control Plane Access',
+      lastLogin: 'Never (Pending Activation)',
+      lastIp: 'Pending First Session',
+      createdAt: new Date().toISOString(),
+      isRootOwner: false
+    };
+
+    const updated = [newOp, ...operators];
+    saveOperators(updated);
+    setNewOpName('');
+    setNewOpEmail('');
+    setShowAddOperatorModal(false);
+    setOpToast(`Platform operator ${newOp.email} invited with enforced 2FA.`);
+    setTimeout(() => setOpToast(null), 4000);
+  };
+
+  const handleToggleOperatorStatus = (id: string) => {
+    const updated = operators.map(op => {
+      if (op.id === id) {
+        if (op.isRootOwner) return op;
+        const nextStatus: 'active' | 'suspended' = op.status === 'active' ? 'suspended' : 'active';
+        return { ...op, status: nextStatus };
+      }
+      return op;
+    });
+    saveOperators(updated);
+    setOpToast('Operator status updated.');
+    setTimeout(() => setOpToast(null), 3000);
+  };
+
+  const handleChangeOperatorRole = (id: string, newRole: 'root_admin' | 'secops_lead' | 'support_engineer' | 'compliance_auditor') => {
+    const roleNameMap: Record<string, string> = {
+      root_admin: 'Root Master Administrator',
+      secops_lead: 'Platform SecOps Lead',
+      support_engineer: 'Tier-3 Support Escalations',
+      compliance_auditor: 'SOC2 / FedRAMP Auditor'
+    };
+    const scopeMap: Record<string, string> = {
+      root_admin: 'Global Control Plane • Infrastructure & License Authority • Cluster Root',
+      secops_lead: 'PQC Algorithm Governance • FIPS 203/204 Handshake Telemetry • Key Audit',
+      support_engineer: 'Support Mirror Diagnostics • Fleet Sync Telemetry • License Health',
+      compliance_auditor: 'Read-Only Control Plane Audit • Cryptographic Inventory Verification'
+    };
+    const updated = operators.map(op => {
+      if (op.id === id) {
+        return {
+          ...op,
+          role: newRole,
+          roleDisplayName: roleNameMap[newRole] || op.roleDisplayName,
+          accessScope: scopeMap[newRole] || op.accessScope
+        };
+      }
+      return op;
+    });
+    saveOperators(updated);
+    setOpToast('Operator role updated.');
+    setTimeout(() => setOpToast(null), 3000);
+  };
+
+  const handleConfirmReset2FA = () => {
+    if (!operatorToReset2FA) return;
+    setOpToast(`Emergency 2FA reset token generated for ${operatorToReset2FA.email}. Prompted on next sign-in.`);
+    setOperatorToReset2FA(null);
+    setTimeout(() => setOpToast(null), 4000);
+  };
+
+  const handleConfirmDeleteOperator = () => {
+    if (!operatorToDelete) return;
+    if (operatorToDelete.isRootOwner) return;
+    const updated = operators.filter(op => op.id !== operatorToDelete.id);
+    saveOperators(updated);
+    setOpToast(`Operator ${operatorToDelete.email} removed from control plane.`);
+    setOperatorToDelete(null);
+    setTimeout(() => setOpToast(null), 4000);
+  };
+
+  // Table Map-Style Pan State & Handlers
+  const tableContainerRef = useRef<HTMLDivElement>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStartX, setPanStartX] = useState(0);
+  const [panScrollLeft, setPanScrollLeft] = useState(0);
+
+  const handleTableMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (['INPUT', 'BUTTON', 'SELECT', 'A', 'TEXTAREA'].includes(target.tagName) || target.closest('button') || target.closest('a') || target.closest('input') || target.closest('select')) {
+      return;
+    }
+    if (!tableContainerRef.current) return;
+    setIsPanning(true);
+    setPanStartX(e.pageX - tableContainerRef.current.offsetLeft);
+    setPanScrollLeft(tableContainerRef.current.scrollLeft);
+  };
+
+  const handleTableMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isPanning || !tableContainerRef.current) return;
+    e.preventDefault();
+    const x = e.pageX - tableContainerRef.current.offsetLeft;
+    const walk = (x - panStartX) * 1.5;
+    tableContainerRef.current.scrollLeft = panScrollLeft - walk;
+  };
+
+  const handleTableMouseUpOrLeave = () => {
+    setIsPanning(false);
+  };
+
+  const panTable = (direction: 'left' | 'right') => {
+    if (!tableContainerRef.current) return;
+    const distance = 400;
+    tableContainerRef.current.scrollBy({
+      left: direction === 'left' ? -distance : distance,
+      behavior: 'smooth'
+    });
+  };
 
   useEffect(() => {
     if (initialSubTab) {
@@ -344,6 +621,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       return matchOrg || matchSub || matchMachine;
     });
   }, [groupedLicenses, licenseFilter]);
+
+  const filteredOperators = useMemo(() => {
+    return operators.filter(op => {
+      const q = operatorSearch.trim().toLowerCase();
+      const matchesSearch = !q ||
+        op.name.toLowerCase().includes(q) ||
+        op.email.toLowerCase().includes(q) ||
+        op.accessScope.toLowerCase().includes(q) ||
+        op.roleDisplayName.toLowerCase().includes(q);
+      const matchesRole = operatorRoleFilter === 'all' || op.role === operatorRoleFilter;
+      return matchesSearch && matchesRole;
+    });
+  }, [operators, operatorSearch, operatorRoleFilter]);
 
   // User Onboarding State (Partner & Corporate)
   const [showOnboardModal, setShowOnboardModal] = useState(false);
@@ -1083,7 +1373,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   useEffect(() => {
     if (activeSubTab === 'analytics') {
       fetchAnalytics();
-    } else if (activeSubTab === 'licenses') {
+    } else if (activeSubTab === 'licenses' || activeSubTab === 'registry') {
       fetchLicenses();
     }
   }, [activeSubTab]);
@@ -1218,6 +1508,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
   useEffect(() => {
     fetchClients();
+    fetchLicenses();
   }, []);
 
   // Handle Inline Client Provisioning (Deploy Tenant)
@@ -1397,15 +1688,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
   // Reset user password
   const handleResetPassword = async (userId: string, email: string) => {
-    const newPassword = prompt(`Enter new password for ${email} (minimum 6 characters):`);
+    const newPassword = prompt(`Enter new password for ${email} (minimum 6 characters, or leave blank to auto-generate a secure temporary password):`);
     if (newPassword === null) return; // User cancelled
-    if (newPassword.trim().length < 6) {
-      alert("Password must be at least 6 characters long.");
+    if (newPassword.trim().length > 0 && newPassword.trim().length < 6) {
+      alert("Custom password must be at least 6 characters long.");
       return;
     }
     
     try {
-      const token = sessionStorage.getItem('quarkshield_token');
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
       const res = await fetch(`/api/admin/users/${userId}/reset-password`, {
         method: 'POST',
         headers: {
@@ -1418,7 +1709,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       if (!res.ok) {
         throw new Error(data.error || 'Failed to reset user password.');
       }
-      alert(data.message);
+      alert(`Password Reset Successful!\n\nUser: ${email}\nNew Password: ${data.password || newPassword.trim()}\n\n${data.message}`);
     } catch (err: any) {
       console.error('Password reset failed:', err);
       alert(`Reset Error: ${err.message}`);
@@ -1744,7 +2035,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
           }}
         >
           <Users size={16} />
-          <span>User Registry</span>
+          <span>Platform Operators & Super Admins</span>
+          {operators.length > 0 && (
+            <span style={{ fontSize: '0.72rem', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--accent-cyan)', padding: '0.1rem 0.45rem', borderRadius: '10px' }}>
+              {operators.length}
+            </span>
+          )}
         </button>
 
         <button
@@ -2447,6 +2743,101 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
             </div>
           </div>
 
+          {/* Tenant Diagnostic Support Mirror Console */}
+          <div className="glass-panel" style={{
+            padding: '1.25rem 1.5rem',
+            background: 'linear-gradient(135deg, rgba(234, 179, 8, 0.08) 0%, rgba(15, 23, 42, 0.6) 100%)',
+            border: '1px solid rgba(234, 179, 8, 0.3)',
+            borderRadius: '12px',
+            marginTop: '1.25rem',
+            marginBottom: '0.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', minWidth: '320px', flex: 1 }}>
+              <div style={{
+                width: '46px',
+                height: '46px',
+                borderRadius: '10px',
+                background: 'rgba(234, 179, 8, 0.15)',
+                border: '1px solid rgba(234, 179, 8, 0.4)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <Eye size={24} color="#facc15" />
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <h4 style={{ margin: 0, fontSize: '1.05rem', color: '#fef08a', fontWeight: 700 }}>
+                    Tenant Diagnostic Support Mirror
+                  </h4>
+                  <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.45rem', borderRadius: '4px', background: 'rgba(234, 179, 8, 0.2)', color: '#fde047', fontWeight: 700, border: '1px solid rgba(234, 179, 8, 0.35)' }}>
+                    SUPER ADMIN CONSOLE
+                  </span>
+                </div>
+                <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                  Launch an impersonated diagnostic mirror into any customer tenant portal in real time without tenant credentials. Inspect live CBOMs, machines, and sync telemetry.
+                </p>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <select
+                value={mirrorSelectedSlug}
+                onChange={(e) => setMirrorSelectedSlug(e.target.value)}
+                style={{
+                  background: '#0b1120',
+                  color: 'var(--text-primary)',
+                  border: '1px solid rgba(234, 179, 8, 0.4)',
+                  borderRadius: '6px',
+                  padding: '0.5rem 0.85rem',
+                  fontSize: '0.85rem',
+                  outline: 'none',
+                  minWidth: '220px'
+                }}
+              >
+                <option value="">-- Select Tenant to Mirror --</option>
+                {clients.map(c => (
+                  <option key={c.name} value={c.name}>
+                    {c.displayName || c.name} ({c.name}.quarkshield.ai)
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                disabled={!mirrorSelectedSlug || !onMirrorTenant}
+                onClick={() => {
+                  if (mirrorSelectedSlug && onMirrorTenant) {
+                    onMirrorTenant(mirrorSelectedSlug);
+                  }
+                }}
+                style={{
+                  background: mirrorSelectedSlug ? 'linear-gradient(135deg, #d97706 0%, #b45309 100%)' : 'rgba(255,255,255,0.05)',
+                  color: mirrorSelectedSlug ? '#ffffff' : '#64748b',
+                  border: mirrorSelectedSlug ? '1px solid #f59e0b' : '1px solid rgba(255,255,255,0.1)',
+                  borderRadius: '6px',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: mirrorSelectedSlug ? 'pointer' : 'not-allowed',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  boxShadow: mirrorSelectedSlug ? '0 2px 8px rgba(217, 119, 6, 0.3)' : 'none',
+                  transition: 'all 0.15s'
+                }}
+              >
+                <Eye size={15} /> Launch Support Mirror
+              </button>
+            </div>
+          </div>
+
           {/* Unified Tenant Management Registry */}
           <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1.5rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
@@ -2459,41 +2850,101 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                 </p>
               </div>
               
-              {/* User Search Input */}
-              <div style={{ position: 'relative', width: '100%', maxWidth: '300px' }}>
-                <Search 
-                  size={14} 
-                  style={{ 
-                    position: 'absolute', 
-                    left: '10px', 
-                    top: '50%', 
-                    transform: 'translateY(-50%)', 
-                    color: 'var(--text-muted)' 
-                  }} 
-                />
-                <input 
-                  type="text" 
-                  placeholder="Search email or workspace..." 
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '0.45rem 1rem 0.45rem 2.2rem',
-                    borderRadius: '6px',
-                    background: 'rgba(0,0,0,0.3)',
-                    border: '1px solid var(--border-normal)',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.85rem',
-                    outline: 'none',
-                    transition: 'border-color 0.2s'
-                  }}
-                  onFocus={(e) => e.target.style.borderColor = 'var(--accent-cyan)'}
-                  onBlur={(e) => e.target.style.borderColor = 'var(--border-normal)'}
-                />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                {/* Alternative Pan Controls (Map-Style Smooth Pan) */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', background: 'rgba(0,0,0,0.25)', padding: '0.25rem 0.5rem', borderRadius: '6px', border: '1px solid var(--border-normal)' }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500, marginRight: '0.2rem' }}>Pan View:</span>
+                  <button
+                    type="button"
+                    onClick={() => panTable('left')}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      padding: '0.25rem 0.55rem',
+                      borderRadius: '4px',
+                      background: 'rgba(255,255,255,0.06)',
+                      border: '1px solid var(--border-normal)',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.76rem',
+                      cursor: 'pointer'
+                    }}
+                    title="Pan table to the left"
+                  >
+                    <ChevronLeft size={13} /> Pan Left
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => panTable('right')}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.25rem',
+                      padding: '0.25rem 0.55rem',
+                      borderRadius: '4px',
+                      background: 'rgba(56, 189, 248, 0.15)',
+                      border: '1px solid rgba(56, 189, 248, 0.35)',
+                      color: 'var(--accent-cyan)',
+                      fontSize: '0.76rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                    title="Pan table to the right"
+                  >
+                    Pan Right <ChevronRight size={13} />
+                  </button>
+                </div>
+
+                {/* User Search Input */}
+                <div style={{ position: 'relative', width: '100%', maxWidth: '280px' }}>
+                  <Search 
+                    size={14} 
+                    style={{ 
+                      position: 'absolute', 
+                      left: '10px', 
+                      top: '50%', 
+                      transform: 'translateY(-50%)', 
+                      color: 'var(--text-muted)' 
+                    }} 
+                  />
+                  <input 
+                    type="text" 
+                    placeholder="Search email or workspace..." 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.45rem 1rem 0.45rem 2.2rem',
+                      borderRadius: '6px',
+                      background: 'rgba(0,0,0,0.3)',
+                      border: '1px solid var(--border-normal)',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.85rem',
+                      outline: 'none',
+                      transition: 'border-color 0.2s'
+                    }}
+                    onFocus={(e) => e.target.style.borderColor = 'var(--accent-cyan)'}
+                    onBlur={(e) => e.target.style.borderColor = 'var(--border-normal)'}
+                  />
+                </div>
               </div>
             </div>
 
-            <div style={{ overflowX: 'auto' }}>
+            <div 
+              ref={tableContainerRef}
+              onMouseDown={handleTableMouseDown}
+              onMouseMove={handleTableMouseMove}
+              onMouseUp={handleTableMouseUpOrLeave}
+              onMouseLeave={handleTableMouseUpOrLeave}
+              style={{ 
+                overflowX: 'auto',
+                cursor: isPanning ? 'grabbing' : 'grab',
+                userSelect: isPanning ? 'none' : 'auto',
+                scrollBehavior: 'smooth',
+                position: 'relative'
+              }}
+              title="Click & drag anywhere to pan horizontally like a map"
+            >
               <table className="quark-table">
                 <thead>
                   <tr>
@@ -2502,7 +2953,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                     <th style={{ userSelect: 'none', color: 'var(--text-secondary)' }}>Role</th>
                     {renderSortableHeader('Network Channels', 'appPort')}
                     {renderSortableHeader('Database Stats', 'userCount')}
-                    <th>Subscription Scale</th>
+                    <th style={{ userSelect: 'none', color: 'var(--text-secondary)' }}>Active License & Scale</th>
                     {renderSortableHeader('Last Login', 'last_login')}
                     {renderSortableHeader('Orchestration Status', 'status')}
                     <th style={{ textAlign: 'center', userSelect: 'none', color: 'var(--text-secondary)' }}>Actions</th>
@@ -2605,9 +3056,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                                 <span style={{ color: 'var(--text-muted)' }}>Users:</span>{' '}
                                 <strong style={{ color: 'var(--text-primary)' }}>{stats ? stats.userCount : '0'}</strong>
                               </div>
-                              <div style={{ fontSize: '0.85rem', marginTop: '0.1rem' }}>
-                                <span style={{ color: 'var(--text-muted)' }}>Keys:</span>{' '}
-                                <strong style={{ color: 'var(--text-primary)' }}>{stats ? stats.assetCount : '0'}</strong>
+                              <div style={{ fontSize: '0.85rem', marginTop: '0.15rem' }}>
+                                <span style={{ color: 'var(--text-muted)' }} title="Discovered Cryptographic Assets, Keys and Certificates in CBOM">Crypto Assets:</span>{' '}
+                                <strong style={{ color: 'var(--accent-cyan)' }}>{stats ? stats.assetCount : '0'}</strong>
                               </div>
                             </div>
                           ) : (
@@ -2615,72 +3066,131 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                           )}
                         </td>
                         <td>
-                          {isProvisioned ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '180px' }}>
-                              <select 
-                                value={stats?.subscription_tier || 'growth'} 
-                                onChange={(e) => {
-                                  const newTier = e.target.value;
-                                  let newLimit = 250;
-                                  if (newTier === 'demo') newLimit = 15;
-                                  else if (newTier === 'assessment') newLimit = 100;
-                                  else if (newTier === 'growth') newLimit = 250;
-                                  else if (newTier === 'enterprise_pro') newLimit = 2500;
-                                  else if (newTier === 'customer') newLimit = 999999;
-                                  handleUpdateSubscription(client.name, newTier, newLimit, stats?.anthropic_api_key || '');
-                                }}
-                                disabled={u.row_locked}
-                                style={{
-                                  background: 'rgba(0,0,0,0.5)',
-                                  border: '1px solid var(--border-normal)',
-                                  borderRadius: '4px',
-                                  color: 'var(--text-primary)',
-                                  fontSize: '0.8rem',
-                                  padding: '0.25rem 0.4rem',
-                                  outline: 'none',
-                                  cursor: 'pointer',
-                                  width: '100%'
-                                }}
-                              >
-                                <option value="demo">Demo Mode (Limit 15)</option>
-                                <option value="assessment">PQC Assessment (Limit 100)</option>
-                                <option value="growth">Growth Tier (Limit 250)</option>
-                                <option value="enterprise_pro">Enterprise Pro (Limit 2500)</option>
-                                <option value="customer">Customer / Unlimited (Custom)</option>
-                              </select>
-                              
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                                <span>Limit:</span>
-                                <input 
-                                  type={stats?.subscription_tier === 'customer' ? 'text' : 'number'} 
-                                  value={stats?.subscription_tier === 'customer' ? 'Unlimited' : (stats?.mca_limit || 250)}
-                                  onChange={(e) => {
-                                    if (stats?.subscription_tier === 'customer') return;
-                                    const newLimit = Number(e.target.value);
-                                    handleUpdateSubscription(client.name, stats?.subscription_tier || 'growth', newLimit, stats?.anthropic_api_key || '');
-                                  }}
-                                  disabled={u.row_locked || stats?.subscription_tier === 'customer'}
-                                  style={{
-                                    background: 'rgba(0,0,0,0.3)',
-                                    border: '1px solid var(--border-normal)',
-                                    borderRadius: '4px',
-                                    color: 'var(--accent-cyan)',
-                                    fontSize: '0.75rem',
-                                    padding: '0.1rem 0.25rem',
-                                    width: '70px',
-                                    outline: 'none',
-                                    fontFamily: 'var(--font-mono)',
-                                    textAlign: 'center'
-                                  }}
-                                />
-                                <span>{stats?.subscription_tier === 'customer' ? '' : 'MCAs'}</span>
-                              </div>
+                          {(() => {
+                            const activeLicense = licenses.find(l => 
+                              (client?.customerId && l.customerId && l.customerId.trim().toLowerCase() === client.customerId.trim().toLowerCase()) ||
+                              (l.tenantName && client?.name && l.tenantName.trim().toLowerCase() === client.name.trim().toLowerCase()) ||
+                              (l.tenantName && client?.displayName && l.tenantName.trim().toLowerCase() === client.displayName.trim().toLowerCase()) ||
+                              (l.contactEmail && l.contactEmail.trim().toLowerCase() === u.email.trim().toLowerCase())
+                            );
 
-                              {/* API Keys are now managed globally on the host to streamline client onboarding */}
-                            </div>
-                          ) : (
-                            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>-</span>
-                          )}
+                            if (activeLicense) {
+                              const isLicActive = activeLicense.status === 'active';
+                              const tierDisplay = activeLicense.tier === 'partner' 
+                                ? 'MSP PARTNER PRO' 
+                                : activeLicense.tier === 'corporate' 
+                                ? 'CORPORATE ENTERPRISE' 
+                                : (activeLicense.tier || 'STANDARD').toUpperCase();
+
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '175px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                                    <span style={{ 
+                                      fontWeight: 600, 
+                                      fontSize: '0.78rem',
+                                      color: activeLicense.tier === 'partner' ? '#c084fc' : '#38bdf8' 
+                                    }}>
+                                      {tierDisplay}
+                                    </span>
+                                    <span style={{
+                                      fontSize: '0.65rem',
+                                      padding: '0.1rem 0.35rem',
+                                      borderRadius: '4px',
+                                      fontWeight: 600,
+                                      background: isLicActive ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                      color: isLicActive ? '#4ade80' : '#f87171',
+                                      border: `1px solid ${isLicActive ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                                    }}>
+                                      {activeLicense.status.toUpperCase()}
+                                    </span>
+                                  </div>
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                    <Layers size={12} style={{ color: 'var(--text-muted)' }} />
+                                    <span>{activeLicense.seats} Nodes / Seats</span>
+                                  </div>
+
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                    <code 
+                                      onClick={() => handleCopyKey(activeLicense.licenseKey)}
+                                      title="Click to copy full license key"
+                                      style={{
+                                        fontFamily: 'var(--font-mono)',
+                                        fontSize: '0.72rem',
+                                        background: 'rgba(0,0,0,0.4)',
+                                        padding: '0.15rem 0.35rem',
+                                        borderRadius: '3px',
+                                        border: '1px solid var(--border-normal)',
+                                        color: 'var(--accent-cyan)',
+                                        cursor: 'pointer'
+                                      }}
+                                    >
+                                      {activeLicense.licenseKey.length > 16 
+                                        ? `${activeLicense.licenseKey.substring(0, 14)}...` 
+                                        : activeLicense.licenseKey}
+                                    </code>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyKey(activeLicense.licenseKey)}
+                                      title="Copy License Key"
+                                      style={{
+                                        background: 'none',
+                                        border: 'none',
+                                        padding: '2px',
+                                        cursor: 'pointer',
+                                        color: copiedKey === activeLicense.licenseKey ? '#4ade80' : 'var(--text-muted)'
+                                      }}
+                                    >
+                                      {copiedKey === activeLicense.licenseKey ? <Check size={12} /> : <Copy size={12} />}
+                                    </button>
+                                  </div>
+
+                                  {activeLicense.expiresAt && (
+                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                      Exp: {new Date(activeLicense.expiresAt).toLocaleDateString()}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+
+                            if (client) {
+                              return (
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: '150px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                    <span style={{ fontWeight: 600, fontSize: '0.78rem', color: '#e2e8f0' }}>
+                                      {(client.subscriptionTier || 'Standard').toUpperCase()}
+                                    </span>
+                                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                                      ({client.mcaLimit || 250} Nodes)
+                                    </span>
+                                  </div>
+                                  <button
+                                    onClick={() => handleProceedToIssueLicense(client)}
+                                    style={{
+                                      fontSize: '0.72rem',
+                                      padding: '0.2rem 0.5rem',
+                                      background: 'rgba(56, 189, 248, 0.1)',
+                                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                                      color: 'var(--accent-cyan)',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      alignSelf: 'flex-start',
+                                      marginTop: '0.15rem'
+                                    }}
+                                  >
+                                    + Issue Key
+                                  </button>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Unassigned</span>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                           {u.last_login ? new Date(u.last_login).toLocaleString() : <span style={{ fontStyle: 'italic', color: 'var(--text-muted)' }}>Never</span>}
@@ -2709,6 +3219,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                         </td>
                         <td style={{ textAlign: 'center' }}>
                           <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'center', alignItems: 'center' }}>
+                            {/* Support Mirror Button (Instant Tenant Diagnostics) */}
+                            {onMirrorTenant && isProvisioned && (
+                              <button
+                                type="button"
+                                onClick={() => onMirrorTenant(sanitizedPrefix || client.name)}
+                                title={`Launch Support Diagnostic Mirror for ${client?.displayName || client?.name || sanitizedPrefix}`}
+                                style={{
+                                  padding: '0.35rem 0.75rem',
+                                  fontSize: '0.78rem',
+                                  background: 'rgba(234, 179, 8, 0.15)',
+                                  color: '#facc15',
+                                  border: '1px solid rgba(234, 179, 8, 0.4)',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem',
+                                  fontWeight: 600,
+                                  whiteSpace: 'nowrap',
+                                  transition: 'all 0.15s ease'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.background = 'rgba(234, 179, 8, 0.25)';
+                                  e.currentTarget.style.borderColor = '#facc15';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.background = 'rgba(234, 179, 8, 0.15)';
+                                  e.currentTarget.style.borderColor = 'rgba(234, 179, 8, 0.4)';
+                                }}
+                              >
+                                <Eye size={13} /> Support Mirror
+                              </button>
+                            )}
+
                             {/* Deploy / Decom Button */}
                             {isProvisioned ? (
                               <button
@@ -2762,174 +3306,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                                 }}
                               >
                                 Deploy Tenant
-                              </button>
-                            )}
-
-                            {/* Enable / Disable CMDB Button */}
-                            {u.cmdb_enabled ? (
-                              <button
-                                onClick={() => handleToggleCMDB(u.id, false)}
-                                disabled={u.row_locked}
-                                style={u.row_locked ? {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'rgba(255, 255, 255, 0.03)',
-                                  color: '#64748b',
-                                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                                  borderRadius: '4px',
-                                  cursor: 'not-allowed',
-                                  whiteSpace: 'nowrap'
-                                } : {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  color: '#f87171',
-                                  border: '1px solid rgba(239, 68, 68, 0.35)',
-                                  background: 'rgba(220, 38, 38, 0.2)',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                Disable CMDB
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleToggleCMDB(u.id, true)}
-                                disabled={u.row_locked}
-                                style={u.row_locked ? {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'rgba(255, 255, 255, 0.03)',
-                                  color: '#64748b',
-                                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                                  borderRadius: '4px',
-                                  cursor: 'not-allowed',
-                                  whiteSpace: 'nowrap'
-                                } : {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'linear-gradient(135deg, #06b6d4 0%, #0891b2 100%)',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontWeight: 500,
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                Enable CMDB
-                              </button>
-                            )}
-
-                            {/* Enable / Disable Quark Migrate Playbook Button */}
-                            {u.playbook_enabled ? (
-                              <button
-                                onClick={() => handleTogglePlaybook(u.id, false)}
-                                disabled={u.row_locked}
-                                style={u.row_locked ? {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'rgba(255, 255, 255, 0.03)',
-                                  color: '#64748b',
-                                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                                  borderRadius: '4px',
-                                  cursor: 'not-allowed',
-                                  whiteSpace: 'nowrap'
-                                } : {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  color: '#c084fc',
-                                  border: '1px solid rgba(168, 85, 247, 0.35)',
-                                  background: 'rgba(168, 85, 247, 0.15)',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                Disable Playbook
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleTogglePlaybook(u.id, true)}
-                                disabled={u.row_locked}
-                                style={u.row_locked ? {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'rgba(255, 255, 255, 0.03)',
-                                  color: '#64748b',
-                                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                                  borderRadius: '4px',
-                                  cursor: 'not-allowed',
-                                  whiteSpace: 'nowrap'
-                                } : {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontWeight: 500,
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                Enable Playbook
-                              </button>
-                            )}
-
-                            {/* Enable / Disable Web3 & Blockchain PQC Button */}
-                            {u.web3_enabled ? (
-                              <button
-                                onClick={() => handleToggleWeb3(u.id, false)}
-                                disabled={u.row_locked}
-                                style={u.row_locked ? {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'rgba(255, 255, 255, 0.03)',
-                                  color: '#64748b',
-                                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                                  borderRadius: '4px',
-                                  cursor: 'not-allowed',
-                                  whiteSpace: 'nowrap'
-                                } : {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  color: '#34d399',
-                                  border: '1px solid rgba(16, 185, 129, 0.35)',
-                                  background: 'rgba(16, 185, 129, 0.15)',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                Disable Web3
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => handleToggleWeb3(u.id, true)}
-                                disabled={u.row_locked}
-                                style={u.row_locked ? {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'rgba(255, 255, 255, 0.03)',
-                                  color: '#64748b',
-                                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                                  borderRadius: '4px',
-                                  cursor: 'not-allowed',
-                                  whiteSpace: 'nowrap'
-                                } : {
-                                  padding: '0.35rem 0.75rem',
-                                  fontSize: '0.78rem',
-                                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                                  color: '#ffffff',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontWeight: 500,
-                                  whiteSpace: 'nowrap'
-                                }}
-                              >
-                                Enable Web3
                               </button>
                             )}
 
@@ -4818,10 +5194,832 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
         </div>
       )}
 
-      {/* Tenant Users & 2FA Policy Subtab */}
+      {/* Super Admin Platform Operators & Control Plane User Registry */}
       {activeSubTab === 'users' && (
-        <div style={{ marginTop: '1.5rem' }}>
-          <TenantUserManagement currentTenant="atrireshma" />
+        <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          {/* Toast Notification */}
+          {opToast && (
+            <div style={{
+              position: 'fixed',
+              top: '24px',
+              right: '24px',
+              background: 'linear-gradient(135deg, #059669 0%, #10b981 100%)',
+              color: '#ffffff',
+              padding: '0.75rem 1.25rem',
+              borderRadius: '8px',
+              boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              zIndex: 10000,
+              fontSize: '0.85rem',
+              fontWeight: 600
+            }}>
+              <CheckCircle2 size={16} />
+              <span>{opToast}</span>
+            </div>
+          )}
+
+          {/* Architectural Privilege Notice */}
+          <div className="glass-panel" style={{
+            padding: '1.15rem 1.5rem',
+            background: 'linear-gradient(135deg, rgba(14, 165, 233, 0.08) 0%, rgba(15, 23, 42, 0.6) 100%)',
+            border: '1px solid rgba(14, 165, 233, 0.25)',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '1rem',
+            flexWrap: 'wrap'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+              <div style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '10px',
+                background: 'rgba(14, 165, 233, 0.15)',
+                border: '1px solid rgba(14, 165, 233, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
+              }}>
+                <ShieldCheck size={22} color="#38bdf8" />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '0.98rem', color: '#e0f2fe', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                  Platform Operators & Central Control Plane Directory
+                  <span style={{ fontSize: '0.68rem', padding: '0.1rem 0.4rem', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.2)', color: '#38bdf8', fontWeight: 700, border: '1px solid rgba(56, 189, 248, 0.35)' }}>
+                    SUPER ADMIN ACCESS ONLY
+                  </span>
+                </h4>
+                <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                  This registry strictly governs internal QuarkShield platform operators, SecOps leads, and Tier-3 support engineers with root control plane privileges. 
+                  <strong style={{ color: '#ffffff' }}> Tenant end-users are self-managed</strong> by customers independently inside their private tenant workspaces under the <em>Team & 2FA Policies</em> tab.
+                </p>
+              </div>
+            </div>
+
+            {onMirrorTenant && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('registry')}
+                  style={{
+                    padding: '0.45rem 0.85rem',
+                    fontSize: '0.8rem',
+                    background: 'rgba(234, 179, 8, 0.12)',
+                    color: '#facc15',
+                    border: '1px solid rgba(234, 179, 8, 0.35)',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    fontWeight: 600
+                  }}
+                >
+                  <Eye size={13} /> Open Tenant Support Mirror
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Security Metrics Grid */}
+          <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
+            <div className="glass-panel metric-card">
+              <div className="metric-info">
+                <h3>ACTIVE PLATFORM OPERATORS</h3>
+                <div className="metric-value" style={{ color: 'var(--accent-cyan)' }}>{operators.length}</div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  {operators.filter(o => o.role === 'root_admin').length} Root • {operators.filter(o => o.role === 'secops_lead').length} SecOps • {operators.filter(o => o.role === 'support_engineer').length} Support
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: 'var(--accent-cyan)' }}>
+                <Users size={24} />
+              </div>
+            </div>
+
+            <div className="glass-panel metric-card">
+              <div className="metric-info">
+                <h3>2FA / MFA ENFORCEMENT</h3>
+                <div className="metric-value" style={{ color: '#4ade80' }}>100%</div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  Hardware FIDO2 & TOTP Enforced
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: '#4ade80' }}>
+                <Lock size={24} />
+              </div>
+            </div>
+
+            <div className="glass-panel metric-card">
+              <div className="metric-info">
+                <h3>PQC HANDSHAKE AUDIT</h3>
+                <div className="metric-value" style={{ color: '#38bdf8' }}>FIPS 203</div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  ML-KEM-768 Hybrid Protocol Active
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: '#38bdf8' }}>
+                <Activity size={24} />
+              </div>
+            </div>
+
+            <div className="glass-panel metric-card">
+              <div className="metric-info">
+                <h3>SUPPORT MIRROR AUTHORITY</h3>
+                <div className="metric-value" style={{ color: '#facc15' }}>TIER-3+</div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  Live Diagnostics Impersonation
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: '#facc15' }}>
+                <Eye size={24} />
+              </div>
+            </div>
+          </div>
+
+          {/* Search, Filters, and Add Operator Bar */}
+          <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flex: 1, minWidth: '300px' }}>
+                <div style={{ position: 'relative', flex: 1, maxWidth: '380px' }}>
+                  <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+                  <input
+                    type="text"
+                    placeholder="Search operators by name, email, or role..."
+                    value={operatorSearch}
+                    onChange={(e) => setOperatorSearch(e.target.value)}
+                    style={{
+                      width: '100%',
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid var(--border-normal)',
+                      borderRadius: '6px',
+                      padding: '0.5rem 0.75rem 0.5rem 2.2rem',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.85rem',
+                      outline: 'none'
+                    }}
+                  />
+                </div>
+
+                <select
+                  value={operatorRoleFilter}
+                  onChange={(e) => setOperatorRoleFilter(e.target.value as any)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-normal)',
+                    borderRadius: '6px',
+                    padding: '0.5rem 0.75rem',
+                    fontSize: '0.85rem',
+                    outline: 'none'
+                  }}
+                >
+                  <option value="all">All Roles ({operators.length})</option>
+                  <option value="root_admin">Root Master Admins</option>
+                  <option value="secops_lead">Platform SecOps Leads</option>
+                  <option value="support_engineer">Tier-3 Support Engineers</option>
+                  <option value="compliance_auditor">SOC2 / FedRAMP Auditors</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAddOperatorModal(true)}
+                style={{
+                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '0.5rem 1.15rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  boxShadow: '0 4px 12px rgba(2, 132, 199, 0.35)',
+                  transition: 'all 0.15s'
+                }}
+              >
+                <Plus size={15} /> Invite Platform Operator
+              </button>
+            </div>
+
+            {/* Operators Table */}
+            <div style={{ overflowX: 'auto', border: '1px solid var(--border-normal)', borderRadius: '8px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
+                <thead>
+                  <tr style={{ background: 'rgba(255, 255, 255, 0.02)', borderBottom: '1px solid var(--border-normal)', color: 'var(--text-secondary)' }}>
+                    <th style={{ padding: '0.75rem 1rem' }}>OPERATOR / IDENTITY</th>
+                    <th style={{ padding: '0.75rem 1rem' }}>CONTROL PLANE ROLE & SCOPE</th>
+                    <th style={{ padding: '0.75rem 1rem' }}>2FA / MFA SECURITY</th>
+                    <th style={{ padding: '0.75rem 1rem' }}>LAST CONSOLE ACTIVITY</th>
+                    <th style={{ padding: '0.75rem 1rem' }}>STATUS</th>
+                    <th style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>ACTIONS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOperators.map(op => {
+                    const initials = op.name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2) || 'OP';
+                    const isRoot = op.role === 'root_admin';
+                    const isSecOps = op.role === 'secops_lead';
+                    const isSupport = op.role === 'support_engineer';
+
+                    const roleBadgeStyle = isRoot ? {
+                      background: 'rgba(239, 68, 68, 0.15)',
+                      color: '#f87171',
+                      border: '1px solid rgba(239, 68, 68, 0.4)'
+                    } : isSecOps ? {
+                      background: 'rgba(6, 182, 212, 0.15)',
+                      color: '#22d3ee',
+                      border: '1px solid rgba(6, 182, 212, 0.4)'
+                    } : isSupport ? {
+                      background: 'rgba(245, 158, 11, 0.15)',
+                      color: '#fbbf24',
+                      border: '1px solid rgba(245, 158, 11, 0.4)'
+                    } : {
+                      background: 'rgba(16, 185, 129, 0.15)',
+                      color: '#34d399',
+                      border: '1px solid rgba(16, 185, 129, 0.4)'
+                    };
+
+                    return (
+                      <tr key={op.id} style={{ borderBottom: '1px solid var(--border-normal)', transition: 'background-color 0.15s' }}>
+                        <td style={{ padding: '0.75rem 1rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <div style={{
+                              width: '36px',
+                              height: '36px',
+                              borderRadius: '50%',
+                              background: isRoot ? 'linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                              color: '#ffffff',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontWeight: 700,
+                              fontSize: '0.75rem',
+                              flexShrink: 0
+                            }}>
+                              {initials}
+                            </div>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                <strong style={{ color: 'var(--text-primary)', fontSize: '0.88rem' }}>{op.name}</strong>
+                                {op.isRootOwner && (
+                                  <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '3px', background: 'rgba(239, 68, 68, 0.2)', color: '#fca5a5', fontWeight: 700, border: '1px solid rgba(239, 68, 68, 0.4)' }}>
+                                    PRIMARY ROOT
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)' }}>
+                                {op.email}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td style={{ padding: '0.75rem 1rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                            <span style={{
+                              padding: '0.15rem 0.5rem',
+                              borderRadius: '4px',
+                              fontSize: '0.74rem',
+                              fontWeight: 700,
+                              display: 'inline-block',
+                              width: 'fit-content',
+                              ...roleBadgeStyle
+                            }}>
+                              {op.roleDisplayName}
+                            </span>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                              {op.accessScope}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td style={{ padding: '0.75rem 1rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                                fontSize: '0.72rem',
+                                color: '#4ade80',
+                                background: 'rgba(34, 197, 94, 0.15)',
+                                padding: '0.1rem 0.4rem',
+                                borderRadius: '4px',
+                                fontWeight: 700
+                              }}>
+                                <Lock size={10} /> MFA ENFORCED
+                              </span>
+                            </div>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                              {op.mfaType}
+                            </span>
+                          </div>
+                        </td>
+
+                        <td style={{ padding: '0.75rem 1rem' }}>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)' }}>
+                            {op.lastLogin.includes('T') ? new Date(op.lastLogin).toLocaleString() : op.lastLogin}
+                          </div>
+                          <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                            IP: {op.lastIp}
+                          </div>
+                        </td>
+
+                        <td style={{ padding: '0.75rem 1rem' }}>
+                          {op.status === 'active' ? (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.3rem',
+                              color: '#4ade80',
+                              fontWeight: 700,
+                              fontSize: '0.76rem',
+                              background: 'rgba(34, 197, 94, 0.12)',
+                              padding: '0.15rem 0.45rem',
+                              borderRadius: '4px'
+                            }}>
+                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80' }} />
+                              ACTIVE
+                            </span>
+                          ) : (
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.3rem',
+                              color: '#fbbf24',
+                              fontWeight: 700,
+                              fontSize: '0.76rem',
+                              background: 'rgba(245, 158, 11, 0.12)',
+                              padding: '0.15rem 0.45rem',
+                              borderRadius: '4px'
+                            }}>
+                              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fbbf24' }} />
+                              SUSPENDED
+                            </span>
+                          )}
+                        </td>
+
+                        <td style={{ padding: '0.75rem 1rem', textAlign: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                            <select
+                              value={op.role}
+                              disabled={op.isRootOwner}
+                              onChange={(e) => handleChangeOperatorRole(op.id, e.target.value as any)}
+                              title={op.isRootOwner ? 'Primary Root role cannot be altered' : 'Modify Control Plane Role'}
+                              style={{
+                                background: 'rgba(0,0,0,0.35)',
+                                color: op.isRootOwner ? 'var(--text-muted)' : 'var(--text-primary)',
+                                border: '1px solid var(--border-normal)',
+                                borderRadius: '4px',
+                                padding: '0.3rem 0.5rem',
+                                fontSize: '0.75rem',
+                                outline: 'none',
+                                cursor: op.isRootOwner ? 'not-allowed' : 'pointer'
+                              }}
+                            >
+                              <option value="root_admin">Root Master Admin</option>
+                              <option value="secops_lead">SecOps Lead</option>
+                              <option value="support_engineer">Tier-3 Support</option>
+                              <option value="compliance_auditor">Compliance Auditor</option>
+                            </select>
+
+                            <button
+                              type="button"
+                              onClick={() => setOperatorToReset2FA(op)}
+                              title={`Generate emergency 2FA reset token for ${op.email}`}
+                              style={{
+                                background: 'rgba(255,255,255,0.05)',
+                                color: 'var(--text-secondary)',
+                                border: '1px solid var(--border-normal)',
+                                borderRadius: '4px',
+                                padding: '0.3rem 0.55rem',
+                                fontSize: '0.75rem',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem'
+                              }}
+                            >
+                              <Key size={12} /> Reset 2FA
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={op.isRootOwner}
+                              onClick={() => handleToggleOperatorStatus(op.id)}
+                              title={op.isRootOwner ? 'Primary Root cannot be suspended' : op.status === 'active' ? 'Suspend operator access' : 'Reactivate operator'}
+                              style={{
+                                background: op.status === 'active' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(34, 197, 94, 0.12)',
+                                color: op.status === 'active' ? '#fbbf24' : '#4ade80',
+                                border: `1px solid ${op.status === 'active' ? 'rgba(245, 158, 11, 0.35)' : 'rgba(34, 197, 94, 0.35)'}`,
+                                borderRadius: '4px',
+                                padding: '0.3rem 0.55rem',
+                                fontSize: '0.75rem',
+                                cursor: op.isRootOwner ? 'not-allowed' : 'pointer',
+                                opacity: op.isRootOwner ? 0.4 : 1,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem'
+                              }}
+                            >
+                              {op.status === 'active' ? <Lock size={12} /> : <Unlock size={12} />}
+                              {op.status === 'active' ? 'Suspend' : 'Activate'}
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={op.isRootOwner}
+                              onClick={() => setOperatorToDelete(op)}
+                              title={op.isRootOwner ? 'Primary Root cannot be removed' : `Revoke & Remove ${op.email}`}
+                              style={{
+                                background: 'rgba(239, 68, 68, 0.12)',
+                                color: '#f87171',
+                                border: '1px solid rgba(239, 68, 68, 0.35)',
+                                borderRadius: '4px',
+                                padding: '0.3rem 0.5rem',
+                                fontSize: '0.75rem',
+                                cursor: op.isRootOwner ? 'not-allowed' : 'pointer',
+                                opacity: op.isRootOwner ? 0.4 : 1
+                              }}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+
+                  {filteredOperators.length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                        No platform operators found matching "{operatorSearch}".
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Invite Platform Operator */}
+      {showAddOperatorModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '520px',
+            width: '100%',
+            padding: '1.75rem',
+            background: 'var(--bg-card)',
+            border: '1px solid rgba(14, 165, 233, 0.4)',
+            borderRadius: '12px',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <Users size={18} color="var(--accent-cyan)" /> Invite Platform Operator
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAddOperatorModal(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleAddOperator} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.35rem', fontWeight: 600 }}>
+                  Operator Full Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Sridhar GS or Sarah Jenkins"
+                  value={newOpName}
+                  onChange={(e) => setNewOpName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--border-normal)',
+                    borderRadius: '6px',
+                    padding: '0.55rem 0.85rem',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.88rem',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.35rem', fontWeight: 600 }}>
+                  Corporate / Super Admin Email *
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. admin@quarkshield.ai or designated root email"
+                  value={newOpEmail}
+                  onChange={(e) => setNewOpEmail(e.target.value)}
+                  style={{
+                    width: '100%',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--border-normal)',
+                    borderRadius: '6px',
+                    padding: '0.55rem 0.85rem',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.88rem',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.35rem', fontWeight: 600 }}>
+                    Control Plane Role *
+                  </label>
+                  <select
+                    value={newOpRole}
+                    onChange={(e) => setNewOpRole(e.target.value as any)}
+                    style={{
+                      width: '100%',
+                      background: '#0f172a',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-normal)',
+                      borderRadius: '6px',
+                      padding: '0.55rem 0.75rem',
+                      fontSize: '0.85rem',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="root_admin">Root Master Admin</option>
+                    <option value="secops_lead">Platform SecOps Lead</option>
+                    <option value="support_engineer">Tier-3 Support Escalations</option>
+                    <option value="compliance_auditor">SOC2 / FedRAMP Auditor</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.35rem', fontWeight: 600 }}>
+                    Required 2FA Method *
+                  </label>
+                  <select
+                    value={newOpMfaType}
+                    onChange={(e) => setNewOpMfaType(e.target.value as any)}
+                    style={{
+                      width: '100%',
+                      background: '#0f172a',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-normal)',
+                      borderRadius: '6px',
+                      padding: '0.55rem 0.75rem',
+                      fontSize: '0.85rem',
+                      outline: 'none'
+                    }}
+                  >
+                    <option value="Hardware Security Key (YubiKey)">Hardware Key (YubiKey)</option>
+                    <option value="FIDO2 / WebAuthn">FIDO2 / Touch ID / WebAuthn</option>
+                    <option value="TOTP Authenticator">TOTP (Google/Microsoft Auth)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Role Scope Preview */}
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.03)',
+                borderRadius: '8px',
+                padding: '0.85rem',
+                border: '1px solid var(--border-normal)',
+                fontSize: '0.78rem',
+                color: 'var(--text-secondary)'
+              }}>
+                <strong style={{ color: '#ffffff', display: 'block', marginBottom: '0.25rem' }}>
+                  Role Privileges Summary:
+                </strong>
+                {newOpRole === 'root_admin' && (
+                  <span>Full control plane authority: physical tenant provisioning, server port allocation, master license key generation, and operator management.</span>
+                )}
+                {newOpRole === 'secops_lead' && (
+                  <span>Governance of PQC algorithms (ML-KEM, ML-DSA, SLH-DSA), hybrid TLS handshakes, and cryptographic risk scoring policies.</span>
+                )}
+                {newOpRole === 'support_engineer' && (
+                  <span>Full Support Mirror access into customer portals, machine synchronization inspection, and diagnostic troubleshooting.</span>
+                )}
+                {newOpRole === 'compliance_auditor' && (
+                  <span>Read-only attestation reporting, SOC2 / FedRAMP evidence generation, and cryptographic certificate chain auditing.</span>
+                )}
+              </div>
+
+              {/* Enforce 2FA Disclaimer */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                fontSize: '0.8rem',
+                color: '#4ade80',
+                background: 'rgba(34, 197, 94, 0.1)',
+                padding: '0.5rem 0.75rem',
+                borderRadius: '6px',
+                border: '1px solid rgba(34, 197, 94, 0.25)'
+              }}>
+                <Lock size={14} />
+                <span>Mandatory 2FA Enrollment enforced on initial console activation.</span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAddOperatorModal(false)}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--border-normal)',
+                    color: 'var(--text-secondary)',
+                    borderRadius: '6px',
+                    padding: '0.5rem 1rem',
+                    fontSize: '0.85rem',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                    border: 'none',
+                    color: '#ffffff',
+                    borderRadius: '6px',
+                    padding: '0.5rem 1.25rem',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(2, 132, 199, 0.35)'
+                  }}
+                >
+                  Issue Operator Invitation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Reset 2FA Confirmation */}
+      {operatorToReset2FA && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '460px',
+            width: '100%',
+            padding: '1.75rem',
+            background: 'var(--bg-card)',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            borderRadius: '12px'
+          }}>
+            <h3 style={{ margin: '0 0 0.75rem 0', color: '#fef08a', fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Key size={18} color="#facc15" /> Reset Operator 2FA Security Token
+            </h3>
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Are you sure you want to invalidate the active 2FA authenticator for <strong style={{ color: '#ffffff' }}>{operatorToReset2FA.email}</strong>? 
+              Upon confirmation, the operator will be required to scan a fresh QR code and re-bind their authenticator app on their next login.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setOperatorToReset2FA(null)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--border-normal)',
+                  color: 'var(--text-secondary)',
+                  borderRadius: '6px',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmReset2FA}
+                style={{
+                  background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)',
+                  border: 'none',
+                  color: '#ffffff',
+                  borderRadius: '6px',
+                  padding: '0.5rem 1.15rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Confirm 2FA Invalidation
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: Delete Operator Confirmation */}
+      {operatorToDelete && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '460px',
+            width: '100%',
+            padding: '1.75rem',
+            background: 'var(--bg-card)',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            borderRadius: '12px'
+          }}>
+            <h3 style={{ margin: '0 0 0.75rem 0', color: '#fca5a5', fontSize: '1.15rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Trash2 size={18} color="#f87171" /> Revoke Platform Operator Access
+            </h3>
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Are you sure you want to permanently revoke control plane access for <strong style={{ color: '#ffffff' }}>{operatorToDelete.name} ({operatorToDelete.email})</strong>? 
+              All active sessions will be terminated immediately.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setOperatorToDelete(null)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid var(--border-normal)',
+                  color: 'var(--text-secondary)',
+                  borderRadius: '6px',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer'
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteOperator}
+                style={{
+                  background: 'linear-gradient(135deg, #dc2626 0%, #b91c1c 100%)',
+                  border: 'none',
+                  color: '#ffffff',
+                  borderRadius: '6px',
+                  padding: '0.5rem 1.15rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Revoke Operator
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

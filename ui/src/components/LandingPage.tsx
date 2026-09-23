@@ -46,12 +46,16 @@ import {
   GitBranch,
   Presentation,
   LogOut,
-  User
+  User,
+  CreditCard,
+  Star,
+  ChevronUp
 } from 'lucide-react';
 import HelpFeedbackWidget from './HelpFeedbackWidget';
+import MoscaMigrationPlanner from './MoscaMigrationPlanner';
 
 interface LandingPageProps {
-  onLaunchConsole: (initialTab?: 'dashboard' | 'cbom' | 'tokens' | 'git' | 'admin', userEmail?: string) => void;
+  onLaunchConsole: (initialTab?: 'dashboard' | 'cbom' | 'tokens' | 'git' | 'admin' | 'planner', userEmail?: string) => void;
 }
 
 interface ProbeResult {
@@ -103,10 +107,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [policyModal, setPolicyModal] = useState<'privacy' | 'terms' | 'disclosure' | null>(null);
   const [guideModal, setGuideModal] = useState<'overview' | 'windows' | 'mac' | 'linux' | null>(null);
+  const [showCareerModal, setShowCareerModal] = useState(false);
+  const [showSupportModal, setShowSupportModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [resourcesDropdownOpen, setResourcesDropdownOpen] = useState(false);
   const resourcesDropdownRef = useRef<HTMLDivElement>(null);
   const resourcesDropdownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // FAQ accordion state
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(0);
+  const toggleFaq = (index: number) => {
+    setOpenFaqIndex(prev => prev === index ? null : index);
+  };
 
 
 
@@ -202,6 +214,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
         setShowSignInModal(false);
         setPolicyModal(null);
         setGuideModal(null);
+        setShowCareerModal(false);
+        setShowSupportModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -761,14 +775,85 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                       </div>
                     </div>
                   </a>
+
+                  <a 
+                    href="#planner" 
+                    className="resources-dropdown-item"
+                    onClick={() => setResourcesDropdownOpen(false)}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'linear-gradient(135deg, rgba(0, 242, 254, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)',
+                      border: '1px solid rgba(0, 242, 254, 0.4)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-cyan)',
+                      flexShrink: 0
+                    }}>
+                      <Calendar size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        Mosca&apos;s Migration Planner
+                        <span style={{ fontSize: '0.64rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>X+Y&gt;Z</span>
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Interactive timeline modeling &amp; organizational risk horizons
+                      </div>
+                    </div>
+                  </a>
+
+                  <a 
+                    href="#faq" 
+                    className="resources-dropdown-item"
+                    onClick={() => setResourcesDropdownOpen(false)}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'rgba(168, 85, 247, 0.12)',
+                      border: '1px solid rgba(168, 85, 247, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#c084fc',
+                      flexShrink: 0
+                    }}>
+                      <HelpCircle size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.15rem' }}>
+                        Post-Quantum FAQs
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Keys &amp; zero-exfiltration, Shor&apos;s algorithm, HNDL &amp; OS trust roots
+                      </div>
+                    </div>
+                  </a>
                 </div>
               )}
             </div>
+
+            {/* Migration Planner Link */}
+            <a href="#planner" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <Calendar size={14} />
+              Migration Planner
+            </a>
 
             {/* Downloads Link */}
             <a href="#downloads" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
               <Download size={14} />
               Downloads
+            </a>
+
+            {/* Pricing Link */}
+            <a href="#pricing" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <CreditCard size={14} />
+              Pricing
             </a>
 
             {/* Careers */}
@@ -785,9 +870,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
           </nav>
 
           {/* Header Action Buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button
               onClick={() => setShowSignInModal(true)}
+              className="btn-header-console"
               style={{
                 background: 'linear-gradient(135deg, rgba(127, 0, 255, 0.35) 0%, rgba(0, 242, 254, 0.25) 100%)',
                 border: '1px solid rgba(0, 242, 254, 0.4)',
@@ -807,24 +893,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <Lock size={14} color="var(--accent-cyan)" /> Console Sign In
             </button>
 
-            {/* Mobile Menu Toggle Button */}
+            {/* Mobile Menu Toggle Button (44x44px accessible touch target) */}
             <button
               className="mobile-nav-toggle"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               style={{
-                background: 'none',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                borderRadius: '6px',
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.18)',
+                borderRadius: '8px',
                 color: '#ffffff',
-                padding: '0.5rem',
+                width: '44px',
+                height: '44px',
+                minWidth: '44px',
+                minHeight: '44px',
+                padding: 0,
                 cursor: 'pointer',
                 display: 'none',
                 alignItems: 'center',
-                justifyContent: 'center'
+                justifyContent: 'center',
+                flexShrink: 0
               }}
               aria-label="Toggle navigation"
             >
-              {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
+              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
         </div>
@@ -886,13 +977,34 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
             >
               <Radio size={15} color="#10b981" /> CNSA 2.0 &amp; PQC Intel
             </a>
+            <a 
+              href="#faq" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.92rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <HelpCircle size={15} color="#c084fc" /> Post-Quantum FAQs
+            </a>
             <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '0.2rem 0' }} />
+            <a 
+              href="#planner" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <Calendar size={16} color="var(--accent-cyan)" /> Mosca&apos;s Migration Planner
+            </a>
             <a 
               href="#downloads" 
               onClick={() => setMobileMenuOpen(false)}
               style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
             >
               <Download size={16} color="var(--accent-cyan)" /> Downloads
+            </a>
+            <a 
+              href="#pricing" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <CreditCard size={16} color="var(--accent-cyan)" /> Pricing &amp; Commercial Plans
             </a>
             <a 
               href="#careers" 
@@ -925,15 +1037,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       </header>
 
       {/* 2. HERO SECTION */}
-      <section style={{
-        padding: '2.5rem 2rem 2rem 2rem',
+      <section className="landing-hero-section" style={{
+        padding: 'calc(75px + 2.5rem) 1.5rem 2.5rem 1.5rem',
         maxWidth: '1200px',
         margin: '0 auto',
         textAlign: 'center',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        gap: '1.8rem'
+        gap: '1.8rem',
+        width: '100%'
       }}>
         <div style={{
           display: 'inline-flex',
@@ -945,38 +1058,44 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
           border: '1px solid rgba(127, 0, 255, 0.35)',
           fontSize: '0.82rem',
           color: '#c084fc',
-          fontWeight: 600
+          fontWeight: 600,
+          maxWidth: '100%',
+          flexWrap: 'wrap',
+          justifyContent: 'center'
         }}>
           <Zap size={14} color="#00f2fe" />
-          <span>Post-Quantum Cryptography Discovery & Fleet Vulnerability Management</span>
+          <span>Post-Quantum Cryptography Discovery &amp; Fleet Vulnerability Management</span>
         </div>
 
         <h1 style={{
-          fontSize: '3.6rem',
+          fontSize: 'clamp(2.1rem, 4.5vw, 3.2rem)',
           fontWeight: 800,
-          lineHeight: 1.15,
-          letterSpacing: '-0.03em',
+          lineHeight: 1.2,
+          letterSpacing: '-0.015em',
+          textWrap: 'balance',
           maxWidth: '960px',
           background: 'linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%)',
           WebkitBackgroundClip: 'text',
           WebkitTextFillColor: 'transparent'
         }}>
-          Continuous Cryptographic BOM & Active Quantum Threat Defense
+          Continuous Cryptographic BOM &amp; Active Quantum Threat Defense
         </h1>
 
         <p style={{
-          fontSize: '1.2rem',
+          fontSize: 'clamp(1rem, 2vw, 1.18rem)',
           color: 'var(--text-secondary)',
           maxWidth: '860px',
-          lineHeight: 1.65
+          lineHeight: 1.65,
+          textWrap: 'balance'
         }}>
           Enterprise Cryptographic Observability and automated Cryptographic Bill of Materials (CBOM) orchestration. Engineered to safeguard national security systems and distributed IT infrastructure against Harvest Now, Decrypt Later (HNDL) quantum threats.
         </p>
 
-        {/* Hero CTA Row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.2rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '0.5rem' }}>
+        {/* Hero CTA Row - Clear Primary / Secondary / Tertiary Hierarchy */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '0.5rem' }}>
+          {/* Primary CTA */}
           <a
-            href="#prober"
+            href="#downloads"
             style={{
               background: 'linear-gradient(135deg, #00f2fe 0%, #0984e3 100%)',
               color: '#06080d',
@@ -988,17 +1107,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               display: 'flex',
               alignItems: 'center',
               gap: '0.6rem',
-              boxShadow: '0 0 24px rgba(0, 242, 254, 0.4)'
+              boxShadow: '0 0 24px rgba(0, 242, 254, 0.45)',
+              transition: 'all 0.2s ease'
             }}
           >
-            <Zap size={18} /> Test Outbound TLS Probe <ArrowRight size={16} />
+            <Download size={18} /> Download Desktop Scanner
           </a>
 
+          {/* Secondary CTA */}
           <a
-            href="#downloads"
+            href="#prober"
             style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(0, 242, 254, 0.35)',
+              background: 'rgba(0, 242, 254, 0.08)',
+              border: '1px solid rgba(0, 242, 254, 0.4)',
               color: 'var(--accent-cyan)',
               padding: '0.9rem 2.2rem',
               borderRadius: '8px',
@@ -1008,12 +1129,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               display: 'flex',
               alignItems: 'center',
               gap: '0.6rem',
-              transition: 'all 0.2s'
+              transition: 'all 0.2s ease'
             }}
           >
-            <Download size={18} /> Download Desktop Scanner
+            <Zap size={18} /> Test Outbound TLS Probe <ArrowRight size={16} />
           </a>
 
+          {/* Tertiary CTA Link */}
           <button
             onClick={() => {
               const hasUser = localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user');
@@ -1024,84 +1146,83 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               }
             }}
             style={{
-              background: 'rgba(168, 85, 247, 0.15)',
-              border: '1px solid rgba(168, 85, 247, 0.45)',
+              background: 'transparent',
+              border: '1px solid rgba(168, 85, 247, 0.35)',
               color: '#c084fc',
-              padding: '0.9rem 2.2rem',
+              padding: '0.9rem 1.8rem',
               borderRadius: '8px',
-              fontSize: '1rem',
+              fontSize: '0.98rem',
               fontWeight: 600,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
               gap: '0.6rem',
-              transition: 'all 0.2s',
-              boxShadow: '0 0 18px rgba(168, 85, 247, 0.2)'
+              transition: 'all 0.2s ease'
             }}
           >
-            <GitBranch size={18} /> Audit Git Repos (GitHub / Bitbucket)
+            <GitBranch size={17} /> Audit Git Repos →
           </button>
         </div>
 
         {/* Feature Badges Grid */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
           gap: '1.25rem',
           width: '100%',
-          marginTop: '2.5rem'
+          marginTop: '2rem'
         }}>
-          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '10px' }}>
+          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '12px', minWidth: 0 }}>
             <div style={{ color: 'var(--accent-cyan)', marginBottom: '0.5rem' }}><FileCode size={22} /></div>
             <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: '#ffffff' }}>CycloneDX 1.6 CBOM</h4>
-            <p style={{ fontSize: '0.82rem', margin: 0, color: 'var(--text-secondary)' }}>
+            <p style={{ fontSize: '0.84rem', margin: 0, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
               Standardized Cryptographic Bill of Materials covering RSA, ECC, OpenSSH, certificates, and keys.
             </p>
           </div>
 
-          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '10px' }}>
+          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '12px', minWidth: 0 }}>
             <div style={{ color: '#c084fc', marginBottom: '0.5rem' }}><Activity size={22} /></div>
             <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: '#ffffff' }}>Active Outbound TLS Probe</h4>
-            <p style={{ fontSize: '0.82rem', margin: 0, color: 'var(--text-secondary)' }}>
+            <p style={{ fontSize: '0.84rem', margin: 0, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
               Direct TLS 1.3 socket handshake inspection checking for X25519MLKEM768 hybrid key encapsulation.
             </p>
           </div>
 
-          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '10px' }}>
+          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '12px', minWidth: 0 }}>
             <div style={{ color: 'var(--status-secure)', marginBottom: '0.5rem' }}><Laptop size={22} /></div>
             <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: '#ffffff' }}>Multi-OS Fleet Discovery</h4>
-            <p style={{ fontSize: '0.82rem', margin: 0, color: 'var(--text-secondary)' }}>
-              Cross-platform agents for Windows, macOS (Apple Silicon & Intel), and Linux cloud servers.
+            <p style={{ fontSize: '0.84rem', margin: 0, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Cross-platform agents for Windows, macOS (Apple Silicon &amp; Intel), and Linux cloud servers.
             </p>
           </div>
 
-          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '10px' }}>
+          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '12px', minWidth: 0 }}>
             <div style={{ color: '#38bdf8', marginBottom: '0.5rem' }}><ShieldCheck size={22} /></div>
             <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: '#ffffff' }}>Isolated Pod Subdomains</h4>
-            <p style={{ fontSize: '0.82rem', margin: 0, color: 'var(--text-secondary)' }}>
-              Dedicated tenant spaces at <code style={{ color: 'var(--accent-cyan)' }}>https://&lt;tenant&gt;.quarkshield.ai</code> with in-tenant RBAC & 2FA.
+            <p style={{ fontSize: '0.84rem', margin: 0, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Dedicated tenant spaces at <code style={{ color: 'var(--accent-cyan)', wordBreak: 'break-all', display: 'inline-block' }}>https://&lt;tenant&gt;.quarkshield.ai</code> with in-tenant RBAC &amp; 2FA.
             </p>
           </div>
         </div>
       </section>
 
       {/* 3. ACTIVE OUTBOUND TLS PROBER INTERACTIVE WIDGET */}
-      <section id="prober" style={{
-        padding: '2rem 2rem',
-        background: 'rgba(13, 19, 33, 0.45)',
+      <section id="prober" className="landing-section" style={{
+        padding: '2.5rem 1.5rem',
+        background: 'rgba(13, 19, 33, 0.65)',
         borderTop: '1px solid rgba(255, 255, 255, 0.06)',
         borderBottom: '1px solid rgba(255, 255, 255, 0.06)'
       }}>
-        <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem', width: '100%' }}>
           
           <div style={{ textAlign: 'center' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
               <Terminal size={16} /> Live Outbound TLS Network Prober
             </div>
-            <h2 style={{ fontSize: '2.4rem', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff' }}>
-              Inspect Public & Enterprise Endpoints for Quantum Vulnerability
+            <h2 style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.4rem)', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff', textWrap: 'balance' }}>
+              Inspect Public &amp; Enterprise Endpoints for Quantum Vulnerability
             </h2>
-            <p style={{ color: 'var(--text-secondary)', maxWidth: '720px', margin: '0 auto', fontSize: '1rem' }}>
+            <p style={{ color: 'var(--text-secondary)', maxWidth: '720px', margin: '0 auto', fontSize: '1rem', lineHeight: 1.6, textWrap: 'balance' }}>
               Establish a direct TLS 1.3 socket handshake with any host or port. Instantly verify if the server negotiates classical ECDHE (vulnerable to Harvest Now, Decrypt Later) or Post-Quantum ML-KEM-768 hybrid key exchange.
             </p>
           </div>
@@ -1323,7 +1444,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       {/* ========================================================================= */}
       {/* 4. CNSA 2.0 & POST-QUANTUM REGULATORY INTELLIGENCE (LIVE RADAR) */}
       {/* ========================================================================= */}
-      <section id="cnsa-news" style={{ padding: '2.5rem 2rem 2rem 2rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+      <section id="cnsa-news" className="landing-section" style={{ padding: '2.5rem 1.5rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
         <div style={{ textAlign: 'center', marginBottom: '1.8rem' }}>
           <div style={{
             display: 'inline-flex',
@@ -1343,8 +1464,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
             <Radio size={14} className="spin" style={{ animationDuration: '4s' }} />
             Live Regulatory Radar • NIST • NSA • White House OMB
           </div>
-          <h2 style={{ fontSize: '2.5rem', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff' }}>
-            Post-Quantum Regulatory Horizons & CNSA 2.0 Intelligence
+          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff', textWrap: 'balance' }}>
+            Post-Quantum Regulatory Horizons &amp; CNSA 2.0 Intelligence
           </h2>
           <p style={{ color: 'var(--text-secondary)', maxWidth: '780px', margin: '0 auto', fontSize: '1.05rem', lineHeight: 1.6 }}>
             Direct federal policy tracking, NIST FIPS releases, and enforcement deadlines for CISOs, defense suppliers, and enterprise cryptographers.
@@ -1570,22 +1691,40 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
         </div>
       </section>
 
+      {/* ========================================================================= */}
+      {/* 4B. MOSCA'S QUANTUM MIGRATION PLANNER (INTERACTIVE TIMELINE & MILESTONES) */}
+      {/* ========================================================================= */}
+      <section 
+        id="planner" 
+        className="landing-section" 
+        style={{ 
+          padding: '3.5rem 1.5rem', 
+          maxWidth: '1240px', 
+          margin: '0 auto', 
+          width: '100%',
+          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+          scrollMarginTop: '90px'
+        }}
+      >
+        <MoscaMigrationPlanner variant="landing" />
+      </section>
+
       {/* 5. MULTI-OS HOST AGENT DOWNLOAD SECTION */}
-      <section id="downloads" style={{ padding: '2.25rem 2rem 2rem 2rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+      <section id="downloads" className="landing-section" style={{ padding: '2.5rem 1.5rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
         <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
             <Download size={16} /> Multi-OS Host Scanners
           </div>
-          <h2 style={{ fontSize: '2.4rem', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff' }}>
+          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff', textWrap: 'balance' }}>
             Lightweight, Standalone Host Cryptographic Scanners
           </h2>
-          <p style={{ color: 'var(--text-secondary)', maxWidth: '720px', margin: '0 auto', fontSize: '1rem' }}>
+          <p style={{ color: 'var(--text-secondary)', maxWidth: '720px', margin: '0 auto', fontSize: '1rem', lineHeight: 1.6, textWrap: 'balance' }}>
             Zero third-party agent dependencies. Download compiled binaries or deploy via standard enterprise configuration tools (Intune, Jamf, Ansible, or GPO).
           </p>
         </div>
 
         {/* OS Selector Tabs */}
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
           <button
             onClick={() => setSelectedOS('windows')}
             style={{
@@ -1603,7 +1742,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               transition: 'all 0.2s'
             }}
           >
-            <Laptop size={16} /> Windows 10/11 & Server
+            <Laptop size={16} /> Windows 10/11 &amp; Server
           </button>
 
           <button
@@ -1623,7 +1762,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               transition: 'all 0.2s'
             }}
           >
-            <Laptop size={16} /> macOS (Apple Silicon & Intel)
+            <Laptop size={16} /> macOS (Apple Silicon &amp; Intel)
           </button>
 
           <button
@@ -1643,14 +1782,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               transition: 'all 0.2s'
             }}
           >
-            <Server size={16} /> Linux (Cloud & On-Prem)
+            <Server size={16} /> Linux (Cloud &amp; On-Prem)
           </button>
         </div>
 
         {/* Selected OS Details Panel */}
-        <div className="glass-panel" style={{ padding: '2rem', borderRadius: '12px', background: 'rgba(10, 15, 28, 0.85)' }}>
+        <div className="glass-panel" style={{ padding: '2rem', borderRadius: '12px', background: 'rgba(10, 15, 28, 0.85)', minWidth: 0 }}>
           {selectedOS === 'windows' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem', alignItems: 'center' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '2rem', alignItems: 'center' }}>
               <div>
                 <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: '#ffffff' }}>
                   QuarkShield Post-Quantum Guard for Windows
@@ -1721,7 +1860,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
 
               {/* Terminal Instructions */}
-              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>PowerShell One-Liner</span>
                   <button
@@ -1731,7 +1870,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     {copiedScript === 'win' ? <Check size={14} /> : <Copy size={14} />} {copiedScript === 'win' ? 'Copied' : 'Copy'}
                   </button>
                 </div>
-                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
 {`# 1. Download agent binary
 Invoke-WebRequest -Uri "https://quarkshield.ai/downloads/pqc-scanner-windows-amd64.exe" -OutFile "pqc-scanner.exe"
 
@@ -1743,7 +1882,7 @@ Invoke-WebRequest -Uri "https://quarkshield.ai/downloads/pqc-scanner-windows-amd
           )}
 
           {selectedOS === 'mac' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem', alignItems: 'center' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '2rem', alignItems: 'center' }}>
               <div>
                 <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: '#ffffff' }}>
                   QuarkShield Post-Quantum Guard for Mac
@@ -1855,7 +1994,7 @@ Invoke-WebRequest -Uri "https://quarkshield.ai/downloads/pqc-scanner-windows-amd
               </div>
 
               {/* Terminal Instructions */}
-              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Terminal Command</span>
                   <button
@@ -1865,7 +2004,7 @@ Invoke-WebRequest -Uri "https://quarkshield.ai/downloads/pqc-scanner-windows-amd
                     {copiedScript === 'mac' ? <Check size={14} /> : <Copy size={14} />} {copiedScript === 'mac' ? 'Copied' : 'Copy'}
                   </button>
                 </div>
-                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
 {`# 1. Download universal macOS scanner (Apple Silicon & Intel)
 curl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner-darwin-universal -o quarkshield-scanner
 
@@ -1880,7 +2019,7 @@ chmod +x quarkshield-scanner
           )}
 
           {selectedOS === 'linux' && (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '2rem', alignItems: 'center' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '2rem', alignItems: 'center' }}>
               <div>
                 <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: '#ffffff' }}>
                   QuarkShield Post-Quantum Guard for Linux
@@ -1951,7 +2090,7 @@ chmod +x quarkshield-scanner
               </div>
 
               {/* Terminal Instructions */}
-              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                   <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Instant Bash Installer</span>
                   <button
@@ -1961,7 +2100,7 @@ chmod +x quarkshield-scanner
                     {copiedScript === 'nix' ? <Check size={14} /> : <Copy size={14} />} {copiedScript === 'nix' ? 'Copied' : 'Copy'}
                   </button>
                 </div>
-                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
+                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
 {`# Auto-detects architecture, installs systemd service, and begins continuous telemetry
 curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
                 </pre>
@@ -2027,6 +2166,901 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
               <Lock size={16} color="var(--accent-cyan)" /> Console Sign In
             </button>
           </div>
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* 4. PRICING & COMMERCIAL PACKAGES SECTION                                  */}
+      {/* ========================================================================= */}
+      <section id="pricing" className="landing-section" style={{
+        padding: '3rem 1.5rem',
+        background: 'linear-gradient(180deg, rgba(8, 12, 22, 0.95) 0%, rgba(6, 8, 15, 0.98) 100%)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        position: 'relative'
+      }}>
+        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem', width: '100%' }}>
+          
+          {/* Section Header */}
+          <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.35rem 0.95rem',
+              borderRadius: '50px',
+              background: 'rgba(0, 242, 254, 0.1)',
+              border: '1px solid rgba(0, 242, 254, 0.3)',
+              color: 'var(--accent-cyan)',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
+            }}>
+              <CreditCard size={14} /> Predictable Commercial Licensing
+            </div>
+
+            <h2 style={{
+              fontSize: 'clamp(1.9rem, 3.8vw, 2.75rem)',
+              fontWeight: 800,
+              color: '#ffffff',
+              margin: 0,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.15,
+              textWrap: 'balance'
+            }}>
+              Pricing &amp; Commercial Packages
+            </h2>
+
+            <p style={{
+              fontSize: '1.05rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.6,
+              margin: 0,
+              textWrap: 'balance'
+            }}>
+              Predictable subscription tiers designed for rapid adoption, enterprise expansion, and MSP partners.
+            </p>
+          </div>
+
+          {/* Pricing Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 290px), 1fr))',
+            gap: '1.75rem',
+            alignItems: 'stretch'
+          }}>
+
+            {/* Card 1: ENTRY */}
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.75)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: '12px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderLeft: '5px solid #38bdf8',
+              padding: '2rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              height: '100%',
+              minWidth: 0,
+              position: 'relative',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              transition: 'transform 0.2s, box-shadow 0.2s'
+            }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.01em' }}>
+                    ENTRY — PQC Assessment
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.6rem', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                    BASELINE
+                  </span>
+                </div>
+
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>$300</span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>/month</span>
+                    <span style={{ fontSize: '0.92rem', color: '#38bdf8', fontWeight: 600, marginLeft: '0.25rem' }}>(5 seats)</span>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                  Five endpoint licenses, unlimited local scans. Executive Quantum Risk Score, migration roadmap, and baseline CBOM JSON. Best for initial baseline audit and board-level reporting.
+                </p>
+
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1.25rem', marginBottom: '1.75rem', marginTop: 'auto' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '0.85rem' }}>
+                    Package Inclusions
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> 5 Workstation / Server endpoint licenses
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> Unlimited local-first cryptographic audits
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> Executive Quantum Risk Score &amp; letter grade
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> CycloneDX 1.6 baseline CBOM JSON export
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> Board-level PQC migration roadmap
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> Zero-exfiltration local audit guarantee
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSignInModal(true)}
+                style={{
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                  color: '#ffffff',
+                  padding: '0.85rem',
+                  borderRadius: '8px',
+                  fontSize: '0.95rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  transition: 'all 0.2s',
+                  marginTop: '1rem'
+                }}
+              >
+                Start Assessment <ArrowRight size={16} />
+              </button>
+            </div>
+
+            {/* Card 2: SCALE (Most Popular) */}
+            <div style={{
+              background: 'linear-gradient(160deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: '12px',
+              border: '1.5px solid rgba(245, 158, 11, 0.55)',
+              borderLeft: '5px solid #f59e0b',
+              padding: '2rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              height: '100%',
+              minWidth: 0,
+              position: 'relative',
+              boxShadow: '0 0 30px rgba(245, 158, 11, 0.15)',
+              transition: 'transform 0.2s, box-shadow 0.2s'
+            }}>
+              {/* Popular Badge */}
+              <div style={{
+                position: 'absolute',
+                top: '-12px',
+                right: '20px',
+                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                color: '#000000',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                padding: '0.25rem 0.75rem',
+                borderRadius: '50px',
+                letterSpacing: '0.04em',
+                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.4)'
+              }}>
+                ⭐ MOST POPULAR
+              </div>
+
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.01em' }}>
+                    SCALE — Growth Fleet
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.6rem', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)' }}>
+                    GROWTH
+                  </span>
+                </div>
+
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>$2,500</span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>/Month</span>
+                    <span style={{ fontSize: '0.92rem', color: '#fbbf24', fontWeight: 600, marginLeft: '0.25rem' }}>Up to 50 endpoints</span>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                  Cloud Fleet Central Plane, real-time telemetry, automated drift detection, continuous CycloneDX 1.6 CBOM and CSV export, group enrollment tokens, and email alerts.
+                </p>
+
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1.25rem', marginBottom: '1.75rem', marginTop: 'auto' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '0.85rem' }}>
+                    Package Inclusions
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Up to 50 monitored fleet endpoints
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Cloud Fleet Central Plane &amp; tenant orchestration
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Automated cryptographic drift detection
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Continuous CycloneDX 1.6 CBOM &amp; CSV export
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Group enrollment tokens for Intune / Jamf MDM
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Real-time email &amp; webhook compliance alerts
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSignInModal(true)}
+                style={{
+                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                  border: 'none',
+                  color: '#000000',
+                  padding: '0.85rem',
+                  borderRadius: '8px',
+                  fontSize: '0.95rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  boxShadow: '0 4px 15px rgba(245, 158, 11, 0.35)',
+                  transition: 'all 0.2s',
+                  marginTop: '1rem'
+                }}
+              >
+                Deploy Growth Fleet <ArrowRight size={16} />
+              </button>
+            </div>
+
+            {/* Card 3: ENTERPRISE */}
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.75)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: '12px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderLeft: '5px solid #a855f7',
+              padding: '2rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              height: '100%',
+              minWidth: 0,
+              position: 'relative',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              transition: 'transform 0.2s, box-shadow 0.2s'
+            }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.01em' }}>
+                    ENTERPRISE — Enterprise Pro
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.6rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+                    ENTERPRISE
+                  </span>
+                </div>
+
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>$10,000</span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>/month</span>
+                    <span style={{ fontSize: '0.92rem', color: '#c084fc', fontWeight: 600, marginLeft: '0.25rem' }}>· Up to 250 endpoints</span>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                  Remote Git scanner (GitHub/Bitbucket), full QS Copilot AI with offline/SCIF support, dedicated tenant subdomain, 2FA policies, and senior cryptographic engineering support.
+                </p>
+
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1.25rem', marginBottom: '1.75rem', marginTop: 'auto' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '0.85rem' }}>
+                    Package Inclusions
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Up to 250 hybrid enterprise endpoints
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Remote Git scanner (GitHub / GitLab / Bitbucket)
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Full QS Copilot AI with offline &amp; SCIF support
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Dedicated tenant subdomain &amp; isolated container channel
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Enterprise 2FA &amp; role-based access policies
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Senior cryptographic engineering advisory support
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowSignInModal(true)}
+                style={{
+                  background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(127, 0, 255, 0.3) 100%)',
+                  border: '1px solid rgba(168, 85, 247, 0.5)',
+                  color: '#ffffff',
+                  padding: '0.85rem',
+                  borderRadius: '8px',
+                  fontSize: '0.95rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  transition: 'all 0.2s',
+                  marginTop: '1rem'
+                }}
+              >
+                Upgrade to Enterprise Pro <ArrowRight size={16} />
+              </button>
+            </div>
+
+          </div>
+
+          {/* Horizontal Rectangle Card: MSP & MIGRATION PARTNER */}
+          <div style={{
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 23, 42, 0.95) 100%)',
+            backdropFilter: 'blur(12px)',
+            borderRadius: '14px',
+            border: '1.5px solid rgba(16, 185, 129, 0.35)',
+            borderLeft: '6px solid #10b981',
+            padding: '2.25rem',
+            boxShadow: '0 10px 35px rgba(0, 0, 0, 0.35)',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))',
+            gap: '2.25rem',
+            alignItems: 'center'
+          }}>
+            {/* Left Col: Title, Pricing, Overview */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, padding: '0.25rem 0.65rem', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.18)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.35)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  PARTNER ECOSYSTEM
+                </span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  For MSPs, MSSPs &amp; Consultancies
+                </span>
+              </div>
+
+              <h3 style={{ fontSize: '1.45rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.02em' }}>
+                MSP &amp; Migration Partner
+              </h3>
+
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.45rem' }}>
+                <span style={{ fontSize: '1.9rem', fontWeight: 900, color: '#ffffff' }}>Custom Volume</span>
+                <span style={{ fontSize: '1.05rem', color: '#34d399', fontWeight: 700 }}>Pricing</span>
+              </div>
+
+              <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Multi-tenant partner console, pooled license pools (500–2,500+ seats), white-labeled executive PQC audit reports, and dedicated migration playbooks for customer distribution.
+              </p>
+            </div>
+
+            {/* Middle Col: Inclusions in 2 columns */}
+            <div style={{ borderLeft: '1px solid rgba(255, 255, 255, 0.08)', paddingLeft: '1.75rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '0.85rem' }}>
+                Partner Inclusions &amp; Privileges
+              </div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.65rem' }}>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Multi-tenant Partner Management Console
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Pooled license pools (500–2,500+ seats)
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> White-labeled executive audit reports (PDF &amp; DOCX)
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Dedicated migration playbooks for client delivery
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Priority partner API access &amp; SIEM webhooks
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Wholesale tiering margins &amp; co-selling enablement
+                </li>
+              </ul>
+            </div>
+
+            {/* Right Col: Action & Engagement */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'stretch', justifyContent: 'center' }}>
+              <a
+                href="mailto:partners@quarkshield.ai?subject=QuarkShield%20MSP%20%26%20Migration%20Partner%20Inquiry"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.35) 100%)',
+                  border: '1.5px solid rgba(16, 185, 129, 0.5)',
+                  color: '#ffffff',
+                  padding: '0.95rem 1.5rem',
+                  borderRadius: '8px',
+                  fontSize: '0.98rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  textDecoration: 'none',
+                  boxShadow: '0 4px 18px rgba(16, 185, 129, 0.25)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Inquire for Partner Licensing <ArrowRight size={16} />
+              </a>
+            </div>
+
+          </div>
+
+          {/* Pricing Note */}
+          <div style={{
+            textAlign: 'center',
+            padding: '1.25rem',
+            borderRadius: '8px',
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            color: 'var(--text-muted)',
+            fontSize: '0.88rem'
+          }}>
+            Need custom air-gapped on-premises licensing, government SCIF clearance, or custom endpoint counts? <a href="#support" style={{ color: 'var(--accent-cyan)', textDecoration: 'none', fontWeight: 600 }}>Contact our Federal &amp; Enterprise Solutions Team</a>.
+          </div>
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* 5. FREQUENTLY ASKED QUESTIONS (FAQ) SECTION                               */}
+      {/* ========================================================================= */}
+      <section id="faq" className="landing-section" style={{
+        padding: '3rem 1.5rem',
+        background: 'linear-gradient(180deg, rgba(6, 8, 15, 0.98) 0%, rgba(10, 16, 28, 0.95) 100%)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        position: 'relative'
+      }}>
+        <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem', width: '100%' }}>
+          
+          {/* Section Header */}
+          <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.35rem 0.95rem',
+              borderRadius: '50px',
+              background: 'rgba(168, 85, 247, 0.1)',
+              border: '1px solid rgba(168, 85, 247, 0.3)',
+              color: '#c084fc',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
+            }}>
+              <HelpCircle size={14} /> Frequently Asked Questions
+            </div>
+
+            <h2 style={{
+              fontSize: 'clamp(1.9rem, 3.8vw, 2.75rem)',
+              fontWeight: 800,
+              color: '#ffffff',
+              margin: 0,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.15,
+              textWrap: 'balance'
+            }}>
+              Post-Quantum Cryptography &amp; Platform FAQs
+            </h2>
+
+            <p style={{
+              fontSize: '1.05rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.6,
+              margin: 0,
+              textWrap: 'balance'
+            }}>
+              Essential guidance on cryptographic key discovery, zero-exfiltration privacy guarantees, Shor&apos;s algorithm vulnerabilities, and OS-level PQC readiness.
+            </p>
+          </div>
+
+          {/* FAQ Accordion List */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+            {/* Q1: What are Keys / Zero-Exfiltration */}
+            <div style={{
+              background: openFaqIndex === 0 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 0 ? '1px solid rgba(0, 242, 254, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(0)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 0 ? 'var(--accent-cyan)' : '#ffffff' }}>
+                  What are &quot;Keys&quot; in QuarkShield, and are my private keys ever uploaded or exfiltrated?
+                </span>
+                {openFaqIndex === 0 ? <ChevronUp size={20} color="var(--accent-cyan)" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 0 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    In QuarkShield, <strong>&quot;Keys&quot;</strong> refers strictly to <strong>Cryptographic Assets</strong> discovered in the Cryptographic Bill of Materials (CBOM) inventory—such as public certificates (X.509), public key parameters (RSA moduli, ECC curve points), SSH public host keys, and TLS cryptographic cipher suites.
+                  </p>
+                  <div style={{ background: 'rgba(0, 242, 254, 0.06)', borderLeft: '4px solid var(--accent-cyan)', padding: '0.85rem 1rem', borderRadius: '4px', margin: '0.85rem 0', color: '#e2e8f0' }}>
+                    <strong>Zero-Exfiltration Guarantee:</strong> Private keys (<code>BEGIN RSA PRIVATE KEY</code>, <code>BEGIN EC PRIVATE KEY</code>, PKCS#8, seed phrases, or passphrases) are <strong>NEVER stored in our cloud, NEVER uploaded, and NEVER exfiltrated</strong>. QuarkShield operates on a local-first volatile memory inspection model. The scanner inspects files and keychains in local RAM, extracts only non-sensitive public metadata (algorithm identifier, bit length, curve name, expiration date, and issuer DN), and immediately discards working buffers.
+                  </div>
+                  <p style={{ margin: 0 }}>
+                    Your private keys never leave your device or network perimeter. Only public cryptographic posture telemetry is structured into standard CycloneDX 1.6 format.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q2: Are current keys quantum certified? */}
+            <div style={{
+              background: openFaqIndex === 1 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 1 ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(1)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 1 ? '#c084fc' : '#ffffff' }}>
+                  Are our current production keys and certificates quantum certified?
+                </span>
+                {openFaqIndex === 1 ? <ChevronUp size={20} color="#c084fc" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 1 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    <strong>Almost certainly not.</strong> Over 99% of digital infrastructure in production today relies on classical asymmetric cryptography: <strong>RSA-2048/4096</strong>, <strong>ECDSA (P-256, secp256k1)</strong>, and <strong>Diffie-Hellman</strong>. None of these classical primitives are quantum certified. They are mathematically vulnerable to complete factorisation and key extraction by Shor&apos;s algorithm on a Cryptanalytically Relevant Quantum Computer (CRQC).
+                  </p>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    True <strong>quantum-certified</strong> algorithms are those newly standardized by NIST in August 2024:
+                  </p>
+                  <ul style={{ margin: '0 0 0.85rem 1.25rem', padding: 0 }}>
+                    <li><strong>FIPS 203 (ML-KEM / Kyber):</strong> Module-Lattice Key Encapsulation for general encryption and TLS key exchange.</li>
+                    <li><strong>FIPS 204 (ML-DSA / Dilithium):</strong> Module-Lattice Digital Signatures for identity certificates and authentication.</li>
+                    <li><strong>FIPS 205 (SLH-DSA / SPHINCS+):</strong> Stateless Hash-Based Signatures for high-assurance root CAs and code signing.</li>
+                  </ul>
+                  <p style={{ margin: 0 }}>
+                    The industry transition path is currently <strong>Hybrid PQC</strong> (e.g., X25519MLKEM768), combining a classical key exchange with a post-quantum lattice algorithm to preserve FIPS 140-3 compliance while resisting future quantum cryptanalysis.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q3: Shor's Algorithm Breakdown */}
+            <div style={{
+              background: openFaqIndex === 2 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 2 ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(2)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 2 ? '#f87171' : '#ffffff' }}>
+                  How does Shor&apos;s Algorithm break RSA and Elliptic Curve Cryptography (ECC)?
+                </span>
+                {openFaqIndex === 2 ? <ChevronUp size={20} color="#f87171" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 2 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    Classical cryptography relies on the assumption that certain mathematical problems are practically impossible for classical computers to compute in reasonable time. Shor&apos;s algorithm provides an exponential quantum speedup that breaks this foundational assumption:
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', margin: '0.85rem 0' }}>
+                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                      <strong style={{ color: '#f87171', display: 'block', marginBottom: '0.4rem' }}>• RSA Prime Factorization</strong>
+                      RSA-2048 and RSA-4096 rely on the difficulty of finding prime factors <em>p</em> and <em>q</em> of a large modulus <em>N = p · q</em>. Shor&apos;s algorithm solves order-finding in polynomial time <em>O((log N)³)</em>, recovering private keys in hours instead of trillions of classical compute years.
+                    </div>
+                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                      <strong style={{ color: '#fbbf24', display: 'block', marginBottom: '0.4rem' }}>• Elliptic Curve Collapse (~2,300 Qubits)</strong>
+                      ECDSA (P-256, secp256k1) and Diffie-Hellman rely on the discrete logarithm problem over elliptic curves. Because elliptic curve groups are much more compact than RSA moduli, <strong>ECC collapses even faster</strong>—requiring only ~2,330 logical qubits compared to ~4,096 logical qubits for RSA-2048.
+                    </div>
+                  </div>
+                  <p style={{ margin: 0 }}>
+                    Because RSA and ECC underpin 99% of all TLS certificates, SSH keys, VPN gateways, and JWT API tokens, their collapse dismantles identity validation, session confidentiality, and software authenticity across the globe.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q4: Harvest Now, Decrypt Later (HNDL) */}
+            <div style={{
+              background: openFaqIndex === 3 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 3 ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(3)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 3 ? '#fbbf24' : '#ffffff' }}>
+                  What is &quot;Harvest Now, Decrypt Later&quot; (HNDL), and why should we act today?
+                </span>
+                {openFaqIndex === 3 ? <ChevronUp size={20} color="#fbbf24" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 3 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    <strong>Harvest Now, Decrypt Later (HNDL)</strong> is an active, ongoing espionage tactic where nation-states and well-funded threat actors intercept and archive encrypted communications, enterprise backups, Git repositories, and intellectual property traversing the public internet.
+                  </p>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    Even though a Cryptanalytically Relevant Quantum Computer may still be years away, data harvested today remains stored indefinitely. Any data with an operational shelf life exceeding 5 to 15 years—such as health records, proprietary algorithms, financial secrets, legal contracts, or classified defense data—is <strong>already compromised</strong> if secured by classical RSA or ECC.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    Deploying hybrid post-quantum key encapsulation (ML-KEM) immediately eliminates this vulnerability for all future traffic sessions, cutting off the harvesting pipeline today.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q5: Apple & Microsoft OS-level PQC trust roots */}
+            <div style={{
+              background: openFaqIndex === 4 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 4 ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(4)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 4 ? '#38bdf8' : '#ffffff' }}>
+                  What actionable steps can we take to prepare for Apple and Microsoft OS-level PQC trust roots?
+                </span>
+                {openFaqIndex === 4 ? <ChevronUp size={20} color="#38bdf8" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 4 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    Both Apple (macOS/iOS Keychain) and Microsoft (Windows Cryptographic Next Generation &amp; Azure Trusted Signing) are actively rolling out OS-level PQC trust roots adhering to NIST FIPS 203/204/205. To prepare your enterprise:
+                  </p>
+                  <ol style={{ margin: '0 0 0.85rem 1.25rem', padding: 0 }}>
+                    <li style={{ marginBottom: '0.5rem' }}>
+                      <strong>Establish Continuous CBOM Discovery:</strong> Deploy QuarkShield across your workstations, servers, and Git repositories to maintain an up-to-date CycloneDX 1.6 Cryptographic Bill of Materials. You cannot migrate what you do not know you possess.
+                    </li>
+                    <li style={{ marginBottom: '0.5rem' }}>
+                      <strong>Audit Certificate Authorities (CAs):</strong> Evaluate public CAs (DigiCert, Let&apos;s Encrypt, Sectigo) and internal PKI (Active Directory Certificate Services, HashiCorp Vault) to ensure they have planned support for ML-DSA and SLH-DSA certificate issuance.
+                    </li>
+                    <li style={{ marginBottom: '0.5rem' }}>
+                      <strong>Enable Hybrid Key Encapsulation (ML-KEM-768):</strong> Configure web servers, reverse proxies (NGINX, Cloudflare, Envoy), and VPN gateways to negotiate hybrid X25519MLKEM768 for TLS 1.3 handshakes.
+                    </li>
+                    <li style={{ marginBottom: '0.5rem' }}>
+                      <strong>Transition Code Signing Pipelines:</strong> Prepare dual-signature architectures for internal software so binaries pass macOS Gatekeeper and Windows SmartScreen without disruption as OS trust policies enforce CNSA 2.0 timelines.
+                    </li>
+                    <li style={{ marginBottom: '0' }}>
+                      <strong>Enforce Automated Drift Detection:</strong> Use QuarkShield&apos;s Cloud Fleet plane to alert security teams whenever developers or administrators introduce legacy, non-compliant keys into production.
+                    </li>
+                  </ol>
+                </div>
+              )}
+            </div>
+
+            {/* Q6: Mosca's Theorem Engine */}
+            <div style={{
+              background: openFaqIndex === 5 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 5 ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(5)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 5 ? '#34d399' : '#ffffff' }}>
+                  What is Mosca&apos;s Theorem Engine and how does it calculate our migration deadline?
+                </span>
+                {openFaqIndex === 5 ? <ChevronUp size={20} color="#34d399" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 5 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    Formulated by Dr. Michele Mosca of the Institute for Quantum Computing, <strong>Mosca&apos;s Theorem</strong> provides the definitive mathematical rule for cryptographic transition timing:
+                  </p>
+                  <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)', textAlign: 'center', margin: '0.85rem 0', fontFamily: 'var(--font-mono)', fontSize: '1.05rem', color: '#34d399' }}>
+                    If X + Y &gt; Z, then your organization is in critical danger.
+                  </div>
+                  <ul style={{ margin: '0 0 0.85rem 1.25rem', padding: 0 }}>
+                    <li><strong>X (Shelf-Life):</strong> How many years your confidential data must remain secure (e.g., 10–25 years).</li>
+                    <li><strong>Y (Migration Time):</strong> The years needed to inventory, redesign, and deploy post-quantum algorithms across your entire estate (typically 3–7 years).</li>
+                    <li><strong>Z (Quantum Horizon):</strong> The estimated years until a quantum computer arrives capable of executing Shor&apos;s algorithm against classical keys.</li>
+                  </ul>
+                  <p style={{ margin: 0 }}>
+                    QuarkShield&apos;s built-in Mosca Engine calculates <em>X + Y</em> across your audited asset baseline to determine your exact risk exposure date and prioritize critical migration assets.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q7: Multi-tenant isolation & network ports */}
+            <div style={{
+              background: openFaqIndex === 6 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 6 ? '1px solid rgba(0, 242, 254, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(6)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 6 ? 'var(--accent-cyan)' : '#ffffff' }}>
+                  How does QuarkShield isolate enterprise tenants and container network ports?
+                </span>
+                {openFaqIndex === 6 ? <ChevronUp size={20} color="var(--accent-cyan)" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 6 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    QuarkShield enforces <strong>complete cryptographic and architectural tenant isolation</strong>:
+                  </p>
+                  <ul style={{ margin: '0 0 0.85rem 1.25rem', padding: 0 }}>
+                    <li><strong>Dedicated Reverse-Proxy Ports:</strong> The network ports visible in the Super Admin Tenant Registry are real, dedicated reverse-proxy and orchestration ports assigned to each tenant instance.</li>
+                    <li><strong>Cryptographic Data Partitioning:</strong> Every tenant&apos;s CBOM inventory, endpoint telemetry, and user identities are encrypted with dedicated per-tenant keys.</li>
+                    <li><strong>Zero Cross-Tenant Bleed:</strong> Ingestion channels are authenticated via tenant-specific HMAC tokens, preventing unauthorized telemetry mixing.</li>
+                  </ul>
+                  <p style={{ margin: 0 }}>
+                    Enterprise and MSP customers can also deploy dedicated tenant containers or isolated on-premises instances for strict compliance mandates.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q8: Offline & SCIF Air-Gapped Support */}
+            <div style={{
+              background: openFaqIndex === 7 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 7 ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(7)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 7 ? '#c084fc' : '#ffffff' }}>
+                  Does QuarkShield support offline, air-gapped, or classified SCIF environments?
+                </span>
+                {openFaqIndex === 7 ? <ChevronUp size={20} color="#c084fc" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 7 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    <strong>Yes, completely.</strong> The QuarkShield scanner is distributed as a single, statically compiled executable (Mach-O on macOS, PE on Windows, ELF on Linux) with zero runtime dependencies.
+                  </p>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    All heuristic vulnerability analysis engines, NIST FIPS 203/204/205 compliance checks, and CycloneDX 1.6 CBOM generation logic are embedded locally inside the binary. The scanner operates with 100% fidelity without requiring internet access, DNS lookups, or external cloud calls.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    In classified environments or Sensitive Compartmented Information Facilities (SCIFs), audit reports can be written directly to local storage and analyzed on-premise without violating security policies.
+                  </p>
+                </div>
+              )}
+            </div>
+
+          </div>
+
         </div>
       </section>
 
@@ -2165,15 +3199,16 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
       </section>
 
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
       {/* 7. CAREERS SECTION                                                        */}
       {/* ========================================================================= */}
-      <section id="careers" style={{
-        padding: '2.5rem 2rem 2rem 2rem',
+      <section id="careers" className="landing-section" style={{
+        padding: '3rem 1.5rem',
         background: 'linear-gradient(180deg, rgba(10, 16, 28, 0.9) 0%, rgba(6, 8, 13, 0.95) 100%)',
         borderTop: '1px solid rgba(255, 255, 255, 0.08)',
         position: 'relative'
       }}>
-        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.25rem' }}>
+        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.25rem', width: '100%' }}>
           
           {/* Header */}
           <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
@@ -2193,10 +3228,10 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
             }}>
               <Briefcase size={14} /> Join the Post-Quantum Vanguard
             </div>
-            <h2 style={{ fontSize: '2.5rem', fontWeight: 800, margin: 0, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+            <h2 style={{ fontSize: 'clamp(1.9rem, 3.8vw, 2.6rem)', fontWeight: 800, margin: 0, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.2, textWrap: 'balance' }}>
               Build the Cryptographic Defense Infrastructure of Tomorrow
             </h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem', lineHeight: 1.65, margin: 0 }}>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem', lineHeight: 1.65, margin: 0, textWrap: 'balance' }}>
               At QuarkShield, we are solving the defining cybersecurity challenge of the decade: migrating the world’s cryptographic foundations before quantum cryptanalysis renders classical public key systems obsolete.
             </p>
           </div>
@@ -2204,9 +3239,9 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
           {/* Perks Bar */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
             gap: '1rem',
-            padding: '1.5rem',
+            padding: '1.25rem 1.5rem',
             borderRadius: '12px',
             background: 'rgba(255, 255, 255, 0.02)',
             border: '1px solid rgba(255, 255, 255, 0.06)'
@@ -2241,91 +3276,116 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
             </div>
           </div>
 
-          {/* Open Roles Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.5rem' }}>
-            {/* Role 1 */}
-            <div className="glass-panel" style={{ padding: '2rem', borderRadius: '12px', background: 'rgba(10, 15, 28, 0.85)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <h4 style={{ fontSize: '1.18rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Senior Post-Quantum Cryptographer</h4>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', marginTop: '0.25rem' }}>Rust • C • Lattice Cryptography • FIPS 203/204</div>
+          {/* Streamlined Open Roles Teaser Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 270px), 1fr))',
+            gap: '1.25rem'
+          }}>
+            {[
+              {
+                title: 'Senior Post-Quantum Cryptographer',
+                tags: 'Rust • Lattice Cryptography • FIPS 203/204',
+                color: 'var(--accent-cyan)',
+                loc: 'Remote / Washington, D.C.'
+              },
+              {
+                title: 'Staff Systems & Kernel Security Engineer',
+                tags: 'CryptoAPI • macOS CryptoKit • Linux eBPF',
+                color: '#c084fc',
+                loc: 'Remote (US)'
+              },
+              {
+                title: 'Full-Stack Security Product Engineer',
+                tags: 'TypeScript • React • Node.js • Multi-Tenant',
+                color: '#38bdf8',
+                loc: 'Remote (US)'
+              },
+              {
+                title: 'Defense PQC Compliance & GRC Lead',
+                tags: 'CMMC 2.0 • NIST SP 800-171 • CNSA 2.0',
+                color: '#fbbf24',
+                loc: 'Washington, D.C. / Remote'
+              }
+            ].map((role, idx) => (
+              <div
+                key={idx}
+                className="glass-panel"
+                onClick={() => setShowCareerModal(true)}
+                style={{
+                  padding: '1.35rem',
+                  borderRadius: '10px',
+                  background: 'rgba(10, 15, 28, 0.85)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.65rem',
+                  cursor: 'pointer',
+                  minWidth: 0
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', borderRadius: '50px', background: 'rgba(255, 255, 255, 0.06)', color: role.color, fontWeight: 700 }}>
+                    Full-Time
+                  </span>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <MapPin size={12} /> {role.loc}
+                  </span>
                 </div>
-                <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.6rem', borderRadius: '50px', background: 'rgba(0, 242, 254, 0.1)', color: 'var(--accent-cyan)', border: '1px solid rgba(0, 242, 254, 0.3)', fontWeight: 600 }}>Full-Time</span>
-              </div>
-              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                Lead research and high-performance implementation of ML-KEM-768/1024 and ML-DSA signature verification algorithms into our core low-latency audit engine.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto', paddingTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}><MapPin size={13} /> Remote / Washington, D.C.</span>
-                <a href="mailto:careers@quarkshield.ai?subject=Application:%20Senior%20Post-Quantum%20Cryptographer" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--accent-cyan)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>Apply Now <ArrowUpRight size={14} /></a>
-              </div>
-            </div>
-
-            {/* Role 2 */}
-            <div className="glass-panel" style={{ padding: '2rem', borderRadius: '12px', background: 'rgba(10, 15, 28, 0.85)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <h4 style={{ fontSize: '1.18rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Staff Systems &amp; Kernel Security Engineer</h4>
-                  <div style={{ fontSize: '0.8rem', color: '#a855f7', marginTop: '0.25rem' }}>Windows CryptoAPI • macOS CryptoKit • Linux eBPF</div>
+                <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0, lineHeight: 1.3 }}>
+                  {role.title}
+                </h4>
+                <div style={{ fontSize: '0.78rem', color: role.color, fontFamily: 'var(--font-mono)' }}>
+                  {role.tags}
                 </div>
-                <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.6rem', borderRadius: '50px', background: 'rgba(168, 85, 247, 0.1)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', fontWeight: 600 }}>Full-Time</span>
-              </div>
-              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                Build robust, low-overhead native agent daemons that perform real-time cryptographic audit of system trust stores, SSH keys, and active socket connections without degrading host performance.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto', paddingTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}><MapPin size={13} /> Remote (US)</span>
-                <a href="mailto:careers@quarkshield.ai?subject=Application:%20Staff%20Systems%20%26%20Kernel%20Security%20Engineer" style={{ fontSize: '0.82rem', fontWeight: 600, color: '#a855f7', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>Apply Now <ArrowUpRight size={14} /></a>
-              </div>
-            </div>
-
-            {/* Role 3 */}
-            <div className="glass-panel" style={{ padding: '2rem', borderRadius: '12px', background: 'rgba(10, 15, 28, 0.85)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <h4 style={{ fontSize: '1.18rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Full-Stack Security Product Engineer</h4>
-                  <div style={{ fontSize: '0.8rem', color: '#38bdf8', marginTop: '0.25rem' }}>TypeScript • React • Node.js • Multi-Tenant Systems</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--accent-cyan)', fontSize: '0.82rem', fontWeight: 600, marginTop: 'auto', paddingTop: '0.5rem' }}>
+                  View Role Details <ArrowRight size={14} />
                 </div>
-                <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.6rem', borderRadius: '50px', background: 'rgba(56, 189, 248, 0.1)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', fontWeight: 600 }}>Full-Time</span>
               </div>
-              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                Develop real-time cryptographic fleet management consoles, CBOM diffing visualizations, enterprise partner dashboards, and zero-trust authentication workflows.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto', paddingTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}><MapPin size={13} /> Remote (US)</span>
-                <a href="mailto:careers@quarkshield.ai?subject=Application:%20Full-Stack%20Security%20Product%20Engineer" style={{ fontSize: '0.82rem', fontWeight: 600, color: '#38bdf8', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>Apply Now <ArrowUpRight size={14} /></a>
-              </div>
-            </div>
-
-            {/* Role 4 */}
-            <div className="glass-panel" style={{ padding: '2rem', borderRadius: '12px', background: 'rgba(10, 15, 28, 0.85)', border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <h4 style={{ fontSize: '1.18rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Defense PQC Compliance &amp; GRC Lead</h4>
-                  <div style={{ fontSize: '0.8rem', color: '#f59e0b', marginTop: '0.25rem' }}>CMMC 2.0 • NIST SP 800-171 • CNSA 2.0 • FedRAMP</div>
-                </div>
-                <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.6rem', borderRadius: '50px', background: 'rgba(245, 158, 11, 0.1)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', fontWeight: 600 }}>Full-Time</span>
-              </div>
-              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                Advise defense industrial base (DIB) contractors and federal agencies on translating OMB M-23-02 mandates and NSA CNSA 2.0 timelines into automated compliance audits.
-              </p>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 'auto', paddingTop: '0.75rem', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}><MapPin size={13} /> Washington, D.C. / Remote</span>
-                <a href="mailto:careers@quarkshield.ai?subject=Application:%20Defense%20PQC%20Compliance%20Lead" style={{ fontSize: '0.82rem', fontWeight: 600, color: '#f59e0b', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>Apply Now <ArrowUpRight size={14} /></a>
-              </div>
-            </div>
+            ))}
           </div>
 
-          {/* General Application Callout */}
-          <div style={{ textAlign: 'center', padding: '1.5rem', background: 'rgba(0, 0, 0, 0.3)', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-            <span style={{ color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
-              Don’t see your exact specialization? We welcome cold inquiries from gifted cryptanalysts, kernel hackers, and security engineers.
-            </span>
-            <div style={{ marginTop: '0.65rem' }}>
-              <a href="mailto:careers@quarkshield.ai" style={{ color: 'var(--accent-cyan)', fontWeight: 600, textDecoration: 'none', fontSize: '0.92rem' }}>
-                Email your CV or research papers to careers@quarkshield.ai →
-              </a>
+          {/* Careers Action Banner */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1.25rem',
+            padding: '1.5rem 2rem',
+            background: 'rgba(15, 23, 42, 0.65)',
+            borderRadius: '12px',
+            border: '1px solid rgba(168, 85, 247, 0.3)'
+          }}>
+            <div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.25rem' }}>
+                Ready to protect the post-quantum horizon?
+              </div>
+              <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
+                Don’t see your exact specialization? We welcome cold research inquiries at <a href="mailto:careers@quarkshield.ai" style={{ color: 'var(--accent-cyan)', textDecoration: 'none', fontWeight: 600 }}>careers@quarkshield.ai</a>.
+              </div>
             </div>
+
+            <button
+              onClick={() => setShowCareerModal(true)}
+              style={{
+                background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.3) 0%, rgba(127, 0, 255, 0.4) 100%)',
+                border: '1px solid rgba(168, 85, 247, 0.6)',
+                color: '#ffffff',
+                padding: '0.75rem 1.6rem',
+                borderRadius: '8px',
+                fontSize: '0.94rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 0 16px rgba(168, 85, 247, 0.25)'
+              }}
+            >
+              <Briefcase size={16} /> Explore All Open Positions <ArrowRight size={16} />
+            </button>
           </div>
 
         </div>
@@ -2334,13 +3394,13 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
       {/* ========================================================================= */}
       {/* 8. ENTERPRISE SUPPORT & HELP DESK SECTION                                 */}
       {/* ========================================================================= */}
-      <section id="support" style={{
-        padding: '2.5rem 2rem 2rem 2rem',
+      <section id="support" className="landing-section" style={{
+        padding: '3rem 1.5rem',
         background: 'linear-gradient(180deg, rgba(6, 8, 13, 0.95) 0%, rgba(13, 19, 33, 0.8) 100%)',
         borderTop: '1px solid rgba(255, 255, 255, 0.08)',
         position: 'relative'
       }}>
-        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.25rem' }}>
+        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.25rem', width: '100%' }}>
           
           {/* Header */}
           <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
@@ -2360,280 +3420,161 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
             }}>
               <LifeBuoy size={14} /> 24/7 Enterprise Support &amp; Assistance
             </div>
-            <h2 style={{ fontSize: '2.5rem', fontWeight: 800, margin: 0, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+            <h2 style={{ fontSize: 'clamp(1.9rem, 3.8vw, 2.6rem)', fontWeight: 800, margin: 0, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.2, textWrap: 'balance' }}>
               Dedicated Cryptographic Engineering Support
             </h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem', lineHeight: 1.65, margin: 0 }}>
-              Need assistance with your desktop scanner deployment, continuous fleet ingestion, or interpreting post-quantum risk scores? Our technical team is available to assist you.
+            <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem', lineHeight: 1.65, margin: 0, textWrap: 'balance' }}>
+              Need assistance with your desktop scanner deployment, continuous fleet ingestion, or interpreting post-quantum risk scores? Our technical team is available 24/7.
             </p>
           </div>
 
-          {/* Support Channels + Interactive Form */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '2rem' }}>
+          {/* 3 Support Channels Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '1.5rem' }}>
             
-            {/* Left Column: Support Channels & In-App Widget Highlight */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-              
-              {/* Channel 1: Floating In-App Widget Callout */}
-              <div className="glass-panel" style={{
-                padding: '1.75rem',
-                borderRadius: '12px',
-                background: 'rgba(37, 99, 235, 0.08)',
-                border: '1px solid rgba(37, 99, 235, 0.35)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.75rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff' }}>
-                    <HelpCircle size={20} />
-                  </div>
-                  <div>
-                    <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Floating Help &amp; Feedback Widget</h4>
-                    <div style={{ fontSize: '0.78rem', color: '#93c5fd' }}>Instant feedback with screenshot pasting</div>
-                  </div>
-                </div>
-                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                  Have an urgent issue or bug to report? Click the blue circular <strong>Help &amp; Feedback</strong> button located at the bottom-right of your screen anytime. You can paste screenshots directly from your clipboard (<code style={{ color: '#ffffff' }}>Ctrl/Cmd+V</code>) and attach scan logs.
-                </p>
-              </div>
-
-              {/* Channel 2: Enterprise Desk */}
-              <div className="glass-panel" style={{
-                padding: '1.75rem',
-                borderRadius: '12px',
-                background: 'rgba(10, 15, 28, 0.85)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.75rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(0, 242, 254, 0.1)', border: '1px solid rgba(0, 242, 254, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-cyan)' }}>
-                    <Mail size={18} />
-                  </div>
-                  <div>
-                    <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Enterprise Support Desk</h4>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>1-Hour SLA for Enterprise &amp; Defense Customers</div>
-                  </div>
-                </div>
-                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                  Email our senior engineering escalation queue directly:
-                </p>
-                <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: 'var(--accent-cyan)' }}>
-                  support@quarkshield.ai
-                </div>
-              </div>
-
-              {/* Channel 3: Security & Responsible Disclosure */}
-              <div className="glass-panel" style={{
-                padding: '1.75rem',
-                borderRadius: '12px',
-                background: 'rgba(10, 15, 28, 0.85)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.75rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                  <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f59e0b' }}>
-                    <ShieldAlert size={18} />
-                  </div>
-                  <div>
-                    <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Security Incident Response</h4>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Safe Harbor vulnerability reports</div>
-                  </div>
-                </div>
-                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-                  For cryptographic vulnerability disclosures, email our Security Operations Response Team:
-                </p>
-                <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: '#fbbf24' }}>
-                  security@quarkshield.ai
-                </div>
-              </div>
-
-            </div>
-
-            {/* Right Column: Direct Online Ticket Submission Form */}
+            {/* Channel 1: Floating In-App Widget Callout */}
             <div className="glass-panel" style={{
-              padding: '2.25rem',
-              borderRadius: '14px',
-              background: 'rgba(10, 15, 28, 0.95)',
-              border: '1px solid rgba(0, 242, 254, 0.3)',
-              boxShadow: '0 16px 48px rgba(0, 0, 0, 0.7)',
+              padding: '1.75rem',
+              borderRadius: '12px',
+              background: 'rgba(37, 99, 235, 0.08)',
+              border: '1px solid rgba(37, 99, 235, 0.35)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '1.25rem'
+              gap: '0.75rem',
+              minWidth: 0
             }}>
-              <div>
-                <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.35rem 0' }}>
-                  Submit a Support Ticket
-                </h3>
-                <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-                  Fill out your details below and a cryptographic engineer will respond promptly.
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff', flexShrink: 0 }}>
+                  <HelpCircle size={20} />
+                </div>
+                <div>
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Floating Help &amp; Feedback Widget</h4>
+                  <div style={{ fontSize: '0.78rem', color: '#93c5fd' }}>Instant feedback with screenshot pasting</div>
                 </div>
               </div>
-
-              {inlineSupportSuccess ? (
-                <div style={{ padding: '2rem 1rem', textAlign: 'center', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', borderRadius: '8px' }}>
-                  <CheckCircle2 size={36} color="#10b981" style={{ margin: '0 auto 0.75rem auto' }} />
-                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.35rem' }}>Ticket Received!</div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    Your support request has been logged in our enterprise ticketing queue. A team member will reply via email shortly.
-                  </div>
-                </div>
-              ) : (
-                <form onSubmit={handleInlineSupportSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  {inlineSupportError && (
-                    <div style={{ padding: '0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid #ef4444', color: '#f87171', fontSize: '0.85rem' }}>
-                      {inlineSupportError}
-                    </div>
-                  )}
-
-                  {/* Subject Selector */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                      Ticket Subject
-                    </label>
-                    <select
-                      value={inlineSupportSubject}
-                      onChange={(e) => setInlineSupportSubject(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '0.65rem 0.85rem',
-                        background: 'rgba(0, 0, 0, 0.35)',
-                        border: '1px solid rgba(255, 255, 255, 0.15)',
-                        borderRadius: '6px',
-                        color: '#ffffff',
-                        fontSize: '0.9rem',
-                        outline: 'none'
-                      }}
-                    >
-                      <option value="Support Question">Support Question</option>
-                      <option value="Bug Report">Bug Report</option>
-                      <option value="Feature Request">Feature Request</option>
-                      <option value="Feedback">Feedback</option>
-                    </select>
-                  </div>
-
-                  {/* Name & Email Row */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                        Your Name
-                      </label>
-                      <input
-                        type="text"
-                        placeholder="Security Analyst"
-                        value={inlineSupportName}
-                        onChange={(e) => setInlineSupportName(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '0.65rem 0.85rem',
-                          background: 'rgba(0, 0, 0, 0.35)',
-                          border: '1px solid rgba(255, 255, 255, 0.15)',
-                          borderRadius: '6px',
-                          color: '#ffffff',
-                          fontSize: '0.9rem',
-                          outline: 'none'
-                        }}
-                      />
-                    </div>
-
-                    <div>
-                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                        Work Email
-                      </label>
-                      <input
-                        type="email"
-                        placeholder="analyst@agency.gov"
-                        value={inlineSupportEmail}
-                        onChange={(e) => setInlineSupportEmail(e.target.value)}
-                        required
-                        style={{
-                          width: '100%',
-                          padding: '0.65rem 0.85rem',
-                          background: 'rgba(0, 0, 0, 0.35)',
-                          border: '1px solid rgba(255, 255, 255, 0.15)',
-                          borderRadius: '6px',
-                          color: '#ffffff',
-                          fontSize: '0.9rem',
-                          outline: 'none'
-                        }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Message Description */}
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                      Description &amp; Steps
-                    </label>
-                    <textarea
-                      rows={4}
-                      placeholder="Please explain the issue you are experiencing or question you have..."
-                      value={inlineSupportMessage}
-                      onChange={(e) => setInlineSupportMessage(e.target.value)}
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '0.75rem 0.85rem',
-                        background: 'rgba(0, 0, 0, 0.35)',
-                        border: '1px solid rgba(255, 255, 255, 0.15)',
-                        borderRadius: '6px',
-                        color: '#ffffff',
-                        fontSize: '0.88rem',
-                        outline: 'none',
-                        resize: 'vertical',
-                        minHeight: '90px'
-                      }}
-                    />
-                  </div>
-
-                  <button
-                    type="submit"
-                    disabled={inlineSupportSubmitting}
-                    className="btn-primary"
-                    style={{
-                      padding: '0.8rem',
-                      borderRadius: '8px',
-                      fontWeight: 700,
-                      cursor: inlineSupportSubmitting ? 'wait' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '0.5rem',
-                      fontSize: '0.92rem',
-                      marginTop: '0.5rem'
-                    }}
-                  >
-                    {inlineSupportSubmitting ? (
-                      <>
-                        <RefreshCw size={16} className="spin" /> Submitting Ticket...
-                      </>
-                    ) : (
-                      <>
-                        <Send size={16} /> Submit Support Request
-                      </>
-                    )}
-                  </button>
-                </form>
-              )}
-
-              {/* Documentation link */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: '0.5rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', fontSize: '0.8rem' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Looking for deployment guides?</span>
-                <button
-                  type="button"
-                  onClick={() => setGuideModal('overview')}
-                  style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', fontWeight: 600, padding: 0 }}
-                >
-                  Open Documentation Center →
-                </button>
-              </div>
-
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Have an urgent issue or bug to report? Click the blue circular <strong>Help &amp; Feedback</strong> button located at the bottom-right of your screen anytime. You can paste screenshots directly from your clipboard (<code style={{ color: '#ffffff' }}>Ctrl/Cmd+V</code>) and attach scan logs.
+              </p>
             </div>
 
+            {/* Channel 2: Enterprise Desk */}
+            <div className="glass-panel" style={{
+              padding: '1.75rem',
+              borderRadius: '12px',
+              background: 'rgba(10, 15, 28, 0.85)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              minWidth: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(0, 242, 254, 0.1)', border: '1px solid rgba(0, 242, 254, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-cyan)', flexShrink: 0 }}>
+                  <Mail size={18} />
+                </div>
+                <div>
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Enterprise Support Desk</h4>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>1-Hour SLA for Enterprise &amp; Defense Customers</div>
+                </div>
+              </div>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Email our senior engineering escalation queue directly:
+              </p>
+              <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>
+                support@quarkshield.ai
+              </div>
+            </div>
+
+            {/* Channel 3: Security & Responsible Disclosure */}
+            <div className="glass-panel" style={{
+              padding: '1.75rem',
+              borderRadius: '12px',
+              background: 'rgba(10, 15, 28, 0.85)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              minWidth: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f59e0b', flexShrink: 0 }}>
+                  <ShieldAlert size={18} />
+                </div>
+                <div>
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Security Incident Response</h4>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Safe Harbor vulnerability reports</div>
+                </div>
+              </div>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                For cryptographic vulnerability disclosures, email our Security Operations Response Team:
+              </p>
+              <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: '#fbbf24', wordBreak: 'break-all' }}>
+                security@quarkshield.ai
+              </div>
+            </div>
+
+          </div>
+
+          {/* Interactive Support Ticket Submission CTA Card */}
+          <div className="glass-panel" style={{
+            padding: '2rem',
+            borderRadius: '14px',
+            background: 'linear-gradient(135deg, rgba(13, 19, 33, 0.9) 0%, rgba(10, 15, 28, 0.95) 100%)',
+            border: '1px solid rgba(0, 242, 254, 0.3)',
+            boxShadow: '0 12px 36px rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1.5rem'
+          }}>
+            <div>
+              <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.35rem 0' }}>
+                Open an Enterprise Support Ticket
+              </h3>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '650px', lineHeight: 1.6 }}>
+                Need troubleshooting assistance with agent daemons, custom air-gapped PKI, or CBOM export formats? Open an official ticket with our engineering team.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setShowSupportModal(true)}
+                className="btn-primary"
+                style={{
+                  padding: '0.85rem 1.85rem',
+                  borderRadius: '8px',
+                  fontSize: '0.96rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  boxShadow: '0 0 20px rgba(0, 242, 254, 0.35)'
+                }}
+              >
+                <LifeBuoy size={16} /> Submit Support Request <ArrowRight size={16} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGuideModal('overview')}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: '#ffffff',
+                  padding: '0.85rem 1.35rem',
+                  borderRadius: '8px',
+                  fontSize: '0.92rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem'
+                }}
+              >
+                <BookOpen size={16} color="var(--accent-cyan)" /> Documentation Center
+              </button>
+            </div>
           </div>
 
         </div>
@@ -2734,6 +3675,12 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
               </h4>
               <a href="#about-us" className="landing-footer-link" style={{ color: 'var(--accent-cyan)' }}>
                 About FedMitigate LLC
+              </a>
+              <a href="#pricing" className="landing-footer-link">
+                Pricing &amp; Commercial Plans
+              </a>
+              <a href="#faq" className="landing-footer-link">
+                Post-Quantum FAQs
               </a>
               <a href="#careers" className="landing-footer-link" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                 Careers <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>Hiring</span>
@@ -3840,6 +4787,52 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
                       </div>
                     </div>
                   </div>
+
+                  {/* 5. Understanding "Keys" & The Zero-Exfiltration Guarantee */}
+                  <div style={{ background: 'rgba(0, 242, 254, 0.04)', padding: '1.25rem', borderRadius: '10px', border: '1px solid rgba(0, 242, 254, 0.25)' }}>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.75rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Key size={18} color="var(--accent-cyan)" /> 5. Understanding &quot;Keys&quot; &amp; The Zero-Exfiltration Guarantee
+                    </h3>
+                    <p style={{ margin: '0 0 0.75rem 0' }}>
+                      In QuarkShield CBOM inventories and dashboards, <strong>&quot;Keys&quot;</strong> refers exclusively to <strong>Cryptographic Assets</strong> discovered on audited endpoints and servers:
+                    </p>
+                    <ul style={{ margin: '0 0 0.75rem 1.25rem', padding: 0 }}>
+                      <li><strong>Public Key Certificates:</strong> X.509 certificates, TLS identity chains, and code-signing credentials.</li>
+                      <li><strong>Asymmetric Key Algorithms:</strong> Public key parameters (RSA moduli, ECDSA curves, Diffie-Hellman parameters).</li>
+                      <li><strong>Host Identities &amp; Ciphers:</strong> SSH public host keys and TLS cipher suites.</li>
+                    </ul>
+                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '0.9rem 1.1rem', borderRadius: '6px', borderLeft: '4px solid var(--accent-cyan)', margin: '0.75rem 0' }}>
+                      <strong style={{ color: 'var(--accent-cyan)' }}>Strict Zero-Exfiltration Guarantee:</strong> QuarkShield operates under a zero-knowledge, local-in-RAM evaluation architecture. <strong>Private keys are NEVER exfiltrated, NEVER uploaded, and NEVER stored</strong> in our central cloud or database. Local file parsing in volatile memory discards private key structures and captures only public algorithm metadata (algorithm family, key size in bits, curve identifier, validity period, and issuer/subject names).
+                    </div>
+                  </div>
+
+                  {/* 6. Preparing for OS-Level PQC Trust Roots */}
+                  <div style={{ background: 'rgba(245, 158, 11, 0.04)', padding: '1.25rem', borderRadius: '10px', border: '1px solid rgba(245, 158, 11, 0.25)' }}>
+                    <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.75rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <ShieldAlert size={18} color="#f59e0b" /> 6. Preparing for OS-Level PQC Trust Roots (Apple &amp; Microsoft)
+                    </h3>
+                    <p style={{ margin: '0 0 0.75rem 0' }}>
+                      Both Apple (macOS Sonoma/Sequoia) and Microsoft (Windows 11 / Server 2025) are actively integrating NIST FIPS 203/204/205 post-quantum trust roots into their OS security anchors. Here is our recommended roadmap to prepare before OS enforcement begins:
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0.75rem' }}>
+                      <div style={{ padding: '0.75rem', background: 'rgba(0, 0, 0, 0.35)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <strong style={{ color: 'var(--accent-cyan)', fontSize: '0.85rem' }}>1. Automated CBOM Baseline</strong>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Audit all endpoints and repositories with QuarkShield to maintain an up-to-date inventory of legacy RSA and ECC keys.</div>
+                      </div>
+                      <div style={{ padding: '0.75rem', background: 'rgba(0, 0, 0, 0.35)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <strong style={{ color: '#a855f7', fontSize: '0.85rem' }}>2. Audit Certificate Authorities</strong>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Evaluate public CAs and internal PKI to verify roadmap readiness for ML-DSA and SLH-DSA issuance.</div>
+                      </div>
+                      <div style={{ padding: '0.75rem', background: 'rgba(0, 0, 0, 0.35)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <strong style={{ color: '#f59e0b', fontSize: '0.85rem' }}>3. Enable Hybrid ML-KEM TLS</strong>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Enable X25519MLKEM768 key exchange on reverse proxies and edge gateways to immediately halt Harvest Now, Decrypt Later threats.</div>
+                      </div>
+                      <div style={{ padding: '0.75rem', background: 'rgba(0, 0, 0, 0.35)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <strong style={{ color: '#10b981', fontSize: '0.85rem' }}>4. Dual Code Signing Pipelines</strong>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Implement hybrid dual-signature signing so binaries pass macOS Gatekeeper and Windows SmartScreen without disruption.</div>
+                      </div>
+                    </div>
+                  </div>
                 </>
               )}
 
@@ -4252,6 +5245,642 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Careers & Research Positions Modal */}
+      {showCareerModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="QuarkShield Careers & Research"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(4, 7, 14, 0.82)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.25rem'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowCareerModal(false);
+          }}
+        >
+          <div
+            className="glass-panel"
+            style={{
+              width: '100%',
+              maxWidth: '920px',
+              maxHeight: '90vh',
+              background: 'linear-gradient(180deg, #0d1322 0%, #080c16 100%)',
+              border: '1px solid rgba(168, 85, 247, 0.35)',
+              borderRadius: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(168, 85, 247, 0.15)',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '1.5rem 1.75rem',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'rgba(15, 23, 42, 0.6)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                <div
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(127, 0, 255, 0.35) 100%)',
+                    border: '1px solid rgba(168, 85, 247, 0.5)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#c084fc'
+                  }}
+                >
+                  <Briefcase size={22} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.015em' }}>
+                    Careers &amp; Applied Cryptography Research
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                    Join our team safeguarding national defense systems and enterprise infrastructure against quantum decryption.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCareerModal(false)}
+                aria-label="Close careers modal"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '8px',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body: Scrollable Job Listings */}
+            <div
+              style={{
+                padding: '1.75rem',
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1.5rem',
+                maxHeight: 'calc(90vh - 160px)'
+              }}
+            >
+              {[
+                {
+                  title: 'Senior Post-Quantum Cryptographer',
+                  dept: 'Core Cryptography & Lattice Algorithms',
+                  loc: 'Remote (Global) / Hybrid D.C.',
+                  type: 'Full-Time',
+                  color: '#a855f7',
+                  summary: 'Lead algorithm verification, hybrid KEM/DSA protocol design, and hardware-accelerated lattice implementations across our scanner engine and SaaS control plane.',
+                  tags: ['NIST FIPS 203 (ML-KEM)', 'FIPS 204 (ML-DSA)', 'FIPS 205 (SLH-DSA)', 'Constant-Time C/Go/Rust', 'Lattice Cryptanalysis'],
+                  responsibilities: [
+                    'Implement and optimize production-grade ML-KEM and ML-DSA implementations resistant to cache-timing and microarchitectural side-channel attacks.',
+                    'Direct the integration of hybrid PQC key exchange schemes (X25519+Kyber/ML-KEM) within enterprise TLS 1.3 and SSH tunnels.',
+                    'Collaborate with defense standards bodies and NIST post-quantum standardization committees.'
+                  ],
+                  applyEmail: 'mailto:careers@quarkshield.ai?subject=Application:%20Senior%20Post-Quantum%20Cryptographer'
+                },
+                {
+                  title: 'Staff Systems & Kernel Security Engineer',
+                  dept: 'Endpoint Agent & Native OS Architecture',
+                  loc: 'Remote (US/Defense Authorized)',
+                  type: 'Full-Time',
+                  color: '#c084fc',
+                  summary: 'Architect native OS cryptographic store discovery across Windows CryptoAPI/CNG, macOS Keychain/CryptoKit, and Linux NSS/eBPF runtime inspection engines.',
+                  tags: ['Windows CNG/CAPI', 'macOS CryptoKit/Security.framework', 'Linux eBPF / OpenSSL 3.x', 'Go & Rust Systems', 'Air-Gapped Daemons'],
+                  responsibilities: [
+                    'Develop low-overhead, memory-safe agent daemons that discover and inventory private key stores, certificates, and TLS sessions.',
+                    'Implement high-throughput kernel event filtering with eBPF and native OS audit hooks for real-time cryptographic posture tracking.',
+                    'Ensure zero-crash reliability, strict CPU cap compliance (< 2%), and air-gapped PKI enclave compatibility.'
+                  ],
+                  applyEmail: 'mailto:careers@quarkshield.ai?subject=Application:%20Staff%20Systems%20%26%20Kernel%20Security%20Engineer'
+                },
+                {
+                  title: 'Full-Stack Security Product Engineer',
+                  dept: 'Cloud Platform & Real-Time Visualization',
+                  loc: 'Remote (US)',
+                  type: 'Full-Time',
+                  color: '#38bdf8',
+                  summary: 'Build real-time cryptographic BOM (CBOM) visualization graphs, fleet posture analytics, isolated tenant Kubernetes pods, and enterprise RBAC workflows.',
+                  tags: ['TypeScript / React', 'Node.js / Express', 'PostgreSQL / Timescale', 'Docker & Kubernetes', 'D3.js / Topology Graphs'],
+                  responsibilities: [
+                    'Architect reactive, low-latency UI interfaces for visualizing thousands of enterprise cryptographic endpoints and certificates.',
+                    'Develop isolated tenant pod provisioning engines, customer SSO integrations (SAML/OIDC), and secure audit log streaming.',
+                    'Design automated CycloneDX 1.6 CBOM and NIST SP 800-227 compliance report generators.'
+                  ],
+                  applyEmail: 'mailto:careers@quarkshield.ai?subject=Application:%20Full-Stack%20Security%20Product%20Engineer'
+                },
+                {
+                  title: 'Defense PQC Compliance & GRC Lead',
+                  dept: 'Defense & Regulatory Architecture',
+                  loc: 'Washington, D.C. / Remote (US Citizen)',
+                  type: 'Full-Time',
+                  color: '#fbbf24',
+                  summary: 'Align QuarkShield capabilities with NSA CNSA 2.0 milestones, NIST SP 800-171/227, DoD Zero Trust directives, FedRAMP High, and CMMC 2.0 requirements.',
+                  tags: ['NSA CNSA 2.0', 'NIST SP 800-171/227', 'CMMC 2.0 Level 3', 'DoD Zero Trust Portfolio', 'FIPS 140-3 CAVP/CMVP'],
+                  responsibilities: [
+                    'Translate executive orders (M-23-02, NSM-10) and defense procurement mandates into technical assessment criteria in our scanning rules engine.',
+                    'Support defense prime contractors and public sector customers with quantum transition roadmaps, risk assessments, and compliance audits.',
+                    'Author technical compliance whitepapers and speak at cybersecurity and defense standards conferences.'
+                  ],
+                  applyEmail: 'mailto:careers@quarkshield.ai?subject=Application:%20Defense%20PQC%20Compliance%20%26%20GRC%20Lead'
+                }
+              ].map((job, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    background: 'rgba(15, 23, 42, 0.55)',
+                    border: '1px solid rgba(255, 255, 255, 0.09)',
+                    borderRadius: '12px',
+                    padding: '1.5rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1rem'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.75rem' }}>
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap', marginBottom: '0.35rem' }}>
+                        <h4 style={{ margin: 0, fontSize: '1.18rem', fontWeight: 800, color: '#ffffff' }}>
+                          {job.title}
+                        </h4>
+                        <span style={{ fontSize: '0.74rem', padding: '0.2rem 0.6rem', borderRadius: '50px', background: `${job.color}20`, color: job.color, fontWeight: 700, border: `1px solid ${job.color}40` }}>
+                          {job.type}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.84rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
+                        <span>{job.dept}</span>
+                        <span>•</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <MapPin size={13} /> {job.loc}
+                        </span>
+                      </div>
+                    </div>
+                    <a
+                      href={job.applyEmail}
+                      style={{
+                        background: `linear-gradient(135deg, ${job.color}30 0%, ${job.color}15 100%)`,
+                        border: `1px solid ${job.color}60`,
+                        color: '#ffffff',
+                        padding: '0.55rem 1.15rem',
+                        borderRadius: '7px',
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        textDecoration: 'none',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      Apply for Role <ArrowUpRight size={14} />
+                    </a>
+                  </div>
+
+                  <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                    {job.summary}
+                  </p>
+
+                  <div>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 700, color: '#ffffff', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '0.5rem' }}>
+                      Key Responsibilities &amp; Focus
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '1.2rem', display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                      {job.responsibilities.map((resp, rIdx) => (
+                        <li key={rIdx} style={{ lineHeight: 1.55 }}>{resp}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', paddingTop: '0.25rem' }}>
+                    {job.tags.map((tag, tIdx) => (
+                      <span
+                        key={tIdx}
+                        style={{
+                          fontSize: '0.74rem',
+                          fontFamily: 'var(--font-mono)',
+                          padding: '0.25rem 0.55rem',
+                          borderRadius: '4px',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          color: '#e2e8f0',
+                          border: '1px solid rgba(255, 255, 255, 0.08)'
+                        }}
+                      >
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '1.15rem 1.75rem',
+                borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'rgba(15, 23, 42, 0.85)',
+                flexWrap: 'wrap',
+                gap: '1rem'
+              }}
+            >
+              <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+                Don't see your specific role? Reach out to <a href="mailto:careers@quarkshield.ai" style={{ color: 'var(--accent-cyan)', textDecoration: 'none', fontWeight: 600 }}>careers@quarkshield.ai</a> with your background and research.
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCareerModal(false)}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.08)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: '#ffffff',
+                  padding: '0.5rem 1.25rem',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Enterprise Support Request Modal */}
+      {showSupportModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Submit Enterprise Support Ticket"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(4, 7, 14, 0.82)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1.25rem'
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowSupportModal(false);
+          }}
+        >
+          <div
+            className="glass-panel"
+            style={{
+              width: '100%',
+              maxWidth: '720px',
+              maxHeight: '90vh',
+              background: 'linear-gradient(180deg, #0d1322 0%, #080c16 100%)',
+              border: '1px solid rgba(0, 242, 254, 0.35)',
+              borderRadius: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 25px 60px rgba(0, 0, 0, 0.8), 0 0 40px rgba(0, 242, 254, 0.15)',
+              overflow: 'hidden'
+            }}
+          >
+            {/* Modal Header */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '1.5rem 1.75rem',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                background: 'rgba(15, 23, 42, 0.6)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                <div
+                  style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '10px',
+                    background: 'rgba(0, 242, 254, 0.12)',
+                    border: '1px solid rgba(0, 242, 254, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--accent-cyan)'
+                  }}
+                >
+                  <LifeBuoy size={22} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.35rem', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.015em' }}>
+                    Submit an Enterprise Support Ticket
+                  </h3>
+                  <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                    Direct engineering response for agent deployments, CBOM exports, and isolated pod routing.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSupportModal(false)}
+                aria-label="Close support modal"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '8px',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '1.75rem', overflowY: 'auto', maxHeight: 'calc(90vh - 160px)' }}>
+              {inlineSupportSuccess ? (
+                <div
+                  style={{
+                    padding: '2rem',
+                    borderRadius: '12px',
+                    background: 'rgba(16, 185, 129, 0.1)',
+                    border: '1px solid rgba(16, 185, 129, 0.35)',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '1rem'
+                  }}
+                >
+                  <div
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '50%',
+                      background: 'rgba(16, 185, 129, 0.2)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#10b981'
+                    }}
+                  >
+                    <CheckCircle2 size={28} />
+                  </div>
+                  <div>
+                    <h4 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800, color: '#ffffff' }}>
+                      Support Ticket Logged Successfully
+                    </h4>
+                    <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.9rem', color: '#cbd5e1', lineHeight: 1.6, maxWidth: '520px' }}>
+                      Our senior cryptographic engineering team has received your ticket and will follow up directly at{' '}
+                      <strong>{inlineSupportEmail || 'your email'}</strong> according to your enterprise SLA.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setInlineSupportSuccess(false);
+                      setShowSupportModal(false);
+                    }}
+                    className="btn-primary"
+                    style={{
+                      marginTop: '0.5rem',
+                      padding: '0.65rem 1.5rem',
+                      borderRadius: '8px',
+                      fontSize: '0.9rem',
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleInlineSupportSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  {inlineSupportError && (
+                    <div
+                      style={{
+                        padding: '0.85rem 1.25rem',
+                        borderRadius: '8px',
+                        background: 'rgba(239, 68, 68, 0.15)',
+                        border: '1px solid rgba(239, 68, 68, 0.4)',
+                        color: '#fca5a5',
+                        fontSize: '0.88rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.65rem'
+                      }}
+                    >
+                      <AlertTriangle size={18} color="#ef4444" />
+                      <span>{inlineSupportError}</span>
+                    </div>
+                  )}
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                        Inquiry Category
+                      </label>
+                      <select
+                        value={inlineSupportSubject}
+                        onChange={(e) => setInlineSupportSubject(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '0.65rem 0.85rem',
+                          borderRadius: '8px',
+                          background: 'rgba(10, 15, 28, 0.95)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          color: '#ffffff',
+                          fontSize: '0.88rem',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      >
+                        <option value="Technical Deployment Issue">Technical Deployment Issue</option>
+                        <option value="Desktop Agent & Scanner">Desktop Agent &amp; Scanner Daemons</option>
+                        <option value="CBOM / CycloneDX Export">CBOM / CycloneDX Export</option>
+                        <option value="Isolated Pod & SSO Integration">Isolated Pod &amp; SSO Integration</option>
+                        <option value="Billing & Enterprise Licensing">Billing &amp; Enterprise Licensing</option>
+                        <option value="Urgent Incident / Vulnerability Report">Urgent Incident / Vulnerability Report</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                        Your Full Name
+                      </label>
+                      <input
+                        type="text"
+                        value={inlineSupportName}
+                        onChange={(e) => setInlineSupportName(e.target.value)}
+                        placeholder="e.g. Alex Mercer"
+                        style={{
+                          width: '100%',
+                          padding: '0.65rem 0.85rem',
+                          borderRadius: '8px',
+                          background: 'rgba(10, 15, 28, 0.95)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          color: '#ffffff',
+                          fontSize: '0.88rem',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                      Work Email Address <span style={{ color: 'var(--accent-cyan)' }}>*</span>
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={inlineSupportEmail}
+                      onChange={(e) => setInlineSupportEmail(e.target.value)}
+                      placeholder="operator@company.com"
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.85rem',
+                        borderRadius: '8px',
+                        background: 'rgba(10, 15, 28, 0.95)',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        color: '#ffffff',
+                        fontSize: '0.88rem',
+                        outline: 'none',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '0.4rem' }}>
+                      Issue Details &amp; Reproduction Steps <span style={{ color: 'var(--accent-cyan)' }}>*</span>
+                    </label>
+                    <textarea
+                      required
+                      rows={5}
+                      value={inlineSupportMessage}
+                      onChange={(e) => setInlineSupportMessage(e.target.value)}
+                      placeholder="Please specify operating system, agent build version, terminal output or any error messages..."
+                      style={{
+                        width: '100%',
+                        padding: '0.75rem 0.85rem',
+                        borderRadius: '8px',
+                        background: 'rgba(10, 15, 28, 0.95)',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        color: '#ffffff',
+                        fontSize: '0.88rem',
+                        fontFamily: 'inherit',
+                        outline: 'none',
+                        boxSizing: 'border-box',
+                        resize: 'vertical'
+                      }}
+                    />
+                  </div>
+
+                  <div
+                    style={{
+                      padding: '0.75rem 1rem',
+                      background: 'rgba(37, 99, 235, 0.08)',
+                      border: '1px solid rgba(37, 99, 235, 0.25)',
+                      borderRadius: '8px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.65rem'
+                    }}
+                  >
+                    <HelpCircle size={16} color="#60a5fa" style={{ flexShrink: 0 }} />
+                    <span style={{ fontSize: '0.8rem', color: '#cbd5e1' }}>
+                      Need to attach screenshots? You can paste images (<code style={{ color: '#ffffff' }}>Ctrl/Cmd+V</code>) directly in the circular <strong>Help &amp; Feedback</strong> widget in the lower-right corner.
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowSupportModal(false)}
+                      style={{
+                        background: 'rgba(255, 255, 255, 0.06)',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
+                        color: '#ffffff',
+                        padding: '0.65rem 1.25rem',
+                        borderRadius: '8px',
+                        fontSize: '0.88rem',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={inlineSupportSubmitting}
+                      className="btn-primary"
+                      style={{
+                        padding: '0.65rem 1.6rem',
+                        borderRadius: '8px',
+                        fontSize: '0.88rem',
+                        fontWeight: 700,
+                        cursor: inlineSupportSubmitting ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        opacity: inlineSupportSubmitting ? 0.7 : 1
+                      }}
+                    >
+                      {inlineSupportSubmitting ? (
+                        <>
+                          <RefreshCw size={15} className="animate-spin" /> Submitting...
+                        </>
+                      ) : (
+                        <>
+                          <Send size={15} /> Submit Support Request
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         </div>

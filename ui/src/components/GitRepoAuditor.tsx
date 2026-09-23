@@ -23,7 +23,8 @@ import {
   Sparkles,
   Info,
   Eye,
-  EyeOff
+  EyeOff,
+  ShieldCheck
 } from 'lucide-react';
 
 export interface GitFinding {
@@ -112,6 +113,88 @@ export const GitRepoAuditor: React.FC = () => {
   const [history, setHistory] = useState<ScanHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
+  // CI/CD Security Gate Sub-View State
+  const [activeSubView, setActiveSubView] = useState<'scanner' | 'ci_gate'>('scanner');
+  const [ciGates, setCiGates] = useState<any[]>([]);
+  const [loadingCiGates, setLoadingCiGates] = useState(false);
+  const [selectedGateReport, setSelectedGateReport] = useState<any | null>(null);
+  const [selectedCiProvider, setSelectedCiProvider] = useState<'github' | 'gitlab' | 'bitbucket' | 'runner'>('github');
+  const [ciTemplateCode, setCiTemplateCode] = useState<string>('');
+  const [ciCopied, setCiCopied] = useState(false);
+  const [testingGate, setTestingGate] = useState(false);
+
+  const fetchCiGates = async () => {
+    setLoadingCiGates(true);
+    try {
+      const res = await fetch('/api/git/ci-gate/history');
+      if (res.ok) {
+        const data = await res.json();
+        setCiGates(data);
+      }
+    } catch (e) {
+      console.error('Error fetching CI gates:', e);
+    } finally {
+      setLoadingCiGates(false);
+    }
+  };
+
+  const fetchCiTemplate = async (prov: string) => {
+    try {
+      const res = await fetch(`/api/git/ci-gate/templates/${prov}`);
+      if (res.ok) {
+        const text = await res.text();
+        setCiTemplateCode(text);
+      }
+    } catch (e) {
+      console.error('Error fetching CI template:', e);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubView === 'ci_gate') {
+      fetchCiGates();
+      fetchCiTemplate(selectedCiProvider);
+    }
+  }, [activeSubView, selectedCiProvider]);
+
+  const handleSimulateGate = async (shouldFail: boolean) => {
+    try {
+      setTestingGate(true);
+      const res = await fetch('/api/git/ci-gate/evaluate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: selectedCiProvider === 'runner' ? 'github' : selectedCiProvider,
+          repoName: 'spinovation/payments-v2',
+          branch: shouldFail ? 'feature/legacy-auth' : 'fix/pqc-kem',
+          prNumber: `PR #${Math.floor(110 + Math.random() * 80)}`,
+          commitHash: Math.random().toString(16).substring(2, 9),
+          commitAuthor: 'devops@spinovation.com',
+          commitMessage: shouldFail ? 'feat: implement payment signing with RSA' : 'fix: migrate tokens to NIST FIPS 203 ML-KEM',
+          filesChanged: shouldFail ? [
+            {
+              path: 'src/crypto/signer.ts',
+              content: `import crypto from 'crypto';\nconst privateKey = '-----BEGIN RSA PRIVATE KEY-----...';\nexport function sign() { return crypto.createSign('SHA256'); }`
+            }
+          ] : [
+            {
+              path: 'src/crypto/pqc.ts',
+              content: `import { mlkem768 } from '@quarkshield/pqc';\nexport function keyExchange() { return mlkem768.generateKeyPair(); }`
+            }
+          ]
+        })
+      });
+
+      if (res.ok) {
+        await fetchCiGates();
+      }
+    } catch (err) {
+      console.error('Error simulating gate:', err);
+    } finally {
+      setTestingGate(false);
+    }
+  };
+
   // Fetch scan history on load
   useEffect(() => {
     fetchHistory();
@@ -157,7 +240,8 @@ export const GitRepoAuditor: React.FC = () => {
           authType,
           token: authType === 'public' ? undefined : token.trim(),
           username: provider === 'bitbucket' ? username.trim() : undefined,
-          branch: branch.trim() || 'main'
+          branch: branch.trim() || 'main',
+          tenant: localStorage.getItem('pqc_active_tenant') || 'SPINOVATIONCORP'
         })
       });
 
@@ -181,20 +265,23 @@ export const GitRepoAuditor: React.FC = () => {
     }
   };
 
-  const handleDownloadCBOM = async () => {
+  const handleDownloadCBOM = async (attested: boolean = false) => {
     if (!activeScan) return;
     try {
       const res = await fetch('/api/scan/remote-git/export-cbom', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ summary: activeScan })
+        body: JSON.stringify({ summary: activeScan, attestation: attested, cdxa: attested })
       });
       if (!res.ok) throw new Error('Failed to generate CycloneDX CBOM');
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${(activeScan.repoName || 'repository').replace(/[\/\\]/g, '_')}_CBOM_CycloneDX_1.6.json`;
+      const baseName = (activeScan.repoName || 'repository').replace(/[\/\\]/g, '_');
+      a.download = attested 
+        ? `${baseName}_CBOM_CDXA_Attested_1.6.json` 
+        : `${baseName}_CBOM_CycloneDX_1.6.json`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -336,15 +423,55 @@ export const GitRepoAuditor: React.FC = () => {
         </div>
       </div>
 
-      {/* SECTION 2: REPOSITORY SCANNER INPUT CARD (Only shown when not showing scan or when toggled) */}
-      {!activeScan && (
-        <div style={{
-          background: 'var(--bg-surface)',
-          border: '1px solid var(--border-color)',
-          borderRadius: '12px',
-          padding: '2rem',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
-        }}>
+      {/* SUB-NAVIGATION: SCANNER VS CI/CD SECURITY GATE */}
+      <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(0,0,0,0.3)', padding: '0.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.08)', width: 'fit-content' }}>
+        <button
+          type="button"
+          onClick={() => setActiveSubView('scanner')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.45rem',
+            padding: '0.55rem 1.15rem', borderRadius: '6px', fontSize: '0.84rem', fontWeight: 600,
+            background: activeSubView === 'scanner' ? 'rgba(0, 242, 254, 0.15)' : 'transparent',
+            border: activeSubView === 'scanner' ? '1px solid var(--accent-cyan)' : '1px solid transparent',
+            color: activeSubView === 'scanner' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <GitBranch size={15} /> On-Demand Repo Scanner
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveSubView('ci_gate')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.45rem',
+            padding: '0.55rem 1.15rem', borderRadius: '6px', fontSize: '0.84rem', fontWeight: 600,
+            background: activeSubView === 'ci_gate' ? 'rgba(0, 242, 254, 0.15)' : 'transparent',
+            border: activeSubView === 'ci_gate' ? '1px solid var(--accent-cyan)' : '1px solid transparent',
+            color: activeSubView === 'ci_gate' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <ShieldAlert size={15} /> CI/CD Security Gate (PR Scanning)
+          <span style={{ fontSize: '0.66rem', padding: '0.1rem 0.45rem', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.2)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', fontWeight: 700 }}>
+            PQC GATE
+          </span>
+        </button>
+      </div>
+
+      {/* VIEW A: ON-DEMAND SCANNER */}
+      {activeSubView === 'scanner' && (
+        <>
+          {/* SECTION 2: REPOSITORY SCANNER INPUT CARD (Only shown when not showing scan or when toggled) */}
+          {!activeScan && (
+            <div style={{
+              background: 'var(--bg-surface)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '12px',
+              padding: '2rem',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+            }}>
           <form onSubmit={handleStartScan}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
               
@@ -854,8 +981,8 @@ export const GitRepoAuditor: React.FC = () => {
               {/* Action Buttons */}
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <button
-                  onClick={handleDownloadCBOM}
-                  title="Download CycloneDX 1.6 Cryptographic Bill of Materials in JSON format"
+                  onClick={() => handleDownloadCBOM(false)}
+                  title="Download Standard CycloneDX 1.6 Cryptographic Bill of Materials in JSON format"
                   style={{
                     background: 'rgba(0, 242, 254, 0.15)',
                     border: '1px solid var(--accent-cyan)',
@@ -871,6 +998,27 @@ export const GitRepoAuditor: React.FC = () => {
                   }}
                 >
                   <Download size={15} /> CBOM JSON (1.6)
+                </button>
+
+                <button
+                  onClick={() => handleDownloadCBOM(true)}
+                  title="Download CycloneDX 1.6 with CDXA Attestation Declarations (NIST SP 800-218, CNSA 2.0) and ML-DSA-65 Signature"
+                  style={{
+                    background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(56, 189, 248, 0.25) 100%)',
+                    border: '1px solid rgba(168, 85, 247, 0.5)',
+                    color: '#c084fc',
+                    fontWeight: 700,
+                    fontSize: '0.85rem',
+                    padding: '0.55rem 1rem',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    boxShadow: '0 0 12px rgba(168, 85, 247, 0.15)'
+                  }}
+                >
+                  <ShieldCheck size={15} color="#c084fc" /> Attested CDXA
                 </button>
 
                 <button
@@ -1293,6 +1441,324 @@ export const GitRepoAuditor: React.FC = () => {
               </div>
             ))}
           </div>
+        </div>
+      )}
+      </>
+      )}
+
+      {/* VIEW B: CI/CD PIPELINE CBOM SECURITY GATE */}
+      {activeSubView === 'ci_gate' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          
+          {/* Top Metrics */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+            <div className="glass-panel" style={{ padding: '1.25rem', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                PRs Evaluated
+              </div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#ffffff', marginTop: '0.35rem' }}>
+                {ciGates.length}
+              </div>
+              <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
+                Across GitHub, GitLab &amp; Bitbucket
+              </div>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.25rem', border: '1px solid rgba(239, 68, 68, 0.25)', background: 'rgba(239, 68, 68, 0.03)' }}>
+              <div style={{ fontSize: '0.75rem', color: '#f87171', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                Merges Blocked (Exit 1)
+              </div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#ef4444', marginTop: '0.35rem' }}>
+                {ciGates.filter(g => g.status === 'BLOCKED').length}
+              </div>
+              <div style={{ fontSize: '0.76rem', color: '#fca5a5', marginTop: '0.3rem' }}>
+                Vulnerable RSA/ECC algorithms stopped
+              </div>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.25rem', border: '1px solid rgba(16, 185, 129, 0.25)', background: 'rgba(16, 185, 129, 0.03)' }}>
+              <div style={{ fontSize: '0.75rem', color: '#34d399', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                Merges Passed (Exit 0)
+              </div>
+              <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#10b981', marginTop: '0.35rem' }}>
+                {ciGates.filter(g => g.status === 'PASSED').length}
+              </div>
+              <div style={{ fontSize: '0.76rem', color: '#6ee7b7', marginTop: '0.3rem' }}>
+                100% PQC &amp; CNSA 2.0 compliant
+              </div>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.25rem', border: '1px solid rgba(0, 242, 254, 0.25)' }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em' }}>
+                Active Policy Gate
+              </div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', marginTop: '0.5rem' }}>
+                CNSA 2.0 Strict Gate
+              </div>
+              <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '0.3rem' }}>
+                Blocks RSA, ECC, 3DES, MD5 &amp; SHA-1
+              </div>
+            </div>
+          </div>
+
+          {/* 1-Click CI/CD Integration Card */}
+          <div className="glass-panel" style={{ padding: '1.75rem', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#ffffff', fontWeight: 600 }}>
+                  Automated Pipeline Setup &amp; Workflow Configurations
+                </h3>
+                <p style={{ margin: '0.2rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                  Copy these pre-packaged actions into your repository to enforce quantum security gates on every Pull Request.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                {(['github', 'gitlab', 'bitbucket', 'runner'] as const).map(p => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setSelectedCiProvider(p)}
+                    style={{
+                      padding: '0.45rem 0.85rem',
+                      borderRadius: '6px',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      background: selectedCiProvider === p ? 'rgba(0, 242, 254, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                      border: `1px solid ${selectedCiProvider === p ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.1)'}`,
+                      color: selectedCiProvider === p ? '#ffffff' : 'var(--text-secondary)',
+                      cursor: 'pointer',
+                      textTransform: 'uppercase'
+                    }}
+                  >
+                    {p === 'runner' ? 'CLI RUNNER' : p}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(ciTemplateCode);
+                    setCiCopied(true);
+                    setTimeout(() => setCiCopied(false), 2000);
+                  }}
+                  className="btn btn-secondary"
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.8rem', padding: '0.45rem 0.85rem' }}
+                >
+                  {ciCopied ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
+                  {ciCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+
+            <pre style={{
+              background: '#030712',
+              padding: '1.25rem',
+              borderRadius: '8px',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              fontSize: '0.82rem',
+              fontFamily: 'monospace',
+              color: '#38bdf8',
+              overflowX: 'auto',
+              lineHeight: 1.5,
+              maxHeight: '380px'
+            }}>
+              {ciTemplateCode}
+            </pre>
+
+            <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+              <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                💡 Tip: Set repository secret <code style={{ color: 'var(--accent-cyan)' }}>QUARKSHIELD_API_TOKEN</code> in your repo settings to authenticate runner webhooks.
+              </div>
+
+              {/* Simulation buttons */}
+              <div style={{ display: 'flex', gap: '0.6rem' }}>
+                <button
+                  type="button"
+                  disabled={testingGate}
+                  onClick={() => handleSimulateGate(false)}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.78rem', padding: '0.45rem 0.85rem', color: '#10b981', borderColor: 'rgba(16, 185, 129, 0.3)' }}
+                >
+                  {testingGate ? 'Testing...' : 'Simulate Passing PR (ML-KEM)'}
+                </button>
+                <button
+                  type="button"
+                  disabled={testingGate}
+                  onClick={() => handleSimulateGate(true)}
+                  className="btn btn-secondary"
+                  style={{ fontSize: '0.78rem', padding: '0.45rem 0.85rem', color: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.3)' }}
+                >
+                  {testingGate ? 'Testing...' : 'Simulate Blocked PR (RSA-2048)'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* PR Evaluation History Table */}
+          <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', color: '#ffffff', fontWeight: 600 }}>
+                  Automated Pull-Request Gate Log ({ciGates.length})
+                </h3>
+                <p style={{ margin: '0.2rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                  Live history of pull requests and commits analyzed against quantum security policies.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={fetchCiGates}
+                className="btn btn-secondary"
+                style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', padding: '0.45rem 0.75rem' }}
+              >
+                <RefreshCw size={13} className={loadingCiGates ? 'spin-animation' : ''} /> Refresh Logs
+              </button>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', textAlign: 'left' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', color: 'var(--text-muted)' }}>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Gate Decision</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Repository &amp; Branch</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>PR / Commit</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Author</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Violations</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Risk Score</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Timestamp</th>
+                    <th style={{ padding: '0.75rem 0.5rem' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ciGates.map(g => (
+                    <tr key={g.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                      <td style={{ padding: '0.75rem 0.5rem' }}>
+                        <span style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          fontSize: '0.72rem',
+                          fontWeight: 700,
+                          padding: '0.2rem 0.55rem',
+                          borderRadius: '4px',
+                          background: g.status === 'PASSED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                          color: g.status === 'PASSED' ? '#10b981' : '#ef4444',
+                          border: `1px solid ${g.status === 'PASSED' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                        }}>
+                          {g.status === 'PASSED' ? '✓ MERGE ALLOWED' : '✕ MERGE BLOCKED'}
+                        </span>
+                      </td>
+
+                      <td style={{ padding: '0.75rem 0.5rem', fontWeight: 600, color: '#ffffff' }}>
+                        <div>{g.repo_name}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                          branch: {g.branch}
+                        </div>
+                      </td>
+
+                      <td style={{ padding: '0.75rem 0.5rem', color: 'var(--accent-cyan)', fontFamily: 'monospace' }}>
+                        <div>{g.pr_number}</div>
+                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>{g.commit_hash?.substring(0, 7)}</div>
+                      </td>
+
+                      <td style={{ padding: '0.75rem 0.5rem', color: 'var(--text-secondary)' }}>
+                        {g.commit_author}
+                      </td>
+
+                      <td style={{ padding: '0.75rem 0.5rem', fontWeight: 700, color: g.violations_count > 0 ? '#ef4444' : '#10b981' }}>
+                        {g.violations_count} violations
+                      </td>
+
+                      <td style={{ padding: '0.75rem 0.5rem', fontWeight: 700, color: g.quantum_risk_score > 50 ? '#ef4444' : '#10b981' }}>
+                        {g.quantum_risk_score} / 100
+                      </td>
+
+                      <td style={{ padding: '0.75rem 0.5rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+                        {new Date(g.created_at).toLocaleString()}
+                      </td>
+
+                      <td style={{ padding: '0.75rem 0.5rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedGateReport(g)}
+                          className="btn btn-secondary"
+                          style={{ fontSize: '0.74rem', padding: '0.3rem 0.65rem' }}
+                        >
+                          View Report
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Gate Report Modal */}
+          {selectedGateReport && (
+            <div style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(5px)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+            }}>
+              <div className="glass-panel" style={{ width: '680px', maxHeight: '85vh', overflowY: 'auto', padding: '2rem', border: '1px solid rgba(0, 242, 254, 0.4)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.75rem' }}>
+                  <h3 style={{ margin: 0, color: '#ffffff', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <ShieldAlert size={18} color={selectedGateReport.status === 'PASSED' ? '#10b981' : '#ef4444'} />
+                    CI/CD Gate Evaluation Report: {selectedGateReport.pr_number}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGateReport(null)}
+                    style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '1.2rem' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                <div style={{
+                  padding: '0.75rem 1rem',
+                  borderRadius: '6px',
+                  marginBottom: '1rem',
+                  background: selectedGateReport.status === 'PASSED' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                  border: `1px solid ${selectedGateReport.status === 'PASSED' ? '#10b981' : '#ef4444'}`,
+                  color: '#ffffff',
+                  fontWeight: 600,
+                  fontSize: '0.88rem'
+                }}>
+                  {selectedGateReport.status === 'PASSED' ? '✅ Gate Passed: Codebase is fully quantum-safe.' : '❌ Gate Blocked: Pull Request introduces quantum-vulnerable cryptographic algorithms.'}
+                </div>
+
+                <pre style={{
+                  background: '#030712',
+                  padding: '1.25rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  fontSize: '0.82rem',
+                  fontFamily: 'monospace',
+                  color: '#f1f5f9',
+                  whiteSpace: 'pre-wrap',
+                  lineHeight: 1.6
+                }}>
+                  {selectedGateReport.markdown_report}
+                </pre>
+
+                <div style={{ marginTop: '1.5rem', textAlign: 'right' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedGateReport(null)}
+                    className="btn btn-primary"
+                    style={{ padding: '0.5rem 1.25rem' }}
+                  >
+                    Close Report
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 

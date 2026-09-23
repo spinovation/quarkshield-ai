@@ -58,7 +58,7 @@ desktop-pqc-scanner/
 ├── Dockerfile                     # Multi-stage production container
 ├── docker-compose.yml             # Standalone Postgres + Console orchestration
 ├── docs/                          # Enterprise Post-Quantum Architecture Specifications
-│   ├── AGENTLESS_PQC_ARCHITECTURE.md       # The "Wiz Model" for Agentless PQC Discovery
+│   ├── AGENTLESS_PQC_ARCHITECTURE.md       # Agentless PQC Discovery Architecture
 │   └── ACTIVE_NETWORK_TLS_PQC_PROBING.md   # Zero-Touch Outbound Socket & TLS Probing Guide
 ├── deploy.sh                      # 1-click VPS installation & update script
 ├── .env.example                   # Environment configuration template
@@ -66,7 +66,7 @@ desktop-pqc-scanner/
 ```
 
 ### 📚 Architectural Specifications & Whitepapers
-- **[Agentless & API-First PQC Discovery ("The Wiz Model")](docs/AGENTLESS_PQC_ARCHITECTURE.md)**: Details the 5 pillars eliminating agent fatigue via Cloud KMS, IAM/MDM, Git repositories, and out-of-band volume snapshotting.
+- **[Agentless & API-First PQC Discovery](docs/AGENTLESS_PQC_ARCHITECTURE.md)**: Details the 5 pillars eliminating agent fatigue via Cloud KMS, IAM/MDM, Git repositories, and out-of-band volume snapshotting.
 - **[Active Network & Outbound TCP/TLS Socket Probing Architecture](docs/ACTIVE_NETWORK_TLS_PQC_PROBING.md)**: Deep-dive into active TLS 1.3 socket probing (e.g. testing `microsoft.com`), 5-stage handshake inspection, and empirical HNDL / Shor's / Grover's threat evaluation.
 
 ---
