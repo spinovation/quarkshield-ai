@@ -54,3 +54,7 @@ ui/public/downloads/pqc-scanner*
 .idea/
 *.sublime-project
 *.sublime-workspace
+
+# Marketing Collateral & Strategy (Do Not Sync to GitHub)
+marketing/
+**/marketing/
