@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 interface VulnerabilityDetail {
   cveId: string;
@@ -1118,3 +1120,54 @@ echo "✅ QuarkShield SBOM Remediation Complete. All vulnerable packages updated
     res.status(500).json({ success: false, error: error.message });
   }
 }
+
+/**
+ * GET /api/sbom/superadmin-guide
+ * Privileged Super Admin endpoint serving the Platform Architecture & Competitive Analysis Guide.
+ * Strictly gated with 403 Forbidden for non-super-admins.
+ */
+export async function getSuperAdminGuide(req: Request, res: Response) {
+  try {
+    const isSuperAdmin = checkSuperAdminAccess(req, 'quarkshield.ai');
+    if (!isSuperAdmin) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access Denied: Super Admin authorization required to access the Platform SBOM Architecture & Competitive Analysis Guide.'
+      });
+    }
+
+    const candidatePaths = [
+      path.resolve(__dirname, '../../../docs/SUPERADMIN_SBOM_AND_COMPETITIVE_ANALYSIS.md'),
+      path.resolve(__dirname, '../../docs/SUPERADMIN_SBOM_AND_COMPETITIVE_ANALYSIS.md'),
+      path.resolve(process.cwd(), 'docs/SUPERADMIN_SBOM_AND_COMPETITIVE_ANALYSIS.md'),
+      '/app/docs/SUPERADMIN_SBOM_AND_COMPETITIVE_ANALYSIS.md'
+    ];
+
+    let content = '';
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        content = fs.readFileSync(p, 'utf8');
+        break;
+      }
+    }
+
+    if (!content) {
+      return res.status(404).json({
+        success: false,
+        error: 'Super Admin Guide document not found on server.'
+      });
+    }
+
+    if (req.query.format === 'json') {
+      return res.json({ success: true, content });
+    }
+
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="SUPERADMIN_SBOM_AND_COMPETITIVE_ANALYSIS.md"');
+    res.send(content);
+  } catch (error: any) {
+    console.error('Error serving super admin guide:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+}
+

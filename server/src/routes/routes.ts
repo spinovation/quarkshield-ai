@@ -83,7 +83,8 @@ import {
   getSbomComponents,
   getSbomStats,
   exportSbom,
-  getFixScript
+  getFixScript,
+  getSuperAdminGuide
 } from '../controllers/sbomController';
 
 const router = Router();
@@ -223,6 +224,7 @@ router.get('/sbom/components', getSbomComponents);
 router.get('/sbom/stats', getSbomStats);
 router.get('/sbom/export', exportSbom);
 router.get('/sbom/fix-script', getFixScript);
+router.get('/sbom/superadmin-guide', getSuperAdminGuide);
 
 export default router;
 

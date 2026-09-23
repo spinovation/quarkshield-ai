@@ -54,6 +54,9 @@ COPY --from=ui-builder /app/ui/dist ./ui/dist
 # Copy pre-compiled cross-platform scanner agent binaries
 COPY agent/binaries ./agent/binaries
 
+# Copy enterprise & super admin documentation
+COPY docs ./docs
+
 EXPOSE 5050
 
 CMD ["node", "server/dist/index.js"]

@@ -16,7 +16,8 @@ import {
   Wrench,
   CheckCircle2,
   X,
-  Info
+  Info,
+  BookOpen
 } from 'lucide-react';
 
 interface VulnerabilityDetail {
@@ -92,6 +93,30 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
   const [activeAdvisory, setActiveAdvisory] = useState<{ comp: SbomComponent; vuln: VulnerabilityDetail } | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 20;
+
+  const [showSuperAdminDocModal, setShowSuperAdminDocModal] = useState(false);
+  const [guideContent, setGuideContent] = useState<string>('');
+  const [guideLoading, setGuideLoading] = useState(false);
+
+  const handleFetchGuide = async () => {
+    setShowSuperAdminDocModal(true);
+    if (!guideContent) {
+      setGuideLoading(true);
+      try {
+        const res = await fetch(`${apiUrl}/api/sbom/superadmin-guide?format=json&admin=true`, {
+          headers: { 'x-admin-role': 'super_admin' }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setGuideContent(data.content || '');
+        }
+      } catch (err) {
+        console.error('Failed to load Super Admin guide', err);
+      } finally {
+        setGuideLoading(false);
+      }
+    }
+  };
 
   const fetchSbomData = async () => {
     setLoading(true);
@@ -464,6 +489,28 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
             >
               <Download size={14} /> CSV
             </button>
+
+            {isSuperAdmin && (
+              <button
+                onClick={handleFetchGuide}
+                style={{
+                  background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.2) 0%, rgba(56, 189, 248, 0.2) 100%)',
+                  border: '1px solid rgba(168, 85, 247, 0.45)',
+                  color: '#e9d5ff',
+                  padding: '0.48rem 0.9rem',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem'
+                }}
+                title="Super Admin Architecture Guide & Competitor Review"
+              >
+                <BookOpen size={14} /> Super Admin Guide &amp; Competitors
+              </button>
+            )}
 
             <button
               onClick={fetchSbomData}
@@ -911,6 +958,111 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
                   {copiedCmd === 'modal-fix' ? 'Copied' : 'Copy'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Super Admin Privileged Architecture & Competitive Review Modal */}
+      {isSuperAdmin && showSuperAdminDocModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10000,
+          padding: '1.5rem'
+        }}>
+          <div style={{
+            background: 'var(--bg-card, #0f172a)',
+            border: '1px solid rgba(168, 85, 247, 0.45)',
+            borderRadius: '12px',
+            maxWidth: '1050px',
+            width: '100%',
+            maxHeight: '90vh',
+            display: 'flex',
+            flexDirection: 'column',
+            boxShadow: '0 25px 60px -15px rgba(168, 85, 247, 0.35)',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.15) 0%, rgba(15, 23, 42, 0.8) 100%)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <BookOpen size={20} color="#c084fc" />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#ffffff' }}>
+                    Super Admin SBOM Architecture &amp; Competitive Analysis
+                  </h3>
+                  <span style={{ fontSize: '0.72rem', color: '#c084fc', fontWeight: 600 }}>
+                    STRICTLY CONFIDENTIAL • SUPER ADMIN ONLY • NIST SP 800-218 &amp; CYCLONEDX 1.6
+                  </span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <button
+                  onClick={() => window.open(`${apiUrl}/api/sbom/superadmin-guide?admin=true`, '_blank')}
+                  style={{
+                    background: 'rgba(168, 85, 247, 0.25)',
+                    border: '1px solid rgba(168, 85, 247, 0.5)',
+                    color: '#e9d5ff',
+                    padding: '0.4rem 0.85rem',
+                    borderRadius: '6px',
+                    fontSize: '0.78rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <Download size={14} /> Download Guide (.md)
+                </button>
+                <button
+                  onClick={() => setShowSuperAdminDocModal(false)}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted, #94a3b8)', cursor: 'pointer' }}
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / Markdown Container */}
+            <div style={{
+              padding: '1.5rem',
+              overflowY: 'auto',
+              flex: 1,
+              fontSize: '0.88rem',
+              lineHeight: 1.65,
+              color: 'var(--text-secondary, #cbd5e1)'
+            }}>
+              {guideLoading ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '3rem', gap: '0.5rem', color: '#c084fc' }}>
+                  <RefreshCw size={20} className="animate-spin" /> Loading privileged architectural document...
+                </div>
+              ) : (
+                <pre style={{
+                  whiteSpace: 'pre-wrap',
+                  wordWrap: 'break-word',
+                  fontFamily: 'inherit',
+                  margin: 0,
+                  fontSize: '0.86rem'
+                }}>
+                  {guideContent}
+                </pre>
+              )}
             </div>
           </div>
         </div>
