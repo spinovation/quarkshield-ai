@@ -49,7 +49,8 @@ import {
   User,
   CreditCard,
   Star,
-  ChevronUp
+  ChevronUp,
+  Cpu
 } from 'lucide-react';
 import HelpFeedbackWidget from './HelpFeedbackWidget';
 import MoscaMigrationPlanner from './MoscaMigrationPlanner';
@@ -106,7 +107,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   // Modals state
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [policyModal, setPolicyModal] = useState<'privacy' | 'terms' | 'disclosure' | null>(null);
-  const [guideModal, setGuideModal] = useState<'overview' | 'windows' | 'mac' | 'linux' | null>(null);
+  const [guideModal, setGuideModal] = useState<'overview' | 'features' | 'windows' | 'mac' | 'linux' | null>(null);
   const [showCareerModal, setShowCareerModal] = useState(false);
   const [showSupportModal, setShowSupportModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -651,6 +652,41 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
 
                   <div 
                     className="resources-dropdown-item"
+                    style={{ cursor: 'pointer', background: 'rgba(168, 85, 247, 0.08)', borderRadius: '6px' }}
+                    onClick={() => {
+                      setResourcesDropdownOpen(false);
+                      setGuideModal('features');
+                    }}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(0, 242, 254, 0.25) 100%)',
+                      border: '1px solid rgba(168, 85, 247, 0.4)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#c084fc',
+                      flexShrink: 0
+                    }}>
+                      <Cpu size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        Enterprise Features &amp; Operations Guide
+                        <span style={{ fontSize: '0.64rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.35)' }}>3-Tier Model</span>
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Step-by-step setup, execution, and CBOM results across all 3 tiers
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '0.25rem 0' }} />
+
+                  <div 
+                    className="resources-dropdown-item"
                     style={{ cursor: 'pointer' }}
                     onClick={() => {
                       setResourcesDropdownOpen(false);
@@ -951,6 +987,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               style={{ color: 'var(--accent-cyan)', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
             >
               <BookOpen size={15} color="var(--accent-cyan)" /> Documentation Center
+            </div>
+            <div 
+              onClick={() => { setMobileMenuOpen(false); setGuideModal('features'); }}
+              style={{ color: '#c084fc', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <Cpu size={15} color="#c084fc" /> Enterprise Features &amp; Operations Guide
             </div>
             <div 
               onClick={() => { setMobileMenuOpen(false); setGuideModal('windows'); }}
@@ -2107,6 +2149,295 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
               </div>
             </div>
           )}
+        </div>
+
+        {/* Enterprise Documentation & Architecture Resources Section */}
+        <div style={{ marginTop: '3rem' }}>
+          <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: '#c084fc', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+              <BookOpen size={16} /> Enterprise Resources &amp; Documentation
+            </div>
+            <h3 style={{ fontSize: 'clamp(1.5rem, 2.5vw, 1.9rem)', fontWeight: 800, margin: '0 0 0.5rem 0', color: '#ffffff' }}>
+              Architectural Blueprints, Features &amp; User Manuals
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', maxWidth: '680px', margin: '0 auto', fontSize: '0.92rem', lineHeight: 1.6 }}>
+              Comprehensive operational documentation, step-by-step setup guides, and compliance specifications for security architects, cryptographers, and system administrators.
+            </p>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '1.5rem' }}>
+            {/* Resource Card 1: Features & Operations Guide */}
+            <div style={{
+              background: 'linear-gradient(180deg, rgba(168, 85, 247, 0.08) 0%, rgba(10, 15, 28, 0.95) 100%)',
+              border: '1px solid rgba(168, 85, 247, 0.35)',
+              borderRadius: '12px',
+              padding: '1.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '1.25rem',
+              boxShadow: '0 8px 32px rgba(168, 85, 247, 0.12)'
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.85rem' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.3) 0%, rgba(0, 242, 254, 0.25) 100%)',
+                    border: '1px solid rgba(168, 85, 247, 0.5)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#c084fc'
+                  }}>
+                    <Cpu size={22} />
+                  </div>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '50px',
+                    background: 'rgba(168, 85, 247, 0.2)',
+                    color: '#c084fc',
+                    border: '1px solid rgba(168, 85, 247, 0.4)',
+                    fontWeight: 700,
+                    letterSpacing: '0.04em'
+                  }}>
+                    3-TIER MODEL
+                  </span>
+                </div>
+                <h4 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+                  Enterprise Features &amp; Operations Guide
+                </h4>
+                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  Detailed operations manual: Purpose, Steps to Connect, Execution Requirements, Results, and CBOM Views across Cloud KMS, Enterprise PKI, Hybrid Proxy, CI/CD Gate, and Workstations.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setGuideModal('features')}
+                  style={{
+                    background: 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '0.6rem 1.15rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    boxShadow: '0 0 16px rgba(168, 85, 247, 0.35)'
+                  }}
+                >
+                  <BookOpen size={15} /> Read Guide
+                </button>
+                <a
+                  href="/docs/QUARKSHIELD_ENTERPRISE_FEATURES_GUIDE.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    color: 'var(--text-secondary)',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <ExternalLink size={14} /> Markdown (.md)
+                </a>
+              </div>
+            </div>
+
+            {/* Resource Card 2: Agentless PQC Architecture */}
+            <div style={{
+              background: 'linear-gradient(180deg, rgba(0, 242, 254, 0.06) 0%, rgba(10, 15, 28, 0.95) 100%)',
+              border: '1px solid rgba(0, 242, 254, 0.3)',
+              borderRadius: '12px',
+              padding: '1.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '1.25rem'
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.85rem' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'rgba(0, 242, 254, 0.15)',
+                    border: '1px solid rgba(0, 242, 254, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--accent-cyan)'
+                  }}>
+                    <Layers size={22} />
+                  </div>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '50px',
+                    background: 'rgba(0, 242, 254, 0.15)',
+                    color: 'var(--accent-cyan)',
+                    border: '1px solid rgba(0, 242, 254, 0.35)',
+                    fontWeight: 700,
+                    letterSpacing: '0.04em'
+                  }}>
+                    WHITEPAPER
+                  </span>
+                </div>
+                <h4 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+                  Agentless PQC Architecture &amp; Strategy
+                </h4>
+                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  Strategic blueprint: Overcoming enterprise agent fatigue via out-of-band cloud disk snapshots, passive wire TLS inspection, and centralized PKI discovery without host disruption.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setGuideModal('overview')}
+                  style={{
+                    background: 'rgba(0, 242, 254, 0.12)',
+                    color: 'var(--accent-cyan)',
+                    border: '1px solid rgba(0, 242, 254, 0.4)',
+                    padding: '0.6rem 1.15rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem'
+                  }}
+                >
+                  <BookOpen size={15} /> Read Architecture
+                </button>
+                <a
+                  href="/docs/AGENTLESS_PQC_ARCHITECTURE.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    color: 'var(--text-secondary)',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <ExternalLink size={14} /> Markdown (.md)
+                </a>
+              </div>
+            </div>
+
+            {/* Resource Card 3: Enterprise Agent Deployment Guide */}
+            <div style={{
+              background: 'linear-gradient(180deg, rgba(16, 185, 129, 0.06) 0%, rgba(10, 15, 28, 0.95) 100%)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: '12px',
+              padding: '1.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '1.25rem'
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.85rem' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#10b981'
+                  }}>
+                    <Laptop size={22} />
+                  </div>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '50px',
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    color: '#10b981',
+                    border: '1px solid rgba(16, 185, 129, 0.35)',
+                    fontWeight: 700,
+                    letterSpacing: '0.04em'
+                  }}>
+                    DEPLOYMENT MANUAL
+                  </span>
+                </div>
+                <h4 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+                  Enterprise Agent Deployment Manual
+                </h4>
+                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  Fleet orchestration guide: Mass-rollout scripts, Intune packaging, Jamf configuration profiles, Active Directory GPO setup, and Linux Ansible playbooks.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setGuideModal('windows')}
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    color: '#10b981',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    padding: '0.6rem 1.15rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem'
+                  }}
+                >
+                  <BookOpen size={15} /> View OS Guides
+                </button>
+                <a
+                  href="/docs/ENTERPRISE_AGENT_DEPLOYMENT_GUIDE.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    color: 'var(--text-secondary)',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <ExternalLink size={14} /> Markdown (.md)
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -4509,7 +4840,7 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <a
-                  href={`/docs/${guideModal === 'windows' ? 'WINDOWS' : guideModal === 'mac' ? 'MACOS' : 'LINUX'}_USER_GUIDE.md`}
+                  href={guideModal === 'features' ? '/docs/QUARKSHIELD_ENTERPRISE_FEATURES_GUIDE.md' : `/docs/${guideModal === 'windows' ? 'WINDOWS' : guideModal === 'mac' ? 'MACOS' : guideModal === 'linux' ? 'LINUX' : 'AGENTLESS_PQC_ARCHITECTURE'}_USER_GUIDE.md`}
                   target="_blank"
                   rel="noreferrer"
                   style={{
@@ -4568,6 +4899,28 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
               >
                 <BookOpen size={16} color={guideModal === 'overview' ? 'var(--accent-cyan)' : 'currentColor'} />
                 Documentation Center
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGuideModal('features')}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  borderBottom: guideModal === 'features' ? '2px solid #a855f7' : '2px solid transparent',
+                  color: guideModal === 'features' ? '#ffffff' : 'var(--text-muted)',
+                  fontWeight: guideModal === 'features' ? 700 : 500,
+                  fontSize: '0.88rem',
+                  padding: '0.65rem 1.25rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <Cpu size={16} color={guideModal === 'features' ? '#a855f7' : 'currentColor'} />
+                Features &amp; Operations Guide
               </button>
 
               <button
@@ -4837,8 +5190,275 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
               )}
 
               {/* =============================================================== */}
-              {/* TAB 1: WINDOWS GUIDE                                            */}
+              {/* TAB: ENTERPRISE FEATURES & OPERATIONS GUIDE                     */}
               {/* =============================================================== */}
+              {guideModal === 'features' && (
+                <>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem', marginBottom: '0.75rem' }}>
+                      <div>
+                        <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.35rem 0' }}>
+                          QuarkShield Enterprise Platform: Features &amp; Operations Guide
+                        </h2>
+                        <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
+                          3-Tier Hybrid Architecture • Steps to Connect • Execution Requirements • Results &amp; CBOM Verification
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <a
+                          href="/docs/QUARKSHIELD_ENTERPRISE_FEATURES_GUIDE.md"
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{
+                            background: 'rgba(168, 85, 247, 0.15)',
+                            border: '1px solid rgba(168, 85, 247, 0.4)',
+                            color: '#c084fc',
+                            padding: '0.45rem 0.9rem',
+                            borderRadius: '6px',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            textDecoration: 'none',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem'
+                          }}
+                        >
+                          <Download size={13} /> Download .MD Guide
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Feature 1: Unified Integrations Hub */}
+                  <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Layers size={19} color="var(--accent-cyan)" /> Feature 1: Unified Integrations Hub
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--accent-cyan)', border: '1px solid rgba(0, 242, 254, 0.3)', fontWeight: 700 }}>
+                        SINGLE-PANE COMMAND CENTER
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Purpose:</strong> Consolidates all enterprise ingestion sources (Cloud KMS, Enterprise PKI, Hybrid Proxies, Fleets, CI/CD Gates, and Repos) into a single-pane directory modeled after Wiz and Splunk. Eliminates navigation fragmentation and duplicated setup screens.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Steps to Connect:</strong> Open <em>Integrations Hub</em> from the left sidebar ➔ Select any connector card (AWS KMS, AD CS, macOS, Proxy) ➔ 3-step slide-out drawer opens: Step 1 (Blueprint &amp; IAM/GPO script), Step 2 (Credentials &amp; Test Connection), Step 3 (Live Discovered Keys).</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Required to Execute:</strong> Corporate Admin role, read-only provider credentials (IAM Role ARN, Vault Token, LDAP user, or Fleet Token). Click <em>Verify &amp; Test Connection</em> then <em>Save &amp; Sync</em>.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Results Produced:</strong> Activates live connector monitoring, triggers cryptographic discovery, and tags findings by source (<code>cloud_kms</code>, <code>enterprise_pki</code>, <code>pqc_proxy</code>, <code>endpoint</code>, <code>git_repo</code>).</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• How to View:</strong> In Step 3 preview table inside drawer, on integration cards (live key counters), or click <em>Open in CBOM Inventory</em> pre-filtered by source.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 2: Tier 1 Cloud KMS */}
+                  <div style={{ background: 'rgba(168, 85, 247, 0.04)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(168, 85, 247, 0.25)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Key size={19} color="#c084fc" /> Feature 2: Tier 1 Cloud KMS (AWS KMS &amp; Azure Key Vault)
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', fontWeight: 700 }}>
+                        TIER 1 • CLOUD HSM
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: '#c084fc' }}>• Purpose:</strong> Discovers and catalogs cryptographic keys, asymmetric certificates, and envelope encryption inside cloud HSMs without installing agents on cloud VMs.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Steps to Connect:</strong> In <em>Integrations Hub ➔ Tier 1 ➔ AWS KMS</em>, attach the provided read-only IAM Policy (<code>kms:ListKeys</code>, <code>kms:DescribeKey</code>) to an IAM Role, enter Role ARN and target regions. For Azure KV: provide Entra ID App Registration Client ID, Tenant ID, and Secret.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Required to Execute:</strong> Read-only Cloud IAM permissions (zero decrypt/sign permissions required). Click <em>Test Connection</em> followed by <em>Trigger Discovery Sync</em>.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Results Produced:</strong> Discovers Customer Master Keys (CMKs), key specs (RSA-2048, RSA-4096, ECC P-256, P-384), rotation states, and Shor algorithm threat ratings.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• How to View:</strong> Under <em>Settings ➔ Enterprise PKI &amp; Vaults</em> dashboard cards, and in <em>CBOM Inventory</em> selecting <code>Source: Cloud KMS</code>.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 3: Tier 1 Enterprise PKI */}
+                  <div style={{ background: 'rgba(0, 242, 254, 0.03)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(0, 242, 254, 0.2)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <ShieldCheck size={19} color="var(--accent-cyan)" /> Feature 3: Tier 1 Enterprise PKI &amp; Vaults (AD CS &amp; HashiCorp)
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--accent-cyan)', border: '1px solid rgba(0, 242, 254, 0.3)', fontWeight: 700 }}>
+                        TIER 1 • ENTERPRISE CA
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Purpose:</strong> Provides centralized visibility into enterprise Public Key Infrastructure (Root CAs, Sub CAs, certificate templates, and Vault secrets engines) issuing internal certificates.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Steps to Connect:</strong> In <em>Integrations Hub ➔ Tier 1 ➔ Microsoft AD CS</em>, provide CA hostname and LDAP/Kerberos service account. For HashiCorp Vault: provide Vault URL, AppRole Role ID/Secret ID, and mount paths (<code>pki/</code>).</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Required to Execute:</strong> Read-only directory or HTTP API access. Network line-of-sight to the CA server. Click <em>Run Discovery Sync</em>.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Results Produced:</strong> Enumerates all active Root CAs, Subordinate CAs, issuing templates, validity periods, and signature algorithms (SHA-1, SHA-256, RSA, ECDSA).</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• How to View:</strong> In <em>Settings ➔ Enterprise PKI &amp; Vaults</em> connector cards, and in <em>CBOM Inventory</em> filtering by <code>Source: Enterprise PKI</code>.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 4: Tier 2 Hybrid Quantum TLS Proxy */}
+                  <div style={{ background: 'rgba(16, 185, 129, 0.04)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(16, 185, 129, 0.25)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Zap size={19} color="#10b981" /> Feature 4: Tier 2 Hybrid Quantum TLS Reverse Proxy Gateway
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '1px solid rgba(16, 185, 129, 0.3)', fontWeight: 700 }}>
+                        TIER 2 • ZERO-CODE PQC
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: '#10b981' }}>• Purpose:</strong> Terminates post-quantum hybrid key exchange (<code>X25519MLKEM768</code>, curve <code>0x11ec</code>, NIST FIPS 203) at ingress with <strong>zero application source code changes</strong>, immediately defeating Harvest Now, Decrypt Later (HNDL) attacks.</div>
+                      <div><strong style={{ color: '#10b981' }}>• Steps to Connect:</strong> Open <em>Hybrid Quantum TLS Proxy</em> from sidebar ➔ Click <em>+ New Proxy Instance</em> ➔ Set Listen Port (e.g. 5443), Upstream URL (e.g. http://127.0.0.1:5050), and edge TLS certs ➔ Click <em>Create &amp; Launch</em>.</div>
+                      <div><strong style={{ color: '#10b981' }}>• Required to Execute:</strong> Available ingress port, reachable backend HTTP/HTTPS service. Optional: Download NGINX/Envoy/Docker Compose template via <em>Export Config Template</em>.</div>
+                      <div><strong style={{ color: '#10b981' }}>• Results Produced:</strong> Active proxy listener terminating hybrid post-quantum TLS handshakes with classical fallback, logging connection counters, and syndicating the proxy asset into CBOM (<code>source = 'pqc_proxy'</code>).</div>
+                      <div><strong style={{ color: '#10b981' }}>• How to View:</strong> In <em>Hybrid Proxy</em> screen showing live status and handshake count. Click <em>Test Handshake</em> to send an active TLS 1.3 ClientHello and view negotiated curve <code>0x11ec</code> and handshake latency.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 5: Tier 2 In-Flight Wire TLS */}
+                  <div style={{ background: 'rgba(255, 255, 255, 0.02)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Radio size={19} color="#38bdf8" /> Feature 5: Tier 2 In-Flight Wire TLS Passive Probing &amp; Mirroring
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', fontWeight: 700 }}>
+                        TIER 2 • WIRE TLS
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: '#38bdf8' }}>• Purpose:</strong> Audits in-flight cryptographic protocols across switches, firewalls, and cloud VPCs out-of-band without intercepting, decrypting, or adding latency to live production traffic.</div>
+                      <div><strong style={{ color: '#38bdf8' }}>• Steps to Connect:</strong> In <em>Integrations Hub ➔ Tier 2 ➔ Passive Wire Mirror</em>, configure SPAN/TAP port on network switches or AWS/Azure Traffic Mirroring directed to QuarkShield collector.</div>
+                      <div><strong style={{ color: '#38bdf8' }}>• Required to Execute:</strong> Promiscuous network interface or mirrored flow log sink (Zeek, Suricata, NetFlow). Run <code>sudo ./pqc-scanner --mode=wire --interface=eth1</code>.</div>
+                      <div><strong style={{ color: '#38bdf8' }}>• Results Produced:</strong> Real-time catalog of all in-flight TLS versions (1.0, 1.1, 1.2, 1.3), cipher suites, Server Name Indications (SNI), and deprecated non-PFS ciphers.</div>
+                      <div><strong style={{ color: '#38bdf8' }}>• How to View:</strong> In <em>Overview &amp; Metrics</em> dashboard wire traffic breakdown, and in <em>CBOM Inventory</em> filtering by <code>Source: Wire TLS</code>.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 6: Tier 3 Endpoint Workstations */}
+                  <div style={{ background: 'rgba(0, 242, 254, 0.03)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(0, 242, 254, 0.2)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Laptop size={19} color="var(--accent-cyan)" /> Feature 6: Tier 3 Endpoint Workstation Fleet Scanner (macOS, Windows, Linux)
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--accent-cyan)', border: '1px solid rgba(0, 242, 254, 0.3)', fontWeight: 700 }}>
+                        TIER 3 • ZERO REBOOT
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Purpose:</strong> Discovers private keys, certificates, SSH keys, OpenSSL/GPG configs, and crypto libraries across employee workstations and servers with <strong>zero reboots, non-intrusive operations, and 0% idle CPU overhead</strong>.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Steps to Connect:</strong> In <em>Integrations Hub ➔ Tier 3 ➔ Endpoint Workstations</em>, copy the 1-click curl / PowerShell command containing your fleet enrollment token. Deploy via Intune, Jamf, GPO, or Ansible.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Required to Execute:</strong> Valid Fleet Token. User-level execution (user profile) or root/Administrator (system-wide keychains). No kernel drivers needed.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Results Produced:</strong> Discovers certificates, private keys, SSH keys, and dependencies. Reports machine hostname, IP, OS, agent version, and total vulnerable assets.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• How to View:</strong> In <em>Fleet Management</em> table showing online status and host check-ins, and in <em>CBOM Inventory</em> filtering by <code>Source: Fleet Endpoints</code>.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 7: Tier 3 CI/CD Security Gate */}
+                  <div style={{ background: 'rgba(239, 68, 68, 0.04)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(239, 68, 68, 0.25)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Terminal size={19} color="#ef4444" /> Feature 7: Tier 3 CI/CD Pipeline CBOM Security Gate
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(239, 68, 68, 0.15)', color: '#ef4444', border: '1px solid rgba(239, 68, 68, 0.3)', fontWeight: 700 }}>
+                        TIER 3 • SHIFT-LEFT PR BLOCKER
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: '#ef4444' }}>• Purpose:</strong> Prevents quantum-vulnerable cryptography from entering production codebases by evaluating pull requests in GitHub Actions, GitLab CI, and Bitbucket. <strong>Fails the build (Exit Code 1)</strong> if classical algorithms (RSA, ECC, 3DES, MD5) are committed.</div>
+                      <div><strong style={{ color: '#ef4444' }}>• Steps to Connect:</strong> In <em>Integrations Hub ➔ Tier 3 ➔ CI/CD Gate</em>, select your CI provider, copy the YAML workflow into <code>.github/workflows/quarkshield-pqc-gate.yml</code>, and set <code>QUARKSHIELD_API_TOKEN</code> in repository secrets.</div>
+                      <div><strong style={{ color: '#ef4444' }}>• Required to Execute:</strong> CI runner executing the downloaded <code>runner.sh</code> script on Pull Request triggers.</div>
+                      <div><strong style={{ color: '#ef4444' }}>• Results Produced:</strong> Policy decision (<code>PASSED</code> Exit Code 0 or <code>BLOCKED</code> Exit Code 1), Quantum Risk Score (0-100), and automated rich GitHub Markdown comment posted to PR thread with remediation advice.</div>
+                      <div><strong style={{ color: '#ef4444' }}>• How to View:</strong> Directly on GitHub/GitLab PR conversation tab, and in QuarkShield console under <em>External Repositories ➔ CI/CD Gate History</em> audit log.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 8: Tier 3 Remote Git Auditor */}
+                  <div style={{ background: 'rgba(168, 85, 247, 0.04)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(168, 85, 247, 0.25)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <FileCode size={19} color="#c084fc" /> Feature 8: Tier 3 Remote Git Repository Cryptographic Auditor
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', fontWeight: 700 }}>
+                        TIER 3 • CODE SCANNER
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: '#c084fc' }}>• Purpose:</strong> Static application cryptographic analysis across remote Git repositories (public or private) without cloning to developer workstations. Scans source code and package manifests for hardcoded keys, legacy ciphers, and outdated crypto libraries.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Steps to Connect:</strong> Navigate to <em>External Repositories</em> in sidebar ➔ Enter Git URL (e.g. <code>https://github.com/org/repo.git</code>) ➔ Specify branch ➔ Enter Personal Access Token (for private repos) ➔ Click <em>Scan Repository</em>.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Required to Execute:</strong> Valid Git URL and read permissions. Outbound network access to GitHub/GitLab.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Results Produced:</strong> Discovers files, manifests, and crypto primitives. Ingests findings into central database tagged with <code>source = 'git_repo'</code> and <code>source_ref = [repo_url]</code>.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• How to View:</strong> Interactive findings breakdown with highlighted source code snippets and line numbers, and in <em>CBOM Inventory</em> filtering by <code>Source: Git Repositories</code>.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 9: Universal CBOM Inventory */}
+                  <div style={{ background: 'rgba(0, 242, 254, 0.03)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(0, 242, 254, 0.2)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <FileCode size={19} color="var(--accent-cyan)" /> Feature 9: Universal CBOM Inventory &amp; Multi-Source Filtering
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--accent-cyan)', border: '1px solid rgba(0, 242, 254, 0.3)', fontWeight: 700 }}>
+                        CYCLONEDX 1.6
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Purpose:</strong> Single source of truth consolidating all cryptographic assets across endpoints, repos, cloud vaults, and edge proxies formatted to the CycloneDX 1.6 Cryptographic BOM standard.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Steps to Connect:</strong> Automatically syndicated from all Tier 1, Tier 2, and Tier 3 connectors. No separate setup required.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Required to Execute:</strong> Open <em>CBOM Inventory</em> tab. Use the source filter dropdown to segment by <code>All Sources</code>, <code>Fleet Endpoints</code>, <code>Git Repositories</code>, <code>Cloud KMS</code>, <code>Enterprise PKI</code>, or <code>Hybrid Proxy</code>.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Results Produced:</strong> Paginated universal inventory table with color-coded origin badges, key lengths, Shor vulnerability indicators, and quantum risk scores (0-100).</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• How to View:</strong> In <em>CBOM Inventory</em> tab, with instant CSV/JSON exports and 50-row pagination.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 10: CDXA Attestation & ML-DSA Signing */}
+                  <div style={{ background: 'rgba(168, 85, 247, 0.04)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(168, 85, 247, 0.25)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <ShieldCheck size={19} color="#c084fc" /> Feature 10: CycloneDX Attestation (CDXA) &amp; ML-DSA-65 Signing
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', fontWeight: 700 }}>
+                        FIPS 204 • NIST SP 800-218
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: '#c084fc' }}>• Purpose:</strong> Generates tamper-evident CBOM exports certified against NIST SP 800-218 (SSDF) and NSA CNSA 2.0, digitally signed using post-quantum <strong>ML-DSA-65 (NIST FIPS 204)</strong> for federal agencies and defense auditors.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Steps to Connect:</strong> In <em>CBOM Inventory ➔ Raw JSON &amp; Export</em>, click <em>Export Attested CBOM (CDXA)</em> or toggle <em>CDXA Attestation &amp; Signing: ON</em>.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Required to Execute:</strong> Authenticated tenant session. Attestation engine dynamically resolves the active tenant name (current and future) and salts the signature digest.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• Results Produced:</strong> CycloneDX 1.6 JSON containing <code>declarations</code> (assessors, targets, affirmation, claims) and post-quantum JSF <code>signature</code> block signed with ML-DSA-65.</div>
+                      <div><strong style={{ color: '#c084fc' }}>• How to View:</strong> Interactive JSON viewer with lightweight preview, or download <code>[tenant]-cbom.cdxa-attested-1.6.json</code>.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 11: Mosca's Migration Planner */}
+                  <div style={{ background: 'rgba(245, 158, 11, 0.04)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(245, 158, 11, 0.25)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Calendar size={19} color="#f59e0b" /> Feature 11: Mosca&apos;s Migration Planner (Y2Q Readiness Assessment)
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.15)', color: '#f59e0b', border: '1px solid rgba(245, 158, 11, 0.3)', fontWeight: 700 }}>
+                        X + Y &gt; Z MODEL
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: '#f59e0b' }}>• Purpose:</strong> Calculates whether an organization is already compromised today under Mosca&apos;s Theorem (Data Shelf-Life <em>X</em> + Migration Time <em>Y</em> &gt; Quantum Arrival <em>Z</em>) due to Harvest Now, Decrypt Later (HNDL) attacks.</div>
+                      <div><strong style={{ color: '#f59e0b' }}>• Steps to Connect:</strong> In the tenant portal, navigate to <em>Settings ➔ Mosca&apos;s Migration Planner</em> (or click Planner on landing page).</div>
+                      <div><strong style={{ color: '#f59e0b' }}>• Required to Execute:</strong> Adjust interactive sliders for Shelf-Life <em>X</em> (1-30 yrs), Migration Time <em>Y</em> (1-10 yrs), and Quantum Year <em>Z</em>. Automatically binds live fleet endpoint and vulnerability totals.</div>
+                      <div><strong style={{ color: '#f59e0b' }}>• Results Produced:</strong> Mathematical risk verdict (CRITICAL RISK / BALANCED / SECURE), visual Gantt timeline chart, and critical path deficit in years/months.</div>
+                      <div><strong style={{ color: '#f59e0b' }}>• How to View:</strong> Rendered interactively inside <em>Settings ➔ Mosca&apos;s Migration Planner</em> and on executive board summary reports.</div>
+                    </div>
+                  </div>
+
+                  {/* Feature 12: PQC Copilot */}
+                  <div style={{ background: 'rgba(0, 242, 254, 0.03)', padding: '1.4rem', borderRadius: '10px', border: '1px solid rgba(0, 242, 254, 0.2)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Sparkles size={19} color="var(--accent-cyan)" /> Feature 12: PQC Copilot (Enterprise Cryptographic Advisory AI)
+                      </h3>
+                      <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.55rem', borderRadius: '4px', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--accent-cyan)', border: '1px solid rgba(0, 242, 254, 0.3)', fontWeight: 700 }}>
+                        ADVISORY &amp; REMEDIATION
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', fontSize: '0.88rem' }}>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Purpose:</strong> Conversational AI assistant providing step-by-step guidance on onboarding, initial credentials, first scans, staff allocation, CI/CD gate configuration, and code-level PQC remediation playbooks.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Steps to Connect:</strong> Click <em>PQC Copilot</em> in sidebar. Type natural language questions or click 1-click Quick Prompt Chips (e.g. <em>&quot;What are my next steps?&quot;</em>, <em>&quot;How do I run my first scan?&quot;</em>).</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Required to Execute:</strong> Works in dual-mode: Online Mode (LLM augmented with live tenant context) and Offline Local Rules Engine (guaranteed 100% uptime in air-gapped environments).</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• Results Produced:</strong> Copyable shell scripts, concrete code replacements (e.g. replacing RSA-2048 with ML-DSA-65), and operational answers.</div>
+                      <div><strong style={{ color: 'var(--accent-cyan)' }}>• How to View:</strong> In the Copilot conversational thread in the tenant portal.</div>
+                    </div>
+                  </div>
+                </>
+              )}
+
               {guideModal === 'windows' && (
                 <>
                   <div>
