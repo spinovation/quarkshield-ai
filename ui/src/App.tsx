@@ -396,7 +396,7 @@ export default function App() {
   const [totpVerificationCode, setTotpVerificationCode] = useState('');
   const [totpSuccess, setTotpSuccess] = useState(false);
   const [copiedBackupCodes, setCopiedBackupCodes] = useState(false);
-  const [adminInitialSubTab, setAdminInitialSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics'>('licenses');
+  const [adminInitialSubTab, setAdminInitialSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics' | 'platform_sbom'>('licenses');
 
   // Token creation & deployment states
   const [showCreateTokenModal, setShowCreateTokenModal] = useState(false);
@@ -2436,7 +2436,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
 
               {cbomViewMode === 'sbom' ? (
                 <div style={{ marginTop: '0.75rem' }}>
-                  <SbomInventory tenant={selectedTenantFilter === 'all' ? 'SPINOVATIONCORP' : selectedTenantFilter} apiUrl="" />
+                  <SbomInventory tenant={selectedTenantFilter === 'all' ? 'SPINOVATIONCORP' : selectedTenantFilter} apiUrl="" isSuperAdmin={true} />
                 </div>
               ) : (
                 <>

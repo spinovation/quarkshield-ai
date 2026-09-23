@@ -63,9 +63,15 @@ interface SbomStats {
 interface SbomInventoryProps {
   tenant?: string;
   apiUrl?: string;
+  isSuperAdmin?: boolean;
 }
 
-export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '' }: SbomInventoryProps) {
+export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '', isSuperAdmin = false }: SbomInventoryProps) {
+  const [selectedScope, setSelectedScope] = useState<'platform' | 'client'>(
+    isSuperAdmin ? (tenant.toLowerCase().includes('quarkshield') ? 'platform' : 'platform') : 'client'
+  );
+  const activeTenant = (isSuperAdmin && selectedScope === 'platform') ? 'quarkshield.ai' : tenant;
+
   const [components, setComponents] = useState<SbomComponent[]>([]);
   const [stats, setStats] = useState<SbomStats>({
     totalComponents: 0,
@@ -90,10 +96,14 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '' 
   const fetchSbomData = async () => {
     setLoading(true);
     try {
-      const tenantParam = encodeURIComponent(tenant);
+      const tenantParam = encodeURIComponent(activeTenant);
+      const headers: Record<string, string> = {};
+      if (isSuperAdmin) {
+        headers['x-admin-role'] = 'super_admin';
+      }
       const [compRes, statsRes] = await Promise.all([
-        fetch(`${apiUrl}/api/sbom/components?tenant=${tenantParam}&limit=200`),
-        fetch(`${apiUrl}/api/sbom/stats?tenant=${tenantParam}`)
+        fetch(`${apiUrl}/api/sbom/components?tenant=${tenantParam}&limit=200`, { headers }),
+        fetch(`${apiUrl}/api/sbom/stats?tenant=${tenantParam}`, { headers })
       ]);
 
       if (compRes.ok) {
@@ -118,7 +128,7 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '' 
 
   useEffect(() => {
     fetchSbomData();
-  }, [tenant]);
+  }, [activeTenant, selectedScope]);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -153,11 +163,13 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '' 
   const totalPages = Math.ceil(filteredComponents.length / pageSize) || 1;
 
   const handleExportJson = () => {
-    window.open(`${apiUrl}/api/sbom/export?tenant=${encodeURIComponent(tenant)}`, '_blank');
+    const adminParam = isSuperAdmin ? '&admin=true' : '';
+    window.open(`${apiUrl}/api/sbom/export?tenant=${encodeURIComponent(activeTenant)}${adminParam}`, '_blank');
   };
 
   const handleDownloadFixScript = () => {
-    window.open(`${apiUrl}/api/sbom/fix-script?tenant=${encodeURIComponent(tenant)}`, '_blank');
+    const adminParam = isSuperAdmin ? '&admin=true' : '';
+    window.open(`${apiUrl}/api/sbom/fix-script?tenant=${encodeURIComponent(activeTenant)}${adminParam}`, '_blank');
   };
 
   const exportCsv = () => {
@@ -183,7 +195,7 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '' 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${tenant.toLowerCase()}-sbom-inventory.csv`);
+    link.setAttribute('download', `${activeTenant.toLowerCase()}-sbom-inventory.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -191,6 +203,78 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '' 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      {/* Super Admin Privileged Access Banner & Scope Selector */}
+      {isSuperAdmin && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.12) 0%, rgba(56, 189, 248, 0.12) 100%)',
+          border: '1px solid rgba(168, 85, 247, 0.4)',
+          borderRadius: '12px',
+          padding: '1.25rem 1.5rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem'
+        }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
+              <ShieldCheck size={20} color="#c084fc" />
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#ffffff' }}>
+                QuarkShield Platform Architecture &amp; System Stack SBOM
+              </h3>
+              <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.5rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.25)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.5)', fontWeight: 700 }}>
+                Super Admin Only
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)', maxWidth: '780px' }}>
+              Privileged infrastructure inventory documenting <strong>quarkshield.ai</strong> production runtime packages, database drivers, scanner binaries, and container layers. Evaluated against NVD &amp; GitHub Security Advisories.
+            </p>
+          </div>
+
+          {/* Scope Toggle */}
+          <div style={{ display: 'flex', background: 'rgba(0, 0, 0, 0.45)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.12)' }}>
+            <button
+              onClick={() => { setSelectedScope('platform'); setCurrentPage(1); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                padding: '0.45rem 0.9rem',
+                borderRadius: '6px',
+                border: 'none',
+                background: selectedScope === 'platform' ? 'rgba(168, 85, 247, 0.35)' : 'transparent',
+                color: selectedScope === 'platform' ? '#c084fc' : 'var(--text-muted, #94a3b8)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Package size={14} /> QuarkShield Platform Stack (quarkshield.ai)
+            </button>
+            <button
+              onClick={() => { setSelectedScope('client'); setCurrentPage(1); }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                padding: '0.45rem 0.9rem',
+                borderRadius: '6px',
+                border: 'none',
+                background: selectedScope === 'client' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
+                color: selectedScope === 'client' ? '#38bdf8' : 'var(--text-muted, #94a3b8)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+            >
+              <Layers size={14} /> Customer Enrolled Workloads ({tenant})
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* 1. Summary Metric Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
         {/* Total Components */}
