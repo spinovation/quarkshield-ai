@@ -716,8 +716,33 @@ async function ensureTenantSbomSeed(tenant: string) {
       }
     ];
 
+    // Resolve tenant organization slug for realistic source repos
+    let tenantOrg = tenant.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (tenant.toUpperCase().startsWith('PART-') || tenant.toUpperCase().startsWith('CORP-')) {
+      try {
+        const clientLookup = await pool.query(
+          `SELECT name FROM admin_clients WHERE UPPER(customer_id) = UPPER($1) LIMIT 1`,
+          [tenant]
+        );
+        if (clientLookup.rows.length > 0 && clientLookup.rows[0].name) {
+          tenantOrg = clientLookup.rows[0].name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        }
+      } catch (err) {
+        // fallback
+      }
+    }
+
     for (const comp of seed) {
-      const id = 'sbom-' + crypto.randomUUID().substring(0, 8);
+      const id = 'sbom-' + crypto.createHash('md5').update(`${tenant.toLowerCase()}:${comp.name}:${comp.version}:${comp.file_path}`).digest('hex').substring(0, 16);
+      let sourceRef = comp.source_ref;
+      if (!isPlatform) {
+        if (comp.source === 'git_repo') {
+          sourceRef = sourceRef.replace('spinovation', tenantOrg);
+        } else if (comp.source === 'endpoint') {
+          sourceRef = `ciso-workstation.${tenantOrg}.internal`;
+        }
+      }
+
       await pool.query(
         `INSERT INTO sbom_components (id, tenant_name, source, source_ref, file_path, name, version, ecosystem, purl, license, has_vulnerabilities, vuln_count, max_severity, vulnerabilities)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -726,7 +751,7 @@ async function ensureTenantSbomSeed(tenant: string) {
           id,
           tenant.toUpperCase(),
           comp.source,
-          comp.source_ref,
+          sourceRef,
           comp.file_path,
           comp.name,
           comp.version,
