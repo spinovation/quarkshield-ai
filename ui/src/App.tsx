@@ -36,7 +36,8 @@ import {
   QrCode,
   AlertTriangle,
   Database,
-  Radio
+  Radio,
+  Package
 } from 'lucide-react';
 
 import { AdminPanel } from './components/AdminPanel';
@@ -46,6 +47,7 @@ import { TenantPortal } from './components/TenantPortal';
 import MoscaMigrationPlanner from './components/MoscaMigrationPlanner';
 import { EnterprisePkiVaults } from './components/EnterprisePkiVaults';
 import { PqcProxyGateway } from './components/PqcProxyGateway';
+import SbomInventory from './components/SbomInventory';
 
 export type TabType = 'dashboard' | 'cbom' | 'tokens' | 'git' | 'pki' | 'proxy' | 'planner' | 'admin';
 
@@ -380,7 +382,7 @@ export default function App() {
   const [selectedMachineFilter, setSelectedMachineFilter] = useState<string>('all');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
-  const [cbomViewMode, setCbomViewMode] = useState<'table' | 'json'>('table');
+  const [cbomViewMode, setCbomViewMode] = useState<'table' | 'json' | 'sbom'>('table');
   const [cbomPage, setCbomPage] = useState<number>(1);
   const cbomPerPage = 50;
 
@@ -1263,7 +1265,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           >
             <FileCode size={17} color={activeTab === 'cbom' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              CBOM Inventory (CycloneDX 1.6)
+              BOM Inventory (CBOM + SBOM)
             </span>
           </button>
 
@@ -2366,14 +2368,14 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div>
                   <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Layers size={18} color="var(--accent-cyan)" /> Cryptographic Bill of Materials (CycloneDX 1.6)
+                    <Layers size={18} color="var(--accent-cyan)" /> Cryptographic &amp; Software Bill of Materials (CycloneDX 1.6)
                   </h3>
                   <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    Standardized cryptographic inventory adhering to the global CycloneDX 1.6 specification.
+                    Standardized inventory adhering to the global CycloneDX 1.6 specification for cryptographic primitives and software dependencies.
                   </p>
                 </div>
 
-                {/* View Toggle (Table vs JSON) */}
+                {/* View Toggle (Table vs SBOM vs JSON) */}
                 <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(0,0,0,0.25)', padding: '0.2rem', borderRadius: '6px' }}>
                   <button
                     onClick={() => setCbomViewMode('table')}
@@ -2391,7 +2393,25 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                       cursor: 'pointer'
                     }}
                   >
-                    <FileCode size={14} /> Tabular View
+                    <FileCode size={14} /> CBOM Assets
+                  </button>
+                  <button
+                    onClick={() => setCbomViewMode('sbom')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      padding: '0.4rem 0.8rem',
+                      background: cbomViewMode === 'sbom' ? 'rgba(0, 242, 254, 0.2)' : 'transparent',
+                      border: 'none',
+                      borderRadius: '4px',
+                      color: cbomViewMode === 'sbom' ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <Package size={14} /> SBOM Dependencies &amp; Fixes
                   </button>
                   <button
                     onClick={() => setCbomViewMode('json')}
@@ -2414,8 +2434,14 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                 </div>
               </div>
 
-              {/* Filters Row */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem', background: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '8px' }}>
+              {cbomViewMode === 'sbom' ? (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <SbomInventory tenant={selectedTenantFilter === 'all' ? 'SPINOVATIONCORP' : selectedTenantFilter} apiUrl="" />
+                </div>
+              ) : (
+                <>
+                  {/* Filters Row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem', background: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '8px' }}>
                 <div>
                   <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.3rem' }}>Filter Machine</label>
                   <select 
@@ -2658,7 +2684,9 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                   </pre>
                 </div>
               )}
-            </div>
+            </>
+          )}
+        </div>
           </div>
         )}
 

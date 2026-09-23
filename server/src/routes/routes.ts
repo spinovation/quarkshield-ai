@@ -79,6 +79,12 @@ import {
   testProxyHandshake,
   getProxyTemplate
 } from '../controllers/pqcProxyController';
+import {
+  getSbomComponents,
+  getSbomStats,
+  exportSbom,
+  getFixScript
+} from '../controllers/sbomController';
 
 const router = Router();
 
@@ -210,5 +216,14 @@ router.get('/proxy/template', (req, res) => {
   return getProxyTemplate({ ...req, params: { format } } as any, res);
 });
 
+// =========================================================================
+// 4. SOFTWARE BILL OF MATERIALS (SBOM) & VULNERABILITY FIX ENGINE
+// =========================================================================
+router.get('/sbom/components', getSbomComponents);
+router.get('/sbom/stats', getSbomStats);
+router.get('/sbom/export', exportSbom);
+router.get('/sbom/fix-script', getFixScript);
+
 export default router;
+
 
