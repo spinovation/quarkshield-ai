@@ -1265,7 +1265,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           >
             <FileCode size={17} color={activeTab === 'cbom' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              BOM Inventory (CBOM + SBOM)
+              CBOM
             </span>
           </button>
 

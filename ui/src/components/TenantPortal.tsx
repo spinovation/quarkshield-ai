@@ -2786,7 +2786,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           {[
             { id: 'overview', label: 'Overview & Metrics', icon: Activity },
-            { id: 'cbom', label: 'BOM Inventory', icon: FileCode, badge: 'CBOM' },
+            { id: 'cbom', label: 'CBOM', icon: FileCode },
             { id: 'integrations', label: 'Integrations Hub', icon: Layers, badge: 'Unified Hub' },
             { id: 'proxy', label: 'Hybrid Quantum TLS Proxy', icon: Radio, badge: 'Inline' },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
@@ -3717,7 +3717,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                         <FileCode size={22} color="var(--accent-cyan, #38bdf8)" />
                         <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#ffffff' }}>
-                          BOM Inventory (CBOM)
+                          CBOM
                         </h2>
                         <span style={{
                           fontSize: '0.68rem',
