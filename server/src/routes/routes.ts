@@ -48,7 +48,13 @@ import {
   onboardUser,
   probeEndpoint,
   unifiedLogin,
-  getTenantPortalData
+  getTenantPortalData,
+  getOperators,
+  inviteOperator,
+  resetOperatorPassword,
+  resetTenantUserPassword,
+  forgotPassword,
+  changePassword
 } from '../controllers/adminController';
 import { getCnsaNews } from '../controllers/newsController';
 import { submitSupportTicket } from '../controllers/supportController';
@@ -124,6 +130,9 @@ router.delete('/admin/clients/:name', deleteClient);
 
 // User & Access Management
 router.get('/admin/users', getUsers);
+router.get('/admin/operators', getOperators);
+router.post('/admin/operators/invite', inviteOperator);
+router.post('/admin/operators/:id/reset-password', resetOperatorPassword);
 router.post('/admin/users/:id/role', toggleUserRole);
 router.post('/admin/users/:id/lock', toggleUserLock);
 router.post('/admin/users/:id/cmdb', toggleUserCMDB);
@@ -158,6 +167,7 @@ router.post('/tenants/:tenant/users', createTenantUser);
 router.patch('/tenants/:tenant/users/:id', updateTenantUser);
 router.delete('/tenants/:tenant/users/:id', deleteTenantUser);
 router.post('/tenants/:tenant/users/:id/reset-2fa', resetTenantUser2FA);
+router.post('/tenants/:tenant/users/:id/reset-password', resetTenantUserPassword);
 router.get('/tenants/:tenant/2fa-policy', getTenant2FAPolicy);
 router.put('/tenants/:tenant/2fa-policy', updateTenant2FAPolicy);
 router.get('/tenant/:tenant/portal-data', getTenantPortalData);
@@ -175,6 +185,8 @@ router.get('/news/cnsa', getCnsaNews);
 
 // Unified Authentication & Auto-Recognition (Tenant, Partner, Super Admin)
 router.post('/auth/login', unifiedLogin);
+router.post('/auth/forgot-password', forgotPassword);
+router.post('/auth/change-password', changePassword);
 
 // Help & Feedback / Support In-App Contact Submission
 router.post('/support/contact', submitSupportTicket);

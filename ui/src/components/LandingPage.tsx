@@ -20,6 +20,8 @@ import {
   Activity,
   Key,
   Lock,
+  Eye,
+  EyeOff,
   ShieldCheck,
   Calendar,
   Radio,
@@ -232,9 +234,29 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const [loginIdentifier, setLoginIdentifier] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [login2FACode, setLogin2FACode] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
   const [signInSuccessMsg, setSignInSuccessMsg] = useState<string | null>(null);
+
+  // Forgot Password modal state
+  const [showForgotPasswordModal, setShowForgotPasswordModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [isSendingForgot, setIsSendingForgot] = useState(false);
+  const [forgotSuccessMsg, setForgotSuccessMsg] = useState<string | null>(null);
+  const [forgotErrorMsg, setForgotErrorMsg] = useState<string | null>(null);
+
+  // Forced Password Change state (First login after invite or reset)
+  const [showForceChangeModal, setShowForceChangeModal] = useState(false);
+  const [pendingAuthData, setPendingAuthData] = useState<any>(null);
+  const [forceCurrentPassword, setForceCurrentPassword] = useState('');
+  const [forceNewPassword, setForceNewPassword] = useState('');
+  const [forceConfirmPassword, setForceConfirmPassword] = useState('');
+  const [showForceCurrent, setShowForceCurrent] = useState(false);
+  const [showForceNew, setShowForceNew] = useState(false);
+  const [showForceConfirm, setShowForceConfirm] = useState(false);
+  const [forceChangeError, setForceChangeError] = useState<string | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   // OS Download tab state with client OS auto-detection
   const [selectedOS, setSelectedOS] = useState<'windows' | 'mac' | 'linux'>(() => {
@@ -393,6 +415,85 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
     fetchCnsaNews();
   }, []);
 
+  // Helper to complete console redirection / state persistence upon verified authentication
+  const finalizeLogin = (data: any, email: string) => {
+    if (data.accountType === 'superadmin') {
+      localStorage.setItem('quarkshield_user', email);
+      sessionStorage.setItem('quarkshield_user', email);
+      localStorage.setItem('quarkshield_role', data.role || 'Super Admin');
+      sessionStorage.setItem('quarkshield_role', data.role || 'Super Admin');
+      localStorage.setItem('quarkshield_account_type', 'superadmin');
+      sessionStorage.setItem('quarkshield_account_type', 'superadmin');
+      localStorage.setItem('quarkshield_customer_id', data.customerId || 'QS-ADMIN-001');
+      sessionStorage.setItem('quarkshield_customer_id', data.customerId || 'QS-ADMIN-001');
+      localStorage.setItem('quarkshield_customer_name', data.customerName || 'INTERNAL USER');
+      sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'INTERNAL USER');
+      localStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
+      sessionStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
+      if (data.token) {
+        localStorage.setItem('quarkshield_token', data.token);
+        sessionStorage.setItem('quarkshield_token', data.token);
+      }
+      setSignInSuccessMsg('Verified Internal Super Admin. Launching Management Console...');
+      setTimeout(() => {
+        setShowSignInModal(false);
+        setShowForceChangeModal(false);
+        onLaunchConsole('admin', email);
+      }, 400);
+    } else if (data.accountType === 'partner') {
+      localStorage.setItem('quarkshield_user', email);
+      sessionStorage.setItem('quarkshield_user', email);
+      localStorage.setItem('quarkshield_role', data.role || 'Partner Admin');
+      sessionStorage.setItem('quarkshield_role', data.role || 'Partner Admin');
+      localStorage.setItem('quarkshield_account_type', 'partner');
+      sessionStorage.setItem('quarkshield_account_type', 'partner');
+      localStorage.setItem('quarkshield_customer_id', data.customerId || 'PART-9148');
+      sessionStorage.setItem('quarkshield_customer_id', data.customerId || 'PART-9148');
+      localStorage.setItem('quarkshield_customer_name', data.customerName || 'MSP PARTNER PRO');
+      sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'MSP PARTNER PRO');
+      localStorage.setItem('quarkshield_license_tier', data.licenseTier || 'MSP PARTNER PRO');
+      sessionStorage.setItem('quarkshield_license_tier', data.licenseTier || 'MSP PARTNER PRO');
+      if (data.token) {
+        localStorage.setItem('quarkshield_token', data.token);
+        sessionStorage.setItem('quarkshield_token', data.token);
+      }
+      setSignInSuccessMsg('Verified Partner Account. Launching Partner Console...');
+      setTimeout(() => {
+        setShowSignInModal(false);
+        setShowForceChangeModal(false);
+        onLaunchConsole('dashboard', email);
+      }, 400);
+    } else {
+      // Tenant Workspace / Corporate
+      localStorage.setItem('quarkshield_user', email);
+      sessionStorage.setItem('quarkshield_user', email);
+      localStorage.setItem('quarkshield_role', data.role || 'Corporate Admin');
+      sessionStorage.setItem('quarkshield_role', data.role || 'Corporate Admin');
+      localStorage.setItem('quarkshield_account_type', 'corporate');
+      sessionStorage.setItem('quarkshield_account_type', 'corporate');
+      localStorage.setItem('quarkshield_customer_id', data.customerId || 'CORP-4821');
+      sessionStorage.setItem('quarkshield_customer_id', data.customerId || 'CORP-4821');
+      localStorage.setItem('quarkshield_customer_name', data.customerName || 'CORPORATE CLIENT');
+      sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'CORPORATE CLIENT');
+      localStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
+      sessionStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
+      if (data.token) {
+        localStorage.setItem('quarkshield_token', data.token);
+        sessionStorage.setItem('quarkshield_token', data.token);
+      }
+      setSignInSuccessMsg(`Verified Tenant Account. Connecting to ${data.workspace || 'Workspace'}...`);
+      setTimeout(() => {
+        if (data.redirectUrl && window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1')) {
+          window.location.href = data.redirectUrl;
+        } else {
+          setShowSignInModal(false);
+          setShowForceChangeModal(false);
+          onLaunchConsole('dashboard', email);
+        }
+      }, 550);
+    }
+  };
+
   // Handle Unified Console Sign-In (Auto-recognizes Tenant, Partner, or Super Admin)
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -421,7 +522,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       if (res.ok) {
         data = await res.json();
       } else {
-        // Deterministic fallback recognition if API is unavailable
+        const errJson = await res.json().catch(() => null);
+        if (res.status === 401 || res.status === 400 || res.status === 403) {
+          throw new Error(errJson?.error || 'Invalid credentials. Please verify your password.');
+        }
+        // Fallback recognition only if backend network error
         const clean = loginIdentifier.trim().toLowerCase();
         if (clean.includes('@quarkshield.ai') || clean === 'superadmin' || clean === 'sridhargs@gmail.com') {
           data = { success: true, accountType: 'superadmin', target: 'console', initialTab: 'admin' };
@@ -436,81 +541,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       }
 
       if (data && data.success) {
-        if (data.accountType === 'superadmin') {
-          const email = loginIdentifier.trim().toLowerCase();
-          localStorage.setItem('quarkshield_user', email);
-          sessionStorage.setItem('quarkshield_user', email);
-          localStorage.setItem('quarkshield_role', 'Super Admin');
-          sessionStorage.setItem('quarkshield_role', 'Super Admin');
-          localStorage.setItem('quarkshield_account_type', 'superadmin');
-          sessionStorage.setItem('quarkshield_account_type', 'superadmin');
-          localStorage.setItem('quarkshield_customer_id', data.customerId || 'QS-ADMIN-001');
-          sessionStorage.setItem('quarkshield_customer_id', data.customerId || 'QS-ADMIN-001');
-          localStorage.setItem('quarkshield_customer_name', data.customerName || 'INTERNAL USER');
-          sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'INTERNAL USER');
-          localStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
-          sessionStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
-          if (data.token) {
-            localStorage.setItem('quarkshield_token', data.token);
-            sessionStorage.setItem('quarkshield_token', data.token);
-          }
-          setSignInSuccessMsg('Verified Internal Super Admin. Launching Management Console...');
-          setTimeout(() => {
-            setShowSignInModal(false);
-            onLaunchConsole('admin', email);
-          }, 400);
-        } else if (data.accountType === 'partner') {
-          const email = loginIdentifier.trim().toLowerCase();
-          localStorage.setItem('quarkshield_user', email);
-          sessionStorage.setItem('quarkshield_user', email);
-          localStorage.setItem('quarkshield_role', data.role || 'Partner Admin');
-          sessionStorage.setItem('quarkshield_role', data.role || 'Partner Admin');
-          localStorage.setItem('quarkshield_account_type', 'partner');
-          sessionStorage.setItem('quarkshield_account_type', 'partner');
-          localStorage.setItem('quarkshield_customer_id', data.customerId || 'PART-9148');
-          sessionStorage.setItem('quarkshield_customer_id', data.customerId || 'PART-9148');
-          localStorage.setItem('quarkshield_customer_name', data.customerName || 'MSP PARTNER PRO');
-          sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'MSP PARTNER PRO');
-          localStorage.setItem('quarkshield_license_tier', data.licenseTier || 'MSP PARTNER PRO');
-          sessionStorage.setItem('quarkshield_license_tier', data.licenseTier || 'MSP PARTNER PRO');
-          if (data.token) {
-            localStorage.setItem('quarkshield_token', data.token);
-            sessionStorage.setItem('quarkshield_token', data.token);
-          }
-          setSignInSuccessMsg('Verified Partner Account. Launching Partner Console...');
-          setTimeout(() => {
-            setShowSignInModal(false);
-            onLaunchConsole('dashboard', email);
-          }, 400);
-        } else {
-          // Tenant Workspace / Corporate
-          const email = loginIdentifier.trim().toLowerCase();
-          localStorage.setItem('quarkshield_user', email);
-          sessionStorage.setItem('quarkshield_user', email);
-          localStorage.setItem('quarkshield_role', data.role || 'Corporate Admin');
-          sessionStorage.setItem('quarkshield_role', data.role || 'Corporate Admin');
-          localStorage.setItem('quarkshield_account_type', 'corporate');
-          sessionStorage.setItem('quarkshield_account_type', 'corporate');
-          localStorage.setItem('quarkshield_customer_id', data.customerId || 'CORP-4821');
-          sessionStorage.setItem('quarkshield_customer_id', data.customerId || 'CORP-4821');
-          localStorage.setItem('quarkshield_customer_name', data.customerName || 'CORPORATE CLIENT');
-          sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'CORPORATE CLIENT');
-          localStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
-          sessionStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
-          if (data.token) {
-            localStorage.setItem('quarkshield_token', data.token);
-            sessionStorage.setItem('quarkshield_token', data.token);
-          }
-          setSignInSuccessMsg(`Verified Tenant Account. Connecting to ${data.workspace || 'Workspace'}...`);
-          setTimeout(() => {
-            if (data.redirectUrl && window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1')) {
-              window.location.href = data.redirectUrl;
-            } else {
-              setShowSignInModal(false);
-              onLaunchConsole('dashboard', email);
-            }
-          }, 550);
+        const email = loginIdentifier.trim().toLowerCase();
+        if (data.mustChangePassword) {
+          setPendingAuthData(data);
+          setForceCurrentPassword(loginPassword);
+          setShowSignInModal(false);
+          setShowForceChangeModal(true);
+          return;
         }
+        finalizeLogin(data, email);
       } else {
         throw new Error(data?.error || 'Invalid credentials or unrecognized account identifier.');
       }
@@ -518,6 +557,79 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       setSignInError(err.message || 'Authentication failed. Please check your credentials.');
     } finally {
       setIsAuthenticating(false);
+    }
+  };
+
+  // Handle Forced Password Change for newly invited or reset accounts
+  const handleForceChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForceChangeError(null);
+
+    if (forceNewPassword.length < 8) {
+      setForceChangeError('New password must be at least 8 characters long.');
+      return;
+    }
+    if (forceNewPassword !== forceConfirmPassword) {
+      setForceChangeError('New password and confirmation do not match.');
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const email = (pendingAuthData?.userEmail || loginIdentifier).trim().toLowerCase();
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          currentPassword: forceCurrentPassword,
+          newPassword: forceNewPassword
+        })
+      });
+
+      const respData = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(respData?.error || 'Failed to update password.');
+      }
+
+      // Password updated successfully, complete authentication
+      finalizeLogin(pendingAuthData, email);
+    } catch (err: any) {
+      setForceChangeError(err.message || 'Failed to update password.');
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  // Handle Forgot Password Submission
+  const handleForgotPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setForgotErrorMsg(null);
+    setForgotSuccessMsg(null);
+
+    if (!forgotEmail || !forgotEmail.includes('@')) {
+      setForgotErrorMsg('Please enter a valid work email address.');
+      return;
+    }
+
+    setIsSendingForgot(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: forgotEmail.trim() })
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        throw new Error(data?.error || 'Failed to dispatch temporary password.');
+      }
+
+      setForgotSuccessMsg(data.message || `A temporary password has been dispatched to ${forgotEmail} from Support@quarkshield.ai. Please check your inbox.`);
+    } catch (err: any) {
+      setForgotErrorMsg(err.message || 'Unable to process password reset.');
+    } finally {
+      setIsSendingForgot(false);
     }
   };
 
@@ -4244,25 +4356,73 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
 
               {/* Password */}
               <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
-                  Password
-                </label>
-                <input
-                  type="password"
-                  placeholder="••••••••••••"
-                  value={loginPassword}
-                  onChange={(e) => setLoginPassword(e.target.value)}
-                  required
-                  style={{
-                    width: '100%',
-                    padding: '0.7rem 0.9rem',
-                    background: 'rgba(0, 0, 0, 0.35)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
-                    borderRadius: '7px',
-                    color: '#ffffff',
-                    fontSize: '0.92rem'
-                  }}
-                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                    Password
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowSignInModal(false);
+                      setShowForgotPasswordModal(true);
+                      setForgotEmail(loginIdentifier.trim());
+                      setForgotSuccessMsg(null);
+                      setForgotErrorMsg(null);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--accent-cyan)',
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      padding: 0,
+                      fontWeight: 600,
+                      textDecoration: 'underline'
+                    }}
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="••••••••••••"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem 2.6rem 0.7rem 0.9rem',
+                      background: 'rgba(0, 0, 0, 0.35)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '7px',
+                      color: '#ffffff',
+                      fontSize: '0.92rem'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: '0.65rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center'
+                    }}
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
 
               {/* 2FA TOTP Code */}
@@ -4315,6 +4475,364 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
                 ) : (
                   <>
                     <Lock size={15} /> Sign In to Console
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: FORGOT PASSWORD RECOVERY */}
+      {/* ========================================================================= */}
+      {showForgotPasswordModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            background: 'var(--bg-sidebar)',
+            maxWidth: '460px',
+            width: '100%',
+            borderRadius: '12px',
+            border: '1px solid rgba(0, 242, 254, 0.35)',
+            boxShadow: '0 16px 48px rgba(0, 0, 0, 0.8)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <Key size={18} color="var(--accent-cyan)" />
+                <span style={{ fontSize: '0.95rem', color: '#ffffff', fontWeight: 700 }}>Reset Password</span>
+              </div>
+              <button
+                onClick={() => {
+                  setShowForgotPasswordModal(false);
+                  setForgotErrorMsg(null);
+                  setForgotSuccessMsg(null);
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleForgotPasswordSubmit} style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Enter the work email associated with your QuarkShield platform operator or tenant account. We will dispatch a new temporary password from <strong style={{ color: '#38bdf8' }}>Support@quarkshield.ai</strong>.
+              </div>
+
+              {forgotErrorMsg && (
+                <div style={{ padding: '0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid var(--status-vulnerable)', color: '#f87171', fontSize: '0.85rem' }}>
+                  {forgotErrorMsg}
+                </div>
+              )}
+
+              {forgotSuccessMsg && (
+                <div style={{ padding: '0.75rem', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.1)', border: '1px solid #10b981', color: '#34d399', fontSize: '0.85rem', display: 'flex', alignItems: 'flex-start', gap: '0.5rem', lineHeight: 1.4 }}>
+                  <CheckCircle2 size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+                  <span>{forgotSuccessMsg}</span>
+                </div>
+              )}
+
+              {!forgotSuccessMsg ? (
+                <>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                      Work Email Address
+                    </label>
+                    <input
+                      type="email"
+                      placeholder="name@company.com"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      required
+                      autoFocus
+                      style={{
+                        width: '100%',
+                        padding: '0.7rem 0.9rem',
+                        background: 'rgba(0, 0, 0, 0.35)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '7px',
+                        color: '#ffffff',
+                        fontSize: '0.92rem'
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSendingForgot}
+                    className="btn-primary"
+                    style={{
+                      padding: '0.75rem',
+                      borderRadius: '8px',
+                      fontWeight: 700,
+                      cursor: isSendingForgot ? 'wait' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      fontSize: '0.9rem'
+                    }}
+                  >
+                    {isSendingForgot ? (
+                      <>
+                        <RefreshCw size={15} className="spin" /> Sending Temporary Password...
+                      </>
+                    ) : (
+                      <>
+                        <Mail size={15} /> Send Temporary Password
+                      </>
+                    )}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPasswordModal(false);
+                    setShowSignInModal(true);
+                    setLoginIdentifier(forgotEmail);
+                  }}
+                  className="btn-primary"
+                  style={{
+                    padding: '0.75rem',
+                    borderRadius: '8px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    fontSize: '0.9rem'
+                  }}
+                >
+                  <ArrowRight size={15} /> Back to Sign In
+                </button>
+              )}
+
+              <div style={{ textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowForgotPasswordModal(false);
+                    setShowSignInModal(true);
+                  }}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline' }}
+                >
+                  Return to Sign In
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: FORCE PASSWORD CHANGE ON FIRST LOGIN / RESET */}
+      {/* ========================================================================= */}
+      {showForceChangeModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.85)',
+          backdropFilter: 'blur(10px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2100,
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            background: 'var(--bg-sidebar)',
+            maxWidth: '480px',
+            width: '100%',
+            borderRadius: '12px',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.9)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(239, 68, 68, 0.08)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <ShieldAlert size={20} color="#f87171" />
+                <span style={{ fontSize: '1rem', color: '#ffffff', fontWeight: 700 }}>Mandatory Password Update</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleForceChangePassword} style={{ padding: '1.75rem', display: 'flex', flexDirection: 'column', gap: '1.15rem' }}>
+              <div style={{
+                padding: '0.75rem 0.9rem',
+                borderRadius: '8px',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.3)',
+                color: '#fca5a5',
+                fontSize: '0.82rem',
+                lineHeight: 1.5
+              }}>
+                <strong>First-Login Security Policy:</strong> You signed in using a temporary password. For compliance with NIST FIPS and zero-trust policy, you must set a new secure password before accessing the console.
+              </div>
+
+              {forceChangeError && (
+                <div style={{ padding: '0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', color: '#f87171', fontSize: '0.85rem' }}>
+                  {forceChangeError}
+                </div>
+              )}
+
+              {/* Current / Temporary Password */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                  Current / Temporary Password
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showForceCurrent ? 'text' : 'password'}
+                    placeholder="Enter temporary password received"
+                    value={forceCurrentPassword}
+                    onChange={(e) => setForceCurrentPassword(e.target.value)}
+                    required
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem 2.6rem 0.7rem 0.9rem',
+                      background: 'rgba(0, 0, 0, 0.35)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '7px',
+                      color: '#ffffff',
+                      fontSize: '0.92rem'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowForceCurrent(!showForceCurrent)}
+                    style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                    aria-label="Toggle password visibility"
+                  >
+                    {showForceCurrent ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* New Password */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                  New Password <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 400 }}>(Minimum 8 characters)</span>
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showForceNew ? 'text' : 'password'}
+                    placeholder="Create a strong password"
+                    value={forceNewPassword}
+                    onChange={(e) => setForceNewPassword(e.target.value)}
+                    required
+                    minLength={8}
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem 2.6rem 0.7rem 0.9rem',
+                      background: 'rgba(0, 0, 0, 0.35)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '7px',
+                      color: '#ffffff',
+                      fontSize: '0.92rem'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowForceNew(!showForceNew)}
+                    style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                    aria-label="Toggle password visibility"
+                  >
+                    {showForceNew ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm New Password */}
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                  Confirm New Password
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type={showForceConfirm ? 'text' : 'password'}
+                    placeholder="Re-type new password"
+                    value={forceConfirmPassword}
+                    onChange={(e) => setForceConfirmPassword(e.target.value)}
+                    required
+                    minLength={8}
+                    style={{
+                      width: '100%',
+                      padding: '0.7rem 2.6rem 0.7rem 0.9rem',
+                      background: 'rgba(0, 0, 0, 0.35)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '7px',
+                      color: '#ffffff',
+                      fontSize: '0.92rem'
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowForceConfirm(!showForceConfirm)}
+                    style={{ position: 'absolute', right: '0.65rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px', display: 'flex', alignItems: 'center' }}
+                    aria-label="Toggle password visibility"
+                  >
+                    {showForceConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isChangingPassword}
+                className="btn-primary"
+                style={{
+                  padding: '0.8rem',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  cursor: isChangingPassword ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.92rem',
+                  background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)'
+                }}
+              >
+                {isChangingPassword ? (
+                  <>
+                    <RefreshCw size={15} className="spin" /> Updating & Authenticating...
+                  </>
+                ) : (
+                  <>
+                    <Lock size={15} /> Set Password & Continue to Console
                   </>
                 )}
               </button>

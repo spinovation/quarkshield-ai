@@ -13,7 +13,10 @@ import {
   AlertTriangle,
   Building,
   Mail,
-  UserPlus
+  UserPlus,
+  Copy,
+  CheckCircle2,
+  X
 } from 'lucide-react';
 
 export interface TenantUser {
@@ -58,6 +61,13 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
   const [newUserRole, setNewUserRole] = useState<'admin' | 'secops' | 'auditor' | 'viewer'>('secops');
   const [isInviting, setIsInviting] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+
+  // Temporary Password Notice State for Tenant User Invite / Password Reset
+  const [showPasswordNoticeModal, setShowPasswordNoticeModal] = useState(false);
+  const [noticeTempPassword, setNoticeTempPassword] = useState('');
+  const [noticeRecipient, setNoticeRecipient] = useState('');
+  const [noticeType, setNoticeType] = useState<'invite' | 'reset'>('invite');
+  const [copiedNoticePassword, setCopiedNoticePassword] = useState(false);
 
   // Available tenants for Super Admin switcher
   const tenantList = [
@@ -171,16 +181,23 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
       });
 
       if (res.ok) {
-        showTemporarySuccess(`Invitation successfully dispatched to ${newUserEmail}.`);
+        const data = await res.json();
         setNewUserEmail('');
         setNewUserFirstName('');
         setNewUserLastName('');
         setShowInviteModal(false);
         fetchTenantUsers(selectedTenant);
+
+        setNoticeTempPassword(data.password || '');
+        setNoticeRecipient(newUserEmail.trim());
+        setNoticeType('invite');
+        setShowPasswordNoticeModal(true);
+        showTemporarySuccess(`Invitation dispatched to ${newUserEmail}. Temporary password emailed from Support@quarkshield.ai.`);
       } else {
-        throw new Error('Failed to invite user');
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error || 'Failed to invite user');
       }
-    } catch (err) {
+    } catch (err: any) {
       const simUser: TenantUser = {
         id: 'tu-' + Date.now(),
         tenantName: selectedTenant,
@@ -194,13 +211,39 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
         createdAt: new Date().toISOString()
       };
       setUsers(prev => [...prev, simUser]);
-      showTemporarySuccess(`User ${newUserEmail} added to tenant ${selectedTenant}.`);
+      showTemporarySuccess(`User ${newUserEmail} added to tenant ${selectedTenant} (${err.message}).`);
       setNewUserEmail('');
       setNewUserFirstName('');
       setNewUserLastName('');
       setShowInviteModal(false);
     } finally {
       setIsInviting(false);
+    }
+  };
+
+  // Handle Reset User Password
+  const handleResetUserPassword = async (user: TenantUser) => {
+    if (!window.confirm(`Generate a new temporary password for ${user.email}? A temporary password will be dispatched from Support@quarkshield.ai and mandatory password change will be enforced on login.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/tenants/${selectedTenant}/users/${user.id}/reset-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to reset password');
+      }
+
+      setNoticeTempPassword(data.password || '');
+      setNoticeRecipient(user.email);
+      setNoticeType('reset');
+      setShowPasswordNoticeModal(true);
+      fetchTenantUsers(selectedTenant);
+      showTemporarySuccess(`Temporary password sent to ${user.email} from Support@quarkshield.ai.`);
+    } catch (err: any) {
+      alert(`Password Reset Error: ${err.message}`);
     }
   };
 
@@ -525,7 +568,25 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
                     {u.lastLogin ? new Date(u.lastLogin).toLocaleString() : 'Never'}
                   </td>
                   <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                    <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                    <div style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <button
+                        onClick={() => handleResetUserPassword(u)}
+                        title={`Reset password and email temporary password to ${u.email}`}
+                        style={{
+                          background: 'rgba(56, 189, 248, 0.1)',
+                          border: '1px solid rgba(56, 189, 248, 0.35)',
+                          color: '#38bdf8',
+                          borderRadius: '4px',
+                          padding: '0.25rem 0.5rem',
+                          fontSize: '0.75rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem'
+                        }}
+                      >
+                        <Key size={12} /> Reset Password
+                      </button>
                       {u.twoFactorEnabled && (
                         <button
                           onClick={() => handleReset2FA(u)}
@@ -731,6 +792,132 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Temporary Password Notice Modal */}
+      {showPasswordNoticeModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          backdropFilter: 'blur(5px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 9999,
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '480px',
+            width: '100%',
+            padding: '1.75rem',
+            background: 'var(--bg-card)',
+            border: '1px solid rgba(56, 189, 248, 0.4)',
+            borderRadius: '12px',
+            boxShadow: '0 20px 50px rgba(0,0,0,0.7)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '1rem'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <CheckCircle2 size={20} color="#38bdf8" />
+                {noticeType === 'invite' ? 'Member Invitation Dispatched' : 'Password Reset Successfully'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPasswordNoticeModal(false);
+                  setCopiedNoticePassword(false);
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              An official credential email has been dispatched from <strong style={{ color: '#38bdf8' }}>Support@quarkshield.ai</strong> to <strong style={{ color: '#ffffff' }}>{noticeRecipient}</strong>.
+            </p>
+
+            <div style={{
+              background: 'rgba(15, 23, 42, 0.8)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              borderRadius: '8px',
+              padding: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.5rem'
+            }}>
+              <div style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#94a3b8', letterSpacing: '0.05em', fontWeight: 600 }}>
+                Generated Temporary Password
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                <span style={{ fontFamily: 'monospace', fontSize: '1.3rem', color: '#00f2fe', fontWeight: 700, letterSpacing: '0.08em' }}>
+                  {noticeTempPassword}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard.writeText(noticeTempPassword);
+                    setCopiedNoticePassword(true);
+                    setTimeout(() => setCopiedNoticePassword(false), 2500);
+                  }}
+                  style={{
+                    background: copiedNoticePassword ? 'rgba(34, 197, 94, 0.2)' : 'rgba(56, 189, 248, 0.15)',
+                    border: `1px solid ${copiedNoticePassword ? '#22c55e' : 'rgba(56, 189, 248, 0.4)'}`,
+                    color: copiedNoticePassword ? '#4ade80' : '#38bdf8',
+                    padding: '0.4rem 0.75rem',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    fontWeight: 600
+                  }}
+                >
+                  {copiedNoticePassword ? <Check size={14} /> : <Copy size={14} />}
+                  {copiedNoticePassword ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            </div>
+
+            <div style={{
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              borderRadius: '6px',
+              padding: '0.65rem 0.85rem',
+              fontSize: '0.8rem',
+              color: '#fca5a5',
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.5rem'
+            }}>
+              <AlertTriangle size={16} color="#ef4444" style={{ flexShrink: 0, marginTop: '2px' }} />
+              <div>
+                <strong>Mandatory Password Update Enforced:</strong> The member will be required to replace this temporary password with a personal password immediately upon first sign-in.
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPasswordNoticeModal(false);
+                  setCopiedNoticePassword(false);
+                }}
+                className="btn-primary"
+                style={{ padding: '0.5rem 1.25rem', fontSize: '0.85rem', fontWeight: 600 }}
+              >
+                Understood & Close
+              </button>
+            </div>
           </div>
         </div>
       )}

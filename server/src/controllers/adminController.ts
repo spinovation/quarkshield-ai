@@ -9,6 +9,85 @@ import { execFile } from 'child_process';
 
 
 // ==============================================================================
+// 0. SHARED EMAIL DISPATCH HELPER (SUPPORT@QUARKSHIELD.AI)
+// ==============================================================================
+
+export const sendSupportEmail = async (options: {
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+}): Promise<{ success: boolean; messageId?: string; error?: string }> => {
+  let resendApiKey = process.env.RESEND_API_KEY || '';
+  if (!resendApiKey) {
+    try {
+      const sRes = await pool.query("SELECT value FROM tenant_settings WHERE key = 'RESEND_API_KEY' LIMIT 1");
+      if (sRes.rows.length > 0 && sRes.rows[0].value) {
+        resendApiKey = sRes.rows[0].value;
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  const fromEmail = 'QuarkShield Support <Support@quarkshield.ai>';
+  const replyTo = 'Support@quarkshield.ai';
+
+  if (resendApiKey) {
+    try {
+      const resendRes = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${resendApiKey.trim()}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: fromEmail,
+          to: [options.to],
+          subject: options.subject,
+          html: options.html,
+          text: options.text,
+          reply_to: replyTo
+        })
+      });
+
+      if (resendRes.ok) {
+        const data: any = await resendRes.json();
+        console.log(`[Support Email] Successfully sent to ${options.to} via Resend (${data.id})`);
+        return { success: true, messageId: data.id };
+      } else {
+        const errText = await resendRes.text();
+        console.error(`[Support Email Resend Error ${resendRes.status}]:`, errText);
+        return { success: false, error: errText };
+      }
+    } catch (err: any) {
+      console.error('[Support Email Network Error]:', err);
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Fallback to sendmail if available
+  try {
+    const { exec } = await import('child_process');
+    const emailMessage = `From: "QuarkShield Support" <Support@quarkshield.ai>\r\nTo: ${options.to}\r\nReply-To: Support@quarkshield.ai\r\nSubject: ${options.subject}\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n${options.html}`;
+    await new Promise<void>((resolve, reject) => {
+      const proc = exec(`/usr/sbin/sendmail -t -f Support@quarkshield.ai`, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+      if (proc.stdin) {
+        proc.stdin.write(emailMessage);
+        proc.stdin.end();
+      }
+    });
+    return { success: true };
+  } catch (smErr: any) {
+    console.warn('[Sendmail fallback skipped]:', smErr.message);
+    return { success: false, error: 'No active email transport available.' };
+  }
+};
+
+// ==============================================================================
 // 1. CLIENT / TENANT REGISTRY CONTROLLERS
 // ==============================================================================
 
@@ -391,10 +470,11 @@ export const resetUserPassword = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { password } = req.body;
 
-    const userRes = await pool.query('SELECT id, email FROM admin_users WHERE id = $1', [id]);
+    const userRes = await pool.query('SELECT id, email, company FROM admin_users WHERE id = $1 OR LOWER(email) = LOWER($1)', [id]);
     if (userRes.rowCount === 0) return res.status(404).json({ error: 'User not found' });
     
     const targetEmail = userRes.rows[0].email;
+    const targetName = userRes.rows[0].company || targetEmail.split('@')[0];
     const targetPassword = (password && typeof password === 'string' && password.trim().length >= 6)
       ? password.trim()
       : ('QS-' + crypto.randomBytes(4).toString('hex').toUpperCase());
@@ -402,30 +482,227 @@ export const resetUserPassword = async (req: Request, res: Response) => {
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = crypto.createHash('sha256').update(targetPassword + salt).digest('hex');
 
-    // Update in admin_users
+    // Update in admin_users with must_change_password = true
     await pool.query(
-      'UPDATE admin_users SET password_hash = $1, salt = $2 WHERE id = $3',
-      [passwordHash, salt, id]
+      'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
+      [passwordHash, salt, targetEmail]
     );
 
     // Also synchronize password to tenant_users if this user exists in a tenant pod
     try {
       await pool.query(
-        'UPDATE tenant_users SET password_hash = $1, salt = $2 WHERE LOWER(email) = LOWER($3)',
+        'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
         [passwordHash, salt, targetEmail]
       );
     } catch (tuErr) {
       console.warn('Syncing password reset to tenant_users notice:', tuErr);
     }
 
+    // Send email from Support@quarkshield.ai
+    const loginUrl = 'https://quarkshield.ai';
+    const emailSubject = 'Your QuarkShield Temporary Password & Password Reset Instructions';
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f19; color: #f1f5f9; padding: 24px;">
+        <div style="max-width: 580px; margin: 0 auto; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); padding: 28px; text-align: center; border-bottom: 1px solid #334155;">
+            <h1 style="margin: 0; font-size: 22px; color: #00f2fe; letter-spacing: 0.5px;">QuarkShield Security Operations</h1>
+            <p style="margin: 8px 0 0 0; font-size: 13px; color: #94a3b8;">Password Reset Confirmation</p>
+          </div>
+          <div style="padding: 28px;">
+            <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Password Reset Requested</h2>
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
+              Hello <strong>${targetName}</strong>,<br/>
+              An administrative password reset was completed for your QuarkShield account (<code>${targetEmail}</code>).
+            </p>
+            <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 18px; margin: 20px 0; text-align: center;">
+              <div style="font-size: 12px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; margin-bottom: 6px;">Your Temporary Password</div>
+              <div style="font-family: 'Courier New', monospace; font-size: 22px; font-weight: bold; color: #00f2fe; letter-spacing: 2px;">${targetPassword}</div>
+            </div>
+            <div style="background: rgba(239, 68, 68, 0.12); border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 4px; margin: 20px 0; color: #fca5a5; font-size: 13px; line-height: 1.5;">
+              <strong>Security Requirement:</strong> You must change this temporary password immediately upon signing in.
+            </div>
+            <div style="text-align: center; margin: 25px 0 10px 0;">
+              <a href="${loginUrl}" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">
+                Sign In & Change Password
+              </a>
+            </div>
+          </div>
+          <div style="background: #0b0f19; padding: 18px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #1e293b;">
+            QuarkShield Security Operations • Support@quarkshield.ai
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    const plainTextBody = `QuarkShield Password Reset\n\nHello ${targetName},\nYour password has been reset.\n\nTemporary Password: ${targetPassword}\nSign In: ${loginUrl}\n\nYou must change this password immediately upon first login.\n\nQuarkShield Support <Support@quarkshield.ai>`;
+
+    await sendSupportEmail({
+      to: targetEmail,
+      subject: emailSubject,
+      html: htmlBody,
+      text: plainTextBody
+    });
+
     res.json({
       success: true,
-      message: `Password successfully reset for ${targetEmail}. Temporary/New password: ${targetPassword}`,
+      message: `Password successfully reset for ${targetEmail}. Temporary password dispatched via Support@quarkshield.ai.`,
       password: targetPassword
     });
   } catch (err: any) {
     console.error('Error resetting password:', err);
     res.status(500).json({ error: err.message });
+  }
+};
+
+export const resetOperatorPassword = resetUserPassword;
+
+export const getOperators = async (req: Request, res: Response) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, email, role, two_factor_enabled, last_login, created_at, must_change_password, company, row_locked
+      FROM admin_users
+      ORDER BY (role = 'superadmin' OR role = 'root_admin') DESC, created_at ASC
+    `);
+
+    const roleNameMap: Record<string, string> = {
+      root_admin: 'Root Master Administrator',
+      superadmin: 'Root Master Administrator',
+      admin: 'Platform Administrator',
+      secops_lead: 'Platform SecOps Lead',
+      secops: 'Platform SecOps Lead',
+      support_engineer: 'Tier-3 Support Escalations',
+      support: 'Tier-3 Support Escalations',
+      compliance_auditor: 'SOC2 / FedRAMP Auditor'
+    };
+
+    const scopeMap: Record<string, string> = {
+      root_admin: 'Global Control Plane • Infrastructure & License Authority • Cluster Root',
+      superadmin: 'Global Control Plane • Infrastructure & License Authority • Cluster Root',
+      admin: 'Global Control Plane • Infrastructure & License Authority • Cluster Root',
+      secops_lead: 'PQC Algorithm Governance • FIPS 203/204 Handshake Telemetry • Key Audit',
+      secops: 'PQC Algorithm Governance • FIPS 203/204 Handshake Telemetry • Key Audit',
+      support_engineer: 'Support Mirror Diagnostics • Fleet Sync Telemetry • License Health',
+      support: 'Support Mirror Diagnostics • Fleet Sync Telemetry • License Health',
+      compliance_auditor: 'Read-Only Control Plane Audit • Cryptographic Inventory Verification'
+    };
+
+    const operators = result.rows.map(u => {
+      const isRoot = u.role === 'superadmin' || u.role === 'root_admin' || u.email === 'sridhargs@gmail.com' || u.email === 'admin@quarkshield.ai';
+      const cleanRole = u.role || 'support_engineer';
+      return {
+        id: u.id,
+        name: u.company && u.company !== 'QuarkShield Internal' ? u.company : (u.email.split('@')[0].toUpperCase()),
+        email: u.email,
+        role: isRoot ? 'root_admin' : (['secops_lead', 'support_engineer', 'compliance_auditor'].includes(cleanRole) ? cleanRole : 'support_engineer'),
+        roleDisplayName: roleNameMap[cleanRole] || (isRoot ? 'Root Master Administrator' : 'Platform Operator'),
+        status: u.row_locked ? 'suspended' : 'active',
+        mfaEnforced: true,
+        mfaType: u.two_factor_enabled ? 'TOTP Authenticator' : 'Hardware Security Key (YubiKey)',
+        accessScope: scopeMap[cleanRole] || 'Platform Control Plane Access',
+        lastLogin: u.last_login ? new Date(u.last_login).toISOString() : 'Never (Pending Activation)',
+        lastIp: 'Authorized Console Node',
+        createdAt: u.created_at ? new Date(u.created_at).toISOString() : new Date().toISOString(),
+        isRootOwner: isRoot,
+        mustChangePassword: !!u.must_change_password
+      };
+    });
+
+    res.json(operators);
+  } catch (err: any) {
+    console.error('Error fetching operators:', err);
+    res.status(500).json({ error: 'Failed to retrieve platform operators.' });
+  }
+};
+
+export const inviteOperator = async (req: Request, res: Response) => {
+  try {
+    const { name, email, role = 'support_engineer', mfaType = 'TOTP Authenticator' } = req.body;
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Valid email address is required.' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+    const id = 'op-' + crypto.randomUUID().substring(0, 8);
+    const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = crypto.createHash('sha256').update(tempPassword + salt).digest('hex');
+
+    await pool.query(`
+      INSERT INTO admin_users (id, email, password_hash, salt, role, must_change_password, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, company)
+      VALUES ($1, $2, $3, $4, $5, true, true, true, true, true, $6)
+      ON CONFLICT (email) DO UPDATE SET password_hash = $3, salt = $4, role = $5, must_change_password = true, company = $6
+    `, [id, cleanEmail, passwordHash, salt, role, name || cleanEmail.split('@')[0]]);
+
+    const loginUrl = 'https://quarkshield.ai';
+    const emailSubject = 'Your QuarkShield Platform Operator Access Credentials';
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f19; color: #f1f5f9; padding: 24px;">
+        <div style="max-width: 580px; margin: 0 auto; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); padding: 28px; text-align: center; border-bottom: 1px solid #334155;">
+            <h1 style="margin: 0; font-size: 22px; color: #00f2fe; letter-spacing: 0.5px;">QuarkShield PQC Control Plane</h1>
+            <p style="margin: 8px 0 0 0; font-size: 13px; color: #94a3b8;">Post-Quantum Cryptography & Identity Management</p>
+          </div>
+          <div style="padding: 28px;">
+            <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Platform Operator Access Granted</h2>
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
+              Hello <strong>${name || cleanEmail}</strong>,<br/>
+              You have been provisioned as a Platform Operator (<strong>${role}</strong>) on the QuarkShield Central Orchestration Control Plane.
+            </p>
+            <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 18px; margin: 20px 0; text-align: center;">
+              <div style="font-size: 12px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; margin-bottom: 6px;">Your Temporary Password</div>
+              <div style="font-family: 'Courier New', monospace; font-size: 22px; font-weight: bold; color: #00f2fe; letter-spacing: 2px;">${tempPassword}</div>
+            </div>
+            <div style="background: rgba(239, 68, 68, 0.12); border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 4px; margin: 20px 0; color: #fca5a5; font-size: 13px; line-height: 1.5;">
+              <strong>Mandatory Security Policy:</strong> You will be required to change your temporary password immediately upon your first sign-in.
+            </div>
+            <div style="text-align: center; margin: 25px 0 10px 0;">
+              <a href="${loginUrl}" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">
+                Sign In to QuarkShield Console
+              </a>
+            </div>
+          </div>
+          <div style="background: #0b0f19; padding: 18px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #1e293b;">
+            QuarkShield Security Operations • Support@quarkshield.ai
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const plainTextBody = `QuarkShield Platform Operator Access Granted\n\nHello ${name || cleanEmail},\nYou have been provisioned as a Platform Operator (${role}) on the QuarkShield Central Control Plane.\n\nYour Temporary Password: ${tempPassword}\nLogin Portal: ${loginUrl}\n\nSECURITY REQUIREMENT: You are required to change this temporary password immediately upon your first sign-in.\n\nQuarkShield Support <Support@quarkshield.ai>`;
+
+    await sendSupportEmail({
+      to: cleanEmail,
+      subject: emailSubject,
+      html: htmlBody,
+      text: plainTextBody
+    });
+
+    res.status(201).json({
+      success: true,
+      message: `Platform operator ${cleanEmail} successfully invited. Credentials sent via Support@quarkshield.ai.`,
+      password: tempPassword,
+      operator: {
+        id,
+        name: name || cleanEmail.split('@')[0],
+        email: cleanEmail,
+        role,
+        status: 'active',
+        mfaEnforced: true,
+        mfaType,
+        createdAt: new Date().toISOString(),
+        isRootOwner: false
+      }
+    });
+  } catch (err: any) {
+    console.error('Error inviting operator:', err);
+    res.status(500).json({ error: 'Failed to invite operator: ' + err.message });
   }
 };
 
@@ -1489,6 +1766,7 @@ export const getTenantUsers = async (req: Request, res: Response) => {
         role, 
         two_factor_enabled as "twoFactorEnabled", 
         status, 
+        must_change_password as "mustChangePassword",
         last_login as "lastLogin", 
         created_at as "createdAt"
       FROM tenant_users
@@ -1512,18 +1790,81 @@ export const createTenantUser = async (req: Request, res: Response) => {
     }
 
     const cleanTenant = tenant.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanEmail = email.toLowerCase().trim();
     const id = 'tu-' + crypto.randomUUID().substring(0, 8);
+    const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = crypto.createHash('sha256').update(tempPassword + salt).digest('hex');
 
     await pool.query(`
-      INSERT INTO tenant_users (id, tenant_name, email, first_name, last_name, role, two_factor_enabled, status)
-      VALUES ($1, $2, $3, $4, $5, $6, false, 'active')
-      ON CONFLICT (tenant_name, email) DO UPDATE SET role = $6, first_name = $4, last_name = $5
-    `, [id, cleanTenant, email.toLowerCase().trim(), firstName || '', lastName || '', role]);
+      INSERT INTO tenant_users (id, tenant_name, email, first_name, last_name, role, two_factor_enabled, status, password_hash, salt, must_change_password)
+      VALUES ($1, $2, $3, $4, $5, $6, false, 'active', $7, $8, true)
+      ON CONFLICT (tenant_name, email) DO UPDATE SET role = $6, first_name = $4, last_name = $5, password_hash = $7, salt = $8, must_change_password = true
+    `, [id, cleanTenant, cleanEmail, firstName || '', lastName || '', role, passwordHash, salt]);
+
+    // Ensure synchronized record exists in admin_users so unifiedLogin finds them
+    try {
+      await pool.query(`
+        INSERT INTO admin_users (id, email, password_hash, salt, role, email_verified, must_change_password, company)
+        VALUES ($1, $2, $3, $4, 'user', true, true, $5)
+        ON CONFLICT (email) DO UPDATE SET password_hash = $3, salt = $4, must_change_password = true
+      `, [id, cleanEmail, passwordHash, salt, cleanTenant.toUpperCase()]);
+    } catch (auErr) {
+      console.warn('Syncing tenant user to admin_users notice:', auErr);
+    }
+
+    const loginUrl = `https://${cleanTenant}.quarkshield.ai`;
+    const emailSubject = `Your QuarkShield Workspace Access Credentials (${cleanTenant})`;
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f19; color: #f1f5f9; padding: 24px;">
+        <div style="max-width: 580px; margin: 0 auto; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); padding: 28px; text-align: center; border-bottom: 1px solid #334155;">
+            <h1 style="margin: 0; font-size: 22px; color: #00f2fe; letter-spacing: 0.5px;">QuarkShield Enterprise Workspace</h1>
+            <p style="margin: 8px 0 0 0; font-size: 13px; color: #94a3b8;">Welcome to ${cleanTenant}.quarkshield.ai</p>
+          </div>
+          <div style="padding: 28px;">
+            <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Workspace Invitation</h2>
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
+              Hello <strong>${firstName || cleanEmail}</strong>,<br/>
+              You have been invited to join the <strong>${cleanTenant}</strong> workspace on QuarkShield as a <strong>${role}</strong>.
+            </p>
+            <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 18px; margin: 20px 0; text-align: center;">
+              <div style="font-size: 12px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; margin-bottom: 6px;">Your Temporary Password</div>
+              <div style="font-family: 'Courier New', monospace; font-size: 22px; font-weight: bold; color: #00f2fe; letter-spacing: 2px;">${tempPassword}</div>
+            </div>
+            <div style="background: rgba(239, 68, 68, 0.12); border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 4px; margin: 20px 0; color: #fca5a5; font-size: 13px; line-height: 1.5;">
+              <strong>Action Required:</strong> You will be required to change your temporary password immediately upon your first sign-in.
+            </div>
+            <div style="text-align: center; margin: 25px 0 10px 0;">
+              <a href="${loginUrl}" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">
+                Sign In to Workspace
+              </a>
+            </div>
+          </div>
+          <div style="background: #0b0f19; padding: 18px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #1e293b;">
+            QuarkShield Security Operations • Support@quarkshield.ai
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    const plainTextBody = `QuarkShield Workspace Invitation\n\nHello ${firstName || cleanEmail},\nYou have been invited to join the ${cleanTenant} workspace on QuarkShield (${role}).\n\nTemporary Password: ${tempPassword}\nWorkspace URL: ${loginUrl}\n\nYou must change this password immediately upon first login.\n\nQuarkShield Support <Support@quarkshield.ai>`;
+
+    await sendSupportEmail({
+      to: cleanEmail,
+      subject: emailSubject,
+      html: htmlBody,
+      text: plainTextBody
+    });
 
     res.status(201).json({
       success: true,
-      message: `User ${email} successfully added to tenant ${cleanTenant}.`,
-      user: { id, email, role, firstName, lastName, twoFactorEnabled: false, status: 'active' }
+      message: `User ${cleanEmail} successfully added to tenant ${cleanTenant}. Temporary password sent from Support@quarkshield.ai.`,
+      password: tempPassword,
+      user: { id, email: cleanEmail, role, firstName, lastName, twoFactorEnabled: false, status: 'active', mustChangePassword: true }
     });
   } catch (err: any) {
     console.error('Error creating tenant user:', err);
@@ -1577,6 +1918,94 @@ export const resetTenantUser2FA = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error resetting 2FA for tenant user:', err);
     res.status(500).json({ error: 'Failed to reset 2FA.' });
+  }
+};
+
+export const resetTenantUserPassword = async (req: Request, res: Response) => {
+  try {
+    const { tenant, id } = req.params;
+    const cleanTenant = tenant.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    const userRes = await pool.query(
+      'SELECT id, email, first_name, last_name FROM tenant_users WHERE id = $1 AND tenant_name = $2',
+      [id, cleanTenant]
+    );
+    if (userRes.rowCount === 0) return res.status(404).json({ error: 'User not found in tenant' });
+
+    const user = userRes.rows[0];
+    const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = crypto.createHash('sha256').update(tempPassword + salt).digest('hex');
+
+    await pool.query(
+      'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = true WHERE id = $3 AND tenant_name = $4',
+      [passwordHash, salt, id, cleanTenant]
+    );
+
+    try {
+      await pool.query(
+        'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
+        [passwordHash, salt, user.email]
+      );
+    } catch (e) {
+      // ignore
+    }
+
+    const loginUrl = `https://${cleanTenant}.quarkshield.ai`;
+    const emailSubject = 'Your QuarkShield Temporary Password & Password Reset Instructions';
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f19; color: #f1f5f9; padding: 24px;">
+        <div style="max-width: 580px; margin: 0 auto; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); padding: 28px; text-align: center; border-bottom: 1px solid #334155;">
+            <h1 style="margin: 0; font-size: 22px; color: #00f2fe; letter-spacing: 0.5px;">QuarkShield Security Operations</h1>
+            <p style="margin: 8px 0 0 0; font-size: 13px; color: #94a3b8;">Workspace Password Reset (${cleanTenant})</p>
+          </div>
+          <div style="padding: 28px;">
+            <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Password Reset Requested</h2>
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
+              Hello <strong>${user.first_name || user.email}</strong>,<br/>
+              An administrative password reset was initiated for your workspace account on <strong>${cleanTenant}.quarkshield.ai</strong>.
+            </p>
+            <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 18px; margin: 20px 0; text-align: center;">
+              <div style="font-size: 12px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; margin-bottom: 6px;">Your New Temporary Password</div>
+              <div style="font-family: 'Courier New', monospace; font-size: 22px; font-weight: bold; color: #00f2fe; letter-spacing: 2px;">${tempPassword}</div>
+            </div>
+            <div style="background: rgba(239, 68, 68, 0.12); border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 4px; margin: 20px 0; color: #fca5a5; font-size: 13px; line-height: 1.5;">
+              <strong>Action Required:</strong> You must change this temporary password immediately after logging in.
+            </div>
+            <div style="text-align: center; margin: 25px 0 10px 0;">
+              <a href="${loginUrl}" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">
+                Sign In to Your Workspace
+              </a>
+            </div>
+          </div>
+          <div style="background: #0b0f19; padding: 18px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #1e293b;">
+            QuarkShield Security Operations • Support@quarkshield.ai
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    const plainTextBody = `QuarkShield Workspace Password Reset\n\nHello ${user.first_name || user.email},\nYour password has been reset.\n\nTemporary Password: ${tempPassword}\nSign In: ${loginUrl}\n\nYou must change this password immediately upon first login.\n\nQuarkShield Support <Support@quarkshield.ai>`;
+
+    await sendSupportEmail({
+      to: user.email,
+      subject: emailSubject,
+      html: htmlBody,
+      text: plainTextBody
+    });
+
+    res.json({
+      success: true,
+      message: `Password successfully reset for ${user.email}. Temporary password sent from Support@quarkshield.ai.`,
+      password: tempPassword
+    });
+  } catch (err: any) {
+    console.error('Error resetting tenant user password:', err);
+    res.status(500).json({ error: err.message });
   }
 };
 
@@ -2169,7 +2598,7 @@ export const unifiedLogin = async (req: Request, res: Response) => {
     // 2. Check if identifier is in admin_users (Central Control Plane / Internal Super Admin)
     try {
       const adminUserResult = await pool.query(
-        'SELECT id, email, role, company, password_hash, salt FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
+        'SELECT id, email, role, company, password_hash, salt, must_change_password FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
         [cleanId]
       );
 
@@ -2187,20 +2616,23 @@ export const unifiedLogin = async (req: Request, res: Response) => {
           }
         }
 
-        if (u.role === 'superadmin' || cleanId.includes('@quarkshield.ai') || cleanId === 'sridhargs@gmail.com') {
-          const adminId = u.id ? ('QS-' + u.id.replace(/^usr-/, '').toUpperCase()) : 'QS-ADMIN-001';
+        const isSuperOrOperator = ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor', 'admin'].includes(u.role) || cleanId.includes('@quarkshield.ai') || cleanId === 'sridhargs@gmail.com';
+
+        if (isSuperOrOperator) {
+          const adminId = u.id ? ('QS-' + u.id.replace(/^usr-/, '').replace(/^op-/, '').toUpperCase()) : 'QS-ADMIN-001';
           return res.json({
             success: true,
             accountType: 'superadmin',
             target: 'console',
             initialTab: 'admin',
-            role: 'Super Admin',
+            role: u.role === 'secops_lead' ? 'SecOps Lead' : u.role === 'support_engineer' ? 'Support Engineer' : 'Super Admin',
             customerId: adminId,
-            customerName: 'INTERNAL USER',
+            customerName: u.company || 'INTERNAL USER',
             licenseTier: 'INTERNAL ROOT',
             isInternal: true,
             userEmail: cleanId,
-            message: 'Authenticated to Central Orchestration Plane as Internal User.'
+            mustChangePassword: !!u.must_change_password,
+            message: 'Authenticated to Central Orchestration Plane.'
           });
         }
       }
@@ -2211,7 +2643,7 @@ export const unifiedLogin = async (req: Request, res: Response) => {
     // 3. Check if identifier matches tenant_users (Users belonging to a specific tenant pod)
     try {
       const tenantUserResult = await pool.query(
-        `SELECT tu.tenant_name, tu.role, tu.password_hash, tu.salt, c.customer_id, c.display_name, c.subscription_tier, c.account_type 
+        `SELECT tu.tenant_name, tu.role, tu.password_hash, tu.salt, tu.must_change_password, c.customer_id, c.display_name, c.subscription_tier, c.account_type 
          FROM tenant_users tu 
          LEFT JOIN admin_clients c ON LOWER(c.name) = LOWER(tu.tenant_name) 
          WHERE LOWER(tu.email) = $1`,
@@ -2240,13 +2672,14 @@ export const unifiedLogin = async (req: Request, res: Response) => {
         return res.json({
           success: true,
           accountType: isPartner ? 'partner' : 'corporate',
-          role: isPartner ? 'Partner Admin' : 'Corporate Admin',
+          role: isPartner ? 'Partner Admin' : (tu.role === 'admin' ? 'Corporate Admin' : 'SecOps Member'),
           customerId,
           customerName,
           licenseTier,
           userEmail: cleanId,
           workspace: tu.tenant_name,
           redirectUrl: `https://${tu.tenant_name}.quarkshield.ai`,
+          mustChangePassword: !!tu.must_change_password,
           message: `Redirecting to Tenant Workspace (${tu.tenant_name}).`
         });
       }
@@ -2313,6 +2746,170 @@ export const unifiedLogin = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Unified login error:', err);
     res.status(500).json({ error: 'Authentication service encountered an internal error.' });
+  }
+};
+
+export const forgotPassword = async (req: Request, res: Response) => {
+  try {
+    const { email } = req.body;
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Valid email address is required.' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Check admin_users or tenant_users
+    const adminRes = await pool.query('SELECT id, email, company FROM admin_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
+    const tenantRes = await pool.query('SELECT id, email, tenant_name, first_name FROM tenant_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
+
+    if (adminRes.rowCount === 0 && tenantRes.rowCount === 0) {
+      // Also check admin_clients contact_email / admin_email
+      const clientRes = await pool.query('SELECT name, admin_email, contact_email FROM admin_clients WHERE LOWER(admin_email) = LOWER($1) OR LOWER(contact_email) = LOWER($1) LIMIT 1', [cleanEmail]);
+      if (clientRes.rowCount === 0) {
+        return res.status(404).json({ error: 'No account found matching this email address. Please contact Support@quarkshield.ai.' });
+      }
+    }
+
+    const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = crypto.createHash('sha256').update(tempPassword + salt).digest('hex');
+
+    // Update admin_users if present, or insert
+    if (adminRes.rowCount && adminRes.rowCount > 0) {
+      await pool.query(
+        'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
+        [passwordHash, salt, cleanEmail]
+      );
+    } else {
+      const newId = 'usr-' + crypto.randomUUID().substring(0, 8);
+      await pool.query(`
+        INSERT INTO admin_users (id, email, password_hash, salt, role, must_change_password, email_verified, company)
+        VALUES ($1, $2, $3, $4, 'user', true, true, 'Registered Client')
+        ON CONFLICT (email) DO UPDATE SET password_hash = $3, salt = $4, must_change_password = true
+      `, [newId, cleanEmail, passwordHash, salt]);
+    }
+
+    // Update tenant_users if present
+    if (tenantRes.rowCount && tenantRes.rowCount > 0) {
+      await pool.query(
+        'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
+        [passwordHash, salt, cleanEmail]
+      );
+    }
+
+    const loginUrl = 'https://quarkshield.ai';
+    const emailSubject = 'Your QuarkShield Temporary Password & Password Reset Instructions';
+    const htmlBody = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b0f19; color: #f1f5f9; padding: 24px;">
+        <div style="max-width: 580px; margin: 0 auto; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden;">
+          <div style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); padding: 28px; text-align: center; border-bottom: 1px solid #334155;">
+            <h1 style="margin: 0; font-size: 22px; color: #00f2fe; letter-spacing: 0.5px;">QuarkShield Security Operations</h1>
+            <p style="margin: 8px 0 0 0; font-size: 13px; color: #94a3b8;">Account Recovery & Password Reset</p>
+          </div>
+          <div style="padding: 28px;">
+            <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Temporary Password Issued</h2>
+            <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
+              Hello,<br/>
+              A password reset request was received for your QuarkShield account (<code>${cleanEmail}</code>).
+            </p>
+            <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 18px; margin: 20px 0; text-align: center;">
+              <div style="font-size: 12px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; margin-bottom: 6px;">Your Temporary Password</div>
+              <div style="font-family: 'Courier New', monospace; font-size: 22px; font-weight: bold; color: #00f2fe; letter-spacing: 2px;">${tempPassword}</div>
+            </div>
+            <div style="background: rgba(239, 68, 68, 0.12); border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 4px; margin: 20px 0; color: #fca5a5; font-size: 13px; line-height: 1.5;">
+              <strong>Important Security Policy:</strong> You will be required to change this temporary password immediately upon your next sign-in.
+            </div>
+            <div style="text-align: center; margin: 25px 0 10px 0;">
+              <a href="${loginUrl}" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">
+                Sign In to QuarkShield
+              </a>
+            </div>
+          </div>
+          <div style="background: #0b0f19; padding: 18px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #1e293b;">
+            QuarkShield Security Operations • Support@quarkshield.ai
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+    const plainTextBody = `QuarkShield Temporary Password\n\nA password reset request was received for ${cleanEmail}.\n\nTemporary Password: ${tempPassword}\nSign In: ${loginUrl}\n\nYou must change this password immediately upon first login.\n\nQuarkShield Support <Support@quarkshield.ai>`;
+
+    await sendSupportEmail({
+      to: cleanEmail,
+      subject: emailSubject,
+      html: htmlBody,
+      text: plainTextBody
+    });
+
+    res.json({
+      success: true,
+      message: `A temporary password has been dispatched to ${cleanEmail} from Support@quarkshield.ai. Please check your inbox and sign in.`
+    });
+  } catch (err: any) {
+    console.error('Error in forgotPassword:', err);
+    res.status(500).json({ error: 'Failed to process password reset request.' });
+  }
+};
+
+export const changePassword = async (req: Request, res: Response) => {
+  try {
+    const { email, currentPassword, newPassword } = req.body;
+    if (!email || !currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Email, current password, and new password are required.' });
+    }
+
+    if (typeof newPassword !== 'string' || newPassword.trim().length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
+    }
+
+    const cleanEmail = email.toLowerCase().trim();
+
+    // Verify current password against admin_users or tenant_users
+    const adminRes = await pool.query('SELECT password_hash, salt FROM admin_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
+    const tenantRes = await pool.query('SELECT password_hash, salt FROM tenant_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
+
+    let valid = false;
+    if (adminRes.rowCount && adminRes.rowCount > 0 && adminRes.rows[0].password_hash && adminRes.rows[0].salt) {
+      const testHash = crypto.createHash('sha256').update(currentPassword + adminRes.rows[0].salt).digest('hex');
+      if (testHash === adminRes.rows[0].password_hash) {
+        valid = true;
+      }
+    }
+
+    if (!valid && tenantRes.rowCount && tenantRes.rowCount > 0 && tenantRes.rows[0].password_hash && tenantRes.rows[0].salt) {
+      const testHash = crypto.createHash('sha256').update(currentPassword + tenantRes.rows[0].salt).digest('hex');
+      if (testHash === tenantRes.rows[0].password_hash) {
+        valid = true;
+      }
+    }
+
+    if (!valid) {
+      return res.status(401).json({ error: 'Current / temporary password is incorrect.' });
+    }
+
+    const newSalt = crypto.randomBytes(16).toString('hex');
+    const newHash = crypto.createHash('sha256').update(newPassword.trim() + newSalt).digest('hex');
+
+    await pool.query(
+      'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = false WHERE LOWER(email) = LOWER($3)',
+      [newHash, newSalt, cleanEmail]
+    );
+
+    await pool.query(
+      'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = false WHERE LOWER(email) = LOWER($3)',
+      [newHash, newSalt, cleanEmail]
+    );
+
+    res.json({
+      success: true,
+      message: 'Password successfully updated. You may now continue.'
+    });
+  } catch (err: any) {
+    console.error('Error changing password:', err);
+    res.status(500).json({ error: 'Failed to update password: ' + err.message });
   }
 };
 

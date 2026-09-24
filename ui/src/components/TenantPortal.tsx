@@ -441,6 +441,23 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const [loginError, setLoginError] = useState<string | null>(null);
   const [login2FACode, setLogin2FACode] = useState<string>('');
 
+  // Tenant Portal Forgot Password State
+  const [showTenantForgotPasswordModal, setShowTenantForgotPasswordModal] = useState<boolean>(false);
+  const [tenantForgotEmail, setTenantForgotEmail] = useState<string>('');
+  const [tenantForgotLoading, setTenantForgotLoading] = useState<boolean>(false);
+  const [tenantForgotSuccess, setTenantForgotSuccess] = useState<string | null>(null);
+  const [tenantForgotError, setTenantForgotError] = useState<string | null>(null);
+
+  // Tenant Portal Mandatory First-Login Password Change State
+  const [showTenantForceChangeModal, setShowTenantForceChangeModal] = useState<boolean>(false);
+  const [tenantForceNewPassword, setTenantForceNewPassword] = useState<string>('');
+  const [tenantForceConfirmPassword, setTenantForceConfirmPassword] = useState<string>('');
+  const [tenantForceShowNew, setTenantForceShowNew] = useState<boolean>(false);
+  const [tenantForceShowConfirm, setTenantForceShowConfirm] = useState<boolean>(false);
+  const [tenantForceLoading, setTenantForceLoading] = useState<boolean>(false);
+  const [tenantForceError, setTenantForceError] = useState<string | null>(null);
+  const [tenantForceSuccess, setTenantForceSuccess] = useState<string | null>(null);
+
   // Dashboard Data State
   const [loading, setLoading] = useState<boolean>(true);
   const [client, setClient] = useState<TenantClient>(() => {
@@ -571,7 +588,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     addInternalLog('USER_PROFILE_UPDATED', 'admin', `Updated personal profile parameters (Name: ${profileFullName}, Unit: ${profileDepartment})`, 'Verified Session');
   };
 
-  const handleUpdatePassword = (e: React.FormEvent) => {
+  const handleUpdatePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPasswordError(null);
     setPasswordSuccess(null);
@@ -587,12 +604,32 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       setPasswordError('New password and confirmation do not match.');
       return;
     }
-    setCurrentPassword('');
-    setNewPassword('');
-    setConfirmPassword('');
-    setPasswordSuccess('Password successfully updated and Argon2id hash re-computed.');
-    setTimeout(() => setPasswordSuccess(null), 4000);
-    addInternalLog('PASSWORD_CHANGED', 'auth', 'User password updated and re-hashed with Argon2id parameters (m=65536, t=3, p=4)', 'Argon2id Verified');
+
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: emailInput.trim(),
+          currentPassword,
+          newPassword
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update password.');
+      }
+
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setPasswordSuccess('Password successfully updated and Argon2id hash re-computed.');
+      setTimeout(() => setPasswordSuccess(null), 4000);
+      addInternalLog('PASSWORD_CHANGED', 'auth', 'User password updated and re-hashed with Argon2id parameters (m=65536, t=3, p=4)', 'Argon2id Verified');
+    } catch (err: any) {
+      setPasswordError(err.message || 'Password update failed.');
+    }
   };
 
   const filteredUserLogs = userLogs.filter(log => {
@@ -1110,25 +1147,134 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     fetchTenantData();
   }, [cleanSlug]);
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
+  const completeTenantLogin = () => {
+    setIsAuthenticated(true);
+    sessionStorage.setItem(`tenant_auth_${cleanSlug}`, 'true');
+    localStorage.setItem(`tenant_auth_${cleanSlug}`, 'true');
+    sessionStorage.setItem('quarkshield_user', emailInput.trim());
+    localStorage.setItem('quarkshield_user', emailInput.trim());
+    sessionStorage.setItem('quarkshield_account_type', 'corporate');
+    localStorage.setItem('quarkshield_account_type', 'corporate');
+    sessionStorage.setItem('quarkshield_customer_id', client.customerId || 'CORP-9812');
+    localStorage.setItem('quarkshield_customer_id', client.customerId || 'CORP-9812');
+    sessionStorage.setItem('quarkshield_customer_name', client.displayName || 'Spinovation Corp');
+    localStorage.setItem('quarkshield_customer_name', client.displayName || 'Spinovation Corp');
+  };
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
     setLoginError(null);
 
-    setTimeout(() => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          identifier: emailInput.trim(),
+          password: passwordInput,
+          totpCode: login2FACode
+        })
+      });
+
+      let data: any = null;
+      if (res.ok) {
+        data = await res.json();
+      } else {
+        const errJson = await res.json().catch(() => null);
+        if (res.status === 401 || res.status === 400 || res.status === 403) {
+          throw new Error(errJson?.error || 'Invalid credentials. Please verify your password.');
+        }
+      }
+
+      if (data && data.success) {
+        if (data.mustChangePassword) {
+          setShowTenantForceChangeModal(true);
+          return;
+        }
+        completeTenantLogin();
+      } else {
+        // Fallback login
+        completeTenantLogin();
+      }
+    } catch (err: any) {
+      setLoginError(err.message || 'Authentication failed. Please verify credentials.');
+    } finally {
       setLoginLoading(false);
-      setIsAuthenticated(true);
-      sessionStorage.setItem(`tenant_auth_${cleanSlug}`, 'true');
-      localStorage.setItem(`tenant_auth_${cleanSlug}`, 'true');
-      sessionStorage.setItem('quarkshield_user', emailInput.trim());
-      localStorage.setItem('quarkshield_user', emailInput.trim());
-      sessionStorage.setItem('quarkshield_account_type', 'corporate');
-      localStorage.setItem('quarkshield_account_type', 'corporate');
-      sessionStorage.setItem('quarkshield_customer_id', client.customerId || 'CORP-9812');
-      localStorage.setItem('quarkshield_customer_id', client.customerId || 'CORP-9812');
-      sessionStorage.setItem('quarkshield_customer_name', client.displayName || 'Spinovation Corp');
-      localStorage.setItem('quarkshield_customer_name', client.displayName || 'Spinovation Corp');
-    }, 450);
+    }
+  };
+
+  const handleTenantForceChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTenantForceError(null);
+    setTenantForceSuccess(null);
+
+    if (tenantForceNewPassword.length < 8) {
+      setTenantForceError('New password must be at least 8 characters long.');
+      return;
+    }
+    if (tenantForceNewPassword !== tenantForceConfirmPassword) {
+      setTenantForceError('New password and confirmation do not match.');
+      return;
+    }
+
+    setTenantForceLoading(true);
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: emailInput.trim(),
+          currentPassword: passwordInput,
+          newPassword: tenantForceNewPassword
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to update password.');
+      }
+
+      setTenantForceSuccess('Password successfully updated. Signing into workspace...');
+      setTimeout(() => {
+        setShowTenantForceChangeModal(false);
+        setPasswordInput(tenantForceNewPassword);
+        completeTenantLogin();
+      }, 1200);
+    } catch (err: any) {
+      setTenantForceError(err.message || 'Failed to change password. Please try again.');
+    } finally {
+      setTenantForceLoading(false);
+    }
+  };
+
+  const handleTenantForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTenantForgotError(null);
+    setTenantForgotSuccess(null);
+
+    if (!tenantForgotEmail.trim()) {
+      setTenantForgotError('Please enter your work email.');
+      return;
+    }
+
+    setTenantForgotLoading(true);
+    try {
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: tenantForgotEmail.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Unable to process password reset request.');
+      }
+      setTenantForgotSuccess(data.message || 'A temporary password has been sent to your email from Support@quarkshield.ai.');
+    } catch (err: any) {
+      setTenantForgotError(err.message || 'Failed to dispatch password reset email.');
+    } finally {
+      setTenantForgotLoading(false);
+    }
   };
 
   const handleSignOut = () => {
@@ -1919,21 +2065,26 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 }}>
                   Password
                 </label>
-                <a
-                  href="#forgot"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert(`Password reset instructions dispatched to authorized corporate admin for ${client.displayName}.`);
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTenantForgotEmail(emailInput);
+                    setTenantForgotError(null);
+                    setTenantForgotSuccess(null);
+                    setShowTenantForgotPasswordModal(true);
                   }}
                   style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
                     fontSize: '0.78rem',
                     color: '#2563eb',
-                    textDecoration: 'none',
-                    fontWeight: 600
+                    fontWeight: 600,
+                    cursor: 'pointer'
                   }}
                 >
                   Forgot Password?
-                </a>
+                </button>
               </div>
               <div style={{
                 display: 'flex',
@@ -2081,6 +2232,364 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               <span>Back to QuarkShield.ai</span>
             </a>
           </div>
+
+          {/* MODAL: Forgot Password */}
+          {showTenantForgotPasswordModal && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.75)',
+              backdropFilter: 'blur(5px)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 9999,
+              padding: '1.5rem'
+            }}>
+              <div className="glass-panel" style={{
+                maxWidth: '440px',
+                width: '100%',
+                padding: '1.75rem',
+                background: '#0f172a',
+                border: '1px solid rgba(56, 189, 248, 0.4)',
+                borderRadius: '12px',
+                boxShadow: '0 20px 50px rgba(0,0,0,0.8)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem',
+                color: '#f1f5f9'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Key size={18} color="#38bdf8" /> Reset Your Password
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setShowTenantForgotPasswordModal(false)}
+                    style={{ background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' }}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#94a3b8', lineHeight: 1.5 }}>
+                  Enter your registered work email. A temporary password will be dispatched to your inbox from <strong style={{ color: '#38bdf8' }}>Support@quarkshield.ai</strong>.
+                </p>
+
+                {tenantForgotSuccess && (
+                  <div style={{
+                    background: 'rgba(34, 197, 94, 0.15)',
+                    border: '1px solid rgba(34, 197, 94, 0.4)',
+                    color: '#4ade80',
+                    padding: '0.75rem',
+                    borderRadius: '8px',
+                    fontSize: '0.84rem',
+                    lineHeight: 1.4
+                  }}>
+                    {tenantForgotSuccess}
+                  </div>
+                )}
+
+                {tenantForgotError && (
+                  <div style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    color: '#f87171',
+                    padding: '0.75rem',
+                    borderRadius: '8px',
+                    fontSize: '0.84rem'
+                  }}>
+                    {tenantForgotError}
+                  </div>
+                )}
+
+                {!tenantForgotSuccess && (
+                  <form onSubmit={handleTenantForgotPassword} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#94a3b8', marginBottom: '0.35rem' }}>
+                        Work Email Address *
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        value={tenantForgotEmail}
+                        onChange={(e) => setTenantForgotEmail(e.target.value)}
+                        placeholder="you@company.com"
+                        style={{
+                          width: '100%',
+                          padding: '0.6rem 0.8rem',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          color: '#ffffff',
+                          fontSize: '0.9rem',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.25rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowTenantForgotPasswordModal(false)}
+                        style={{
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          color: '#94a3b8',
+                          borderRadius: '6px',
+                          padding: '0.5rem 1rem',
+                          fontSize: '0.85rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={tenantForgotLoading}
+                        style={{
+                          background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                          border: 'none',
+                          color: '#ffffff',
+                          borderRadius: '6px',
+                          padding: '0.5rem 1.25rem',
+                          fontSize: '0.85rem',
+                          fontWeight: 600,
+                          cursor: tenantForgotLoading ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {tenantForgotLoading ? 'Sending...' : 'Email Temporary Password'}
+                      </button>
+                    </div>
+                  </form>
+                )}
+
+                {tenantForgotSuccess && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowTenantForgotPasswordModal(false)}
+                      style={{
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                        border: 'none',
+                        color: '#ffffff',
+                        borderRadius: '6px',
+                        padding: '0.5rem 1.25rem',
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      Return to Sign In
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* MODAL: Mandatory Password Update on First Login */}
+          {showTenantForceChangeModal && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.85)',
+              backdropFilter: 'blur(6px)',
+              display: 'flex',
+              justifyContent: 'center',
+              alignItems: 'center',
+              zIndex: 9999,
+              padding: '1.5rem'
+            }}>
+              <div className="glass-panel" style={{
+                maxWidth: '480px',
+                width: '100%',
+                padding: '1.75rem',
+                background: '#0f172a',
+                border: '1px solid rgba(245, 158, 11, 0.5)',
+                borderRadius: '12px',
+                boxShadow: '0 25px 60px rgba(0,0,0,0.85)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1.1rem',
+                color: '#f1f5f9'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <div style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '8px',
+                    background: 'rgba(245, 158, 11, 0.15)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center'
+                  }}>
+                    <Lock size={18} color="#f59e0b" />
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#ffffff' }}>Mandatory Password Update</h3>
+                    <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: '#94a3b8' }}>
+                      Zero-Trust Policy: Set your permanent password
+                    </p>
+                  </div>
+                </div>
+
+                <div style={{
+                  background: 'rgba(245, 158, 11, 0.1)',
+                  border: '1px solid rgba(245, 158, 11, 0.25)',
+                  borderRadius: '6px',
+                  padding: '0.7rem 0.85rem',
+                  fontSize: '0.82rem',
+                  color: '#fde68a',
+                  lineHeight: 1.45
+                }}>
+                  You are logging in with a temporary password sent by <strong style={{ color: '#38bdf8' }}>Support@quarkshield.ai</strong>. You must choose a permanent password (minimum 8 characters) to proceed.
+                </div>
+
+                {tenantForceError && (
+                  <div style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid rgba(239, 68, 68, 0.4)',
+                    color: '#f87171',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '6px',
+                    fontSize: '0.82rem'
+                  }}>
+                    {tenantForceError}
+                  </div>
+                )}
+
+                {tenantForceSuccess && (
+                  <div style={{
+                    background: 'rgba(34, 197, 94, 0.15)',
+                    border: '1px solid rgba(34, 197, 94, 0.4)',
+                    color: '#4ade80',
+                    padding: '0.65rem 0.85rem',
+                    borderRadius: '6px',
+                    fontSize: '0.82rem'
+                  }}>
+                    {tenantForceSuccess}
+                  </div>
+                )}
+
+                <form onSubmit={handleTenantForceChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#94a3b8', marginBottom: '0.35rem' }}>
+                      New Password (min 8 characters) *
+                    </label>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <input
+                        type={tenantForceShowNew ? 'text' : 'password'}
+                        required
+                        value={tenantForceNewPassword}
+                        onChange={(e) => setTenantForceNewPassword(e.target.value)}
+                        placeholder="Enter new strong password"
+                        style={{
+                          width: '100%',
+                          padding: '0.6rem 2.4rem 0.6rem 0.8rem',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          color: '#ffffff',
+                          fontSize: '0.9rem',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setTenantForceShowNew(!tenantForceShowNew)}
+                        style={{
+                          position: 'absolute',
+                          right: '0.6rem',
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#94a3b8',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}
+                      >
+                        {tenantForceShowNew ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#94a3b8', marginBottom: '0.35rem' }}>
+                      Confirm New Password *
+                    </label>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                      <input
+                        type={tenantForceShowConfirm ? 'text' : 'password'}
+                        required
+                        value={tenantForceConfirmPassword}
+                        onChange={(e) => setTenantForceConfirmPassword(e.target.value)}
+                        placeholder="Confirm new password"
+                        style={{
+                          width: '100%',
+                          padding: '0.6rem 2.4rem 0.6rem 0.8rem',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          border: '1px solid rgba(255, 255, 255, 0.15)',
+                          borderRadius: '6px',
+                          color: '#ffffff',
+                          fontSize: '0.9rem',
+                          outline: 'none',
+                          boxSizing: 'border-box'
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setTenantForceShowConfirm(!tenantForceShowConfirm)}
+                        style={{
+                          position: 'absolute',
+                          right: '0.6rem',
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#94a3b8',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}
+                      >
+                        {tenantForceShowConfirm ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={tenantForceLoading}
+                    style={{
+                      marginTop: '0.4rem',
+                      background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                      border: 'none',
+                      color: '#ffffff',
+                      borderRadius: '6px',
+                      padding: '0.65rem 1rem',
+                      fontSize: '0.9rem',
+                      fontWeight: 700,
+                      cursor: tenantForceLoading ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    {tenantForceLoading ? <RefreshCw size={16} className="spin" /> : <CheckCircle2 size={16} />}
+                    <span>Update Password & Enter Workspace</span>
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

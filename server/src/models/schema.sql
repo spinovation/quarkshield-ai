@@ -148,6 +148,7 @@ ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS salt VARCHAR(255);
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_enabled BOOLEAN DEFAULT false;
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_secret VARCHAR(255);
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS tenant_users (
   id VARCHAR(100) PRIMARY KEY,
@@ -159,10 +160,12 @@ CREATE TABLE IF NOT EXISTS tenant_users (
   two_factor_enabled BOOLEAN DEFAULT false,
   two_factor_secret VARCHAR(255),
   status VARCHAR(50) DEFAULT 'active',
+  must_change_password BOOLEAN DEFAULT false,
   last_login TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(tenant_name, email)
 );
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS tenant_settings (
   tenant_name VARCHAR(255) NOT NULL,
