@@ -2494,6 +2494,32 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             <Layers size={16} color="#00f2fe" />
             <span>Integrations Hub</span>
           </button>
+
+          <button
+            onClick={() => {
+              setGeneratedTokenData(null);
+              setShowEnrollModal(true);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.7rem',
+              padding: '0.55rem 0.75rem',
+              borderRadius: '6px',
+              background: 'rgba(56, 189, 248, 0.08)',
+              border: '1px solid rgba(56, 189, 248, 0.25)',
+              color: '#38bdf8',
+              fontSize: '0.84rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              width: '100%',
+              textAlign: 'left'
+            }}
+            title="Generate Fleet Enrollment Token"
+          >
+            <Key size={16} color="#38bdf8" />
+            <span>Fleet Enrollment Token</span>
+          </button>
         </div>
 
         {/* Subscription Scale Card */}
@@ -2737,7 +2763,30 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    setGeneratedTokenData(null);
+                    setShowEnrollModal(true);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    fontSize: '0.82rem',
+                    padding: '0.45rem 0.95rem',
+                    background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)',
+                    border: '1px solid rgba(56, 189, 248, 0.45)',
+                    color: '#38bdf8',
+                    fontWeight: 700,
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 10px rgba(56, 189, 248, 0.15)'
+                  }}
+                  title="Generate Fleet Enrollment Token & Rollout Commands"
+                >
+                  <Key size={14} color="#38bdf8" /> Fleet Enrollment Token
+                </button>
                 <button 
                   onClick={fetchTenantData} 
                   className="btn-secondary"
@@ -2934,7 +2983,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           gap: '0.4rem'
                         }}
                       >
-                        <Plus size={14} /> Enroll New Device
+                        <Key size={14} color="#38bdf8" /> Generate Fleet Token / Enroll Device
                       </button>
                     </div>
                   </div>
@@ -3287,6 +3336,30 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         }}
                       >
                         <ShieldCheck size={14} color="#c084fc" /> Export Attested CBOM (CDXA)
+                      </button>
+
+                      {/* Enroll Workstations / Fleet Token */}
+                      <button
+                        onClick={() => {
+                          setGeneratedTokenData(null);
+                          setShowEnrollModal(true);
+                        }}
+                        title="Generate Fleet Enrollment Token for Endpoints & Servers"
+                        style={{
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          border: '1px solid rgba(56, 189, 248, 0.35)',
+                          color: '#38bdf8',
+                          padding: '0.45rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem'
+                        }}
+                      >
+                        <Key size={13} color="#38bdf8" /> Enroll Workstations / Fleet Token
                       </button>
                     </div>
                   </div>
@@ -3926,6 +3999,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     setActiveTab('cbom');
                   }}
                   onNavigateToProxy={() => setActiveTab('proxy')}
+                  onOpenEnrollModal={() => {
+                    setGeneratedTokenData(null);
+                    setShowEnrollModal(true);
+                  }}
                 />
               </div>
             )}

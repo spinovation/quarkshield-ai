@@ -39,6 +39,7 @@ export interface IntegrationsHubProps {
   customerId?: string;
   onNavigateToCbom?: (sourceFilter?: string) => void;
   onNavigateToProxy?: () => void;
+  onOpenEnrollModal?: () => void;
 }
 
 interface ConnectorItem {
@@ -60,7 +61,8 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
   licenseKey,
   customerId,
   onNavigateToCbom,
-  onNavigateToProxy
+  onNavigateToProxy,
+  onOpenEnrollModal
 }) => {
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://quarkshield.ai';
   const cleanTenantUpper = (tenantName || 'ENTERPRISE').toUpperCase().replace(/[^A-Z0-9-]/g, '');
@@ -966,6 +968,29 @@ Get-CertificationAuthority | Select-Object Name, Forest, Domain, Certificate |
   --tenant ${cleanTenantUpper} \\
   --mode continuous`}
                       </pre>
+                      {onOpenEnrollModal && (
+                        <div style={{ marginTop: '0.85rem', display: 'flex', justifyContent: 'flex-start' }}>
+                          <button
+                            onClick={onOpenEnrollModal}
+                            style={{
+                              background: 'linear-gradient(135deg, rgba(0, 242, 254, 0.15) 0%, rgba(79, 172, 254, 0.2) 100%)',
+                              border: '1px solid rgba(0, 242, 254, 0.4)',
+                              color: '#38bdf8',
+                              padding: '0.45rem 0.95rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.45rem'
+                            }}
+                          >
+                            <Key size={14} color="#00f2fe" />
+                            <span>Generate Custom Fleet Enrollment Token &amp; Workstation Group</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
 
