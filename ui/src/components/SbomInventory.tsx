@@ -67,11 +67,9 @@ interface SbomInventoryProps {
   isSuperAdmin?: boolean;
 }
 
-export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '', isSuperAdmin = false }: SbomInventoryProps) {
-  const [selectedScope, setSelectedScope] = useState<'platform' | 'client'>(
-    isSuperAdmin ? (tenant.toLowerCase().includes('quarkshield') ? 'platform' : 'platform') : 'client'
-  );
-  const activeTenant = (isSuperAdmin && selectedScope === 'platform') ? 'quarkshield.ai' : tenant;
+export default function SbomInventory({ tenant = 'quarkshield.ai', apiUrl = '', isSuperAdmin = true }: SbomInventoryProps) {
+  // SBOM is strictly and exclusively for Super Admin auditing quarkshield.ai production platform stack
+  const activeTenant = 'quarkshield.ai';
 
   const [components, setComponents] = useState<SbomComponent[]>([]);
   const [stats, setStats] = useState<SbomStats>({
@@ -153,7 +151,7 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
 
   useEffect(() => {
     fetchSbomData();
-  }, [activeTenant, selectedScope]);
+  }, [activeTenant]);
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -256,46 +254,23 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
             </p>
           </div>
 
-          {/* Scope Toggle */}
-          <div style={{ display: 'flex', background: 'rgba(0, 0, 0, 0.45)', padding: '3px', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.12)' }}>
-            <button
-              onClick={() => { setSelectedScope('platform'); setCurrentPage(1); }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.45rem',
-                padding: '0.45rem 0.9rem',
-                borderRadius: '6px',
-                border: 'none',
-                background: selectedScope === 'platform' ? 'rgba(168, 85, 247, 0.35)' : 'transparent',
-                color: selectedScope === 'platform' ? '#c084fc' : 'var(--text-muted, #94a3b8)',
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <Package size={14} /> QuarkShield Platform Stack (quarkshield.ai)
-            </button>
-            <button
-              onClick={() => { setSelectedScope('client'); setCurrentPage(1); }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.45rem',
-                padding: '0.45rem 0.9rem',
-                borderRadius: '6px',
-                border: 'none',
-                background: selectedScope === 'client' ? 'rgba(56, 189, 248, 0.25)' : 'transparent',
-                color: selectedScope === 'client' ? '#38bdf8' : 'var(--text-muted, #94a3b8)',
-                fontSize: '0.82rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease'
-              }}
-            >
-              <Layers size={14} /> Customer Enrolled Workloads ({tenant})
-            </button>
+          {/* Target Architecture Badge */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.65rem',
+            background: 'rgba(0, 0, 0, 0.45)',
+            padding: '0.5rem 1rem',
+            borderRadius: '8px',
+            border: '1px solid rgba(168, 85, 247, 0.35)'
+          }}>
+            <Package size={15} color="#c084fc" />
+            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#ffffff' }}>
+              quarkshield.ai Core Stack
+            </span>
+            <span style={{ fontSize: '0.74rem', color: '#c084fc', borderLeft: '1px solid rgba(255, 255, 255, 0.15)', paddingLeft: '0.6rem' }}>
+              github.com/spinovation/quarkshield-ai
+            </span>
           </div>
         </div>
       )}

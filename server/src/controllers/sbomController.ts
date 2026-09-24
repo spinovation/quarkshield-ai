@@ -549,12 +549,10 @@ const QUARKSHIELD_PLATFORM_STACK = [
 ];
 
 /**
- * Access Control Gate: Verifies that only Super Admin can inspect QuarkShield's internal platform stack
+ * Access Control Gate: Verifies that only Super Admin can inspect QuarkShield's internal platform stack.
+ * Customers / tenants never receive internal vulnerability or component disclosures directly.
  */
-function checkSuperAdminAccess(req: Request, tenant: string): boolean {
-  const isPlatform = tenant.toLowerCase().includes('quarkshield') || tenant.toLowerCase() === 'system' || tenant.toLowerCase() === 'platform';
-  if (!isPlatform) return true; // Customer tenants do not require Super Admin access
-  
+function checkSuperAdminAccess(req: Request): boolean {
   const adminRole = req.headers['x-admin-role'] as string;
   const adminQuery = req.query.admin as string;
   const authHeader = req.headers['authorization'] as string;
@@ -564,194 +562,25 @@ function checkSuperAdminAccess(req: Request, tenant: string): boolean {
 }
 
 /**
- * Ensures baseline mock SBOM data exists for a tenant if the table is empty
+ * Ensures baseline QuarkShield platform stack SBOM components are seeded for 'quarkshield.ai'.
+ * Customer tenants NEVER receive software component SBOM records.
  */
-async function ensureTenantSbomSeed(tenant: string) {
+async function ensurePlatformSbomSeed() {
   const check = await pool.query(
-    `SELECT COUNT(*) FROM sbom_components WHERE LOWER(tenant_name) = LOWER($1)`,
-    [tenant]
+    `SELECT COUNT(*) FROM sbom_components WHERE LOWER(tenant_name) = 'quarkshield.ai'`
   );
   if (parseInt(check.rows[0].count, 10) === 0) {
-    const isPlatform = tenant.toLowerCase().includes('quarkshield') || tenant.toLowerCase() === 'system' || tenant.toLowerCase() === 'platform';
-    const seed = isPlatform ? QUARKSHIELD_PLATFORM_STACK : [
-      {
-        name: 'jsonwebtoken',
-        version: '8.5.1',
-        ecosystem: 'npm',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/payments-microservice',
-        file_path: 'package.json',
-        purl: 'pkg:npm/jsonwebtoken@8.5.1',
-        license: 'MIT',
-        has_vulnerabilities: true,
-        vuln_count: 1,
-        max_severity: 'critical',
-        vulnerabilities: CVE_ADVISORY_CATALOG['npm/jsonwebtoken'].vulnerabilities
-      },
-      {
-        name: 'axios',
-        version: '0.21.1',
-        ecosystem: 'npm',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/payments-microservice',
-        file_path: 'package.json',
-        purl: 'pkg:npm/axios@0.21.1',
-        license: 'MIT',
-        has_vulnerabilities: true,
-        vuln_count: 2,
-        max_severity: 'high',
-        vulnerabilities: CVE_ADVISORY_CATALOG['npm/axios'].vulnerabilities
-      },
-      {
-        name: 'lodash',
-        version: '4.17.20',
-        ecosystem: 'npm',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/payments-microservice',
-        file_path: 'package.json',
-        purl: 'pkg:npm/lodash@4.17.20',
-        license: 'MIT',
-        has_vulnerabilities: true,
-        vuln_count: 1,
-        max_severity: 'high',
-        vulnerabilities: CVE_ADVISORY_CATALOG['npm/lodash'].vulnerabilities
-      },
-      {
-        name: 'qs',
-        version: '6.15.3',
-        ecosystem: 'npm',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/core-api-gateway',
-        file_path: 'package.json',
-        purl: 'pkg:npm/qs@6.15.3',
-        license: 'BSD-3-Clause',
-        has_vulnerabilities: true,
-        vuln_count: 2,
-        max_severity: 'high',
-        vulnerabilities: CVE_ADVISORY_CATALOG['npm/qs'].vulnerabilities
-      },
-      {
-        name: 'requests',
-        version: '2.28.1',
-        ecosystem: 'pypi',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/risk-analyzer',
-        file_path: 'requirements.txt',
-        purl: 'pkg:pypi/requests@2.28.1',
-        license: 'Apache-2.0',
-        has_vulnerabilities: true,
-        vuln_count: 1,
-        max_severity: 'medium',
-        vulnerabilities: CVE_ADVISORY_CATALOG['pypi/requests'].vulnerabilities
-      },
-      {
-        name: 'urllib3',
-        version: '1.26.17',
-        ecosystem: 'pypi',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/risk-analyzer',
-        file_path: 'requirements.txt',
-        purl: 'pkg:pypi/urllib3@1.26.17',
-        license: 'MIT',
-        has_vulnerabilities: true,
-        vuln_count: 1,
-        max_severity: 'high',
-        vulnerabilities: CVE_ADVISORY_CATALOG['pypi/urllib3'].vulnerabilities
-      },
-      {
-        name: 'golang.org/x/crypto',
-        version: 'v0.12.0',
-        ecosystem: 'golang',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/crypto-signer',
-        file_path: 'go.mod',
-        purl: 'pkg:golang/golang.org/x/crypto@v0.12.0',
-        license: 'BSD-3-Clause',
-        has_vulnerabilities: true,
-        vuln_count: 1,
-        max_severity: 'medium',
-        vulnerabilities: CVE_ADVISORY_CATALOG['golang/golang.org/x/crypto'].vulnerabilities
-      },
-      {
-        name: 'openssl',
-        version: '3.0.2',
-        ecosystem: 'os_pkg',
-        source: 'endpoint',
-        source_ref: 'macbook-pro-ciso.local',
-        file_path: '/usr/local/Cellar',
-        purl: 'pkg:generic/openssl@3.0.2',
-        license: 'Apache-2.0',
-        has_vulnerabilities: true,
-        vuln_count: 1,
-        max_severity: 'medium',
-        vulnerabilities: CVE_ADVISORY_CATALOG['os_pkg/openssl'].vulnerabilities
-      },
-      {
-        name: '@noble/post-quantum',
-        version: '0.2.0',
-        ecosystem: 'npm',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/payments-microservice',
-        file_path: 'package.json',
-        purl: 'pkg:npm/@noble/post-quantum@0.2.0',
-        license: 'MIT',
-        has_vulnerabilities: false,
-        vuln_count: 0,
-        max_severity: 'none',
-        vulnerabilities: []
-      },
-      {
-        name: 'express',
-        version: '4.22.2',
-        ecosystem: 'npm',
-        source: 'git_repo',
-        source_ref: 'https://github.com/spinovation/payments-microservice',
-        file_path: 'package.json',
-        purl: 'pkg:npm/express@4.22.2',
-        license: 'MIT',
-        has_vulnerabilities: false,
-        vuln_count: 0,
-        max_severity: 'none',
-        vulnerabilities: []
-      }
-    ];
-
-    // Resolve tenant organization slug for realistic source repos
-    let tenantOrg = tenant.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (tenant.toUpperCase().startsWith('PART-') || tenant.toUpperCase().startsWith('CORP-')) {
-      try {
-        const clientLookup = await pool.query(
-          `SELECT name FROM admin_clients WHERE UPPER(customer_id) = UPPER($1) LIMIT 1`,
-          [tenant]
-        );
-        if (clientLookup.rows.length > 0 && clientLookup.rows[0].name) {
-          tenantOrg = clientLookup.rows[0].name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        }
-      } catch (err) {
-        // fallback
-      }
-    }
-
-    for (const comp of seed) {
-      const id = 'sbom-' + crypto.createHash('md5').update(`${tenant.toLowerCase()}:${comp.name}:${comp.version}:${comp.file_path}`).digest('hex').substring(0, 16);
-      let sourceRef = comp.source_ref;
-      if (!isPlatform) {
-        if (comp.source === 'git_repo') {
-          sourceRef = sourceRef.replace('spinovation', tenantOrg);
-        } else if (comp.source === 'endpoint') {
-          sourceRef = `ciso-workstation.${tenantOrg}.internal`;
-        }
-      }
-
+    for (const comp of QUARKSHIELD_PLATFORM_STACK) {
+      const id = 'sbom-' + crypto.createHash('md5').update(`quarkshield.ai:${comp.name}:${comp.version}:${comp.file_path}`).digest('hex').substring(0, 16);
       await pool.query(
         `INSERT INTO sbom_components (id, tenant_name, source, source_ref, file_path, name, version, ecosystem, purl, license, has_vulnerabilities, vuln_count, max_severity, vulnerabilities)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          ON CONFLICT (id) DO NOTHING`,
         [
           id,
-          tenant.toUpperCase(),
+          'quarkshield.ai',
           comp.source,
-          sourceRef,
+          comp.source_ref,
           comp.file_path,
           comp.name,
           comp.version,
@@ -770,18 +599,18 @@ async function ensureTenantSbomSeed(tenant: string) {
 
 /**
  * GET /api/sbom/components
- * Returns paginated software components with vulnerability and fix details
+ * Returns paginated software components for QuarkShield.ai platform stack (Super Admin Only)
  */
 export async function getSbomComponents(req: Request, res: Response) {
   try {
-    const tenant = (req.query.tenant as string) || 'SPINOVATIONCORP';
-    if (!checkSuperAdminAccess(req, tenant)) {
+    if (!checkSuperAdminAccess(req)) {
       return res.status(403).json({
         success: false,
         error: 'Access Denied: QuarkShield Platform Stack SBOM is restricted to Super Admin only.'
       });
     }
 
+    const tenant = 'quarkshield.ai';
     const ecosystem = (req.query.ecosystem as string) || 'all';
     const severity = (req.query.severity as string) || 'all';
     const search = (req.query.search as string) || '';
@@ -789,15 +618,15 @@ export async function getSbomComponents(req: Request, res: Response) {
     const limit = parseInt(req.query.limit as string, 10) || 50;
     const offset = (page - 1) * limit;
 
-    await ensureTenantSbomSeed(tenant);
+    await ensurePlatformSbomSeed();
 
     let query = `
       SELECT id, tenant_name, source, source_ref, file_path, name, version, ecosystem, purl, license,
              has_vulnerabilities, vuln_count, max_severity, vulnerabilities, created_at, updated_at
       FROM sbom_components
-      WHERE (LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global')
+      WHERE LOWER(tenant_name) = 'quarkshield.ai'
     `;
-    const params: any[] = [tenant];
+    const params: any[] = [];
 
     if (ecosystem && ecosystem !== 'all') {
       params.push(ecosystem);
@@ -850,19 +679,19 @@ export async function getSbomComponents(req: Request, res: Response) {
 
 /**
  * GET /api/sbom/stats
- * Returns high-level metrics for SBOM and vulnerability management
+ * Returns high-level metrics for QuarkShield Platform Stack SBOM (Super Admin Only)
  */
 export async function getSbomStats(req: Request, res: Response) {
   try {
-    const tenant = (req.query.tenant as string) || 'SPINOVATIONCORP';
-    if (!checkSuperAdminAccess(req, tenant)) {
+    if (!checkSuperAdminAccess(req)) {
       return res.status(403).json({
         success: false,
         error: 'Access Denied: QuarkShield Platform Stack SBOM is restricted to Super Admin only.'
       });
     }
 
-    await ensureTenantSbomSeed(tenant);
+    const tenant = 'quarkshield.ai';
+    await ensurePlatformSbomSeed();
 
     const statsRes = await pool.query(`
       SELECT 
@@ -874,8 +703,8 @@ export async function getSbomStats(req: Request, res: Response) {
         COUNT(*) FILTER (WHERE max_severity = 'low') as "lowCount",
         COUNT(*) FILTER (WHERE has_vulnerabilities = false) as "cleanCount"
       FROM sbom_components
-      WHERE (LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global')
-    `, [tenant]);
+      WHERE LOWER(tenant_name) = 'quarkshield.ai'
+    `);
 
     const row = statsRes.rows[0] || {};
     const totalComponents = parseInt(row.totalComponents || '0', 10);
@@ -886,7 +715,6 @@ export async function getSbomStats(req: Request, res: Response) {
     const lowCount = parseInt(row.lowCount || '0', 10);
     const cleanCount = parseInt(row.cleanCount || '0', 10);
 
-    // 100% of our cataloged vulnerable components have safe fixes calculated
     const patchableCount = vulnerableComponents;
     const patchablePercent = 100;
 
@@ -913,26 +741,26 @@ export async function getSbomStats(req: Request, res: Response) {
 
 /**
  * GET /api/sbom/export
- * Exports CycloneDX 1.6 compliant Software Bill of Materials (SBOM) with vulnerabilities
+ * Exports CycloneDX 1.6 compliant Software Bill of Materials (SBOM) for QuarkShield.ai platform stack
  */
 export async function exportSbom(req: Request, res: Response) {
   try {
-    const tenant = (req.query.tenant as string) || 'SPINOVATIONCORP';
-    if (!checkSuperAdminAccess(req, tenant)) {
+    if (!checkSuperAdminAccess(req)) {
       return res.status(403).json({
         success: false,
-        error: 'Access Denied: QuarkShield Platform Stack SBOM is restricted to Super Admin only.'
+        error: 'Access Denied: QuarkShield Platform Stack SBOM export is restricted to Super Admin only.'
       });
     }
 
-    const cleanTenant = tenant.toUpperCase();
+    const tenant = 'quarkshield.ai';
+    await ensurePlatformSbomSeed();
 
     const dataRes = await pool.query(`
       SELECT id, name, version, ecosystem, purl, license, has_vulnerabilities, vulnerabilities
       FROM sbom_components
-      WHERE (LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global')
+      WHERE LOWER(tenant_name) = 'quarkshield.ai'
       ORDER BY name ASC
-    `, [tenant]);
+    `);
 
     const components = dataRes.rows.map((r: any) => ({
       type: 'library',
@@ -995,8 +823,8 @@ export async function exportSbom(req: Request, res: Response) {
         ],
         component: {
           type: 'application',
-          name: `QuarkShield SBOM - ${cleanTenant}`,
-          version: '1.0.0'
+          name: 'QuarkShield Core Platform Stack (quarkshield.ai)',
+          version: '2.0.0'
         }
       },
       components,
@@ -1004,7 +832,7 @@ export async function exportSbom(req: Request, res: Response) {
     };
 
     res.setHeader('Content-Type', 'application/json');
-    res.setHeader('Content-Disposition', `attachment; filename="${tenant.toLowerCase()}-sbom.cyclonedx-1.6.json"`);
+    res.setHeader('Content-Disposition', `attachment; filename="quarkshield-platform-sbom.cyclonedx-1.6.json"`);
     res.json(cyclonedxSbom);
   } catch (error: any) {
     console.error('Error exporting CycloneDX SBOM:', error);
@@ -1014,24 +842,21 @@ export async function exportSbom(req: Request, res: Response) {
 
 /**
  * GET /api/sbom/fix-script
- * Generates an automated remediation shell script to fix all patchable components
+ * Generates an automated platform maintenance & fix script for quarkshield.ai (Super Admin Only)
  */
 export async function getFixScript(req: Request, res: Response) {
   try {
-    const tenant = (req.query.tenant as string) || 'SPINOVATIONCORP';
-    if (!checkSuperAdminAccess(req, tenant)) {
+    if (!checkSuperAdminAccess(req)) {
       return res.status(403).json({
         success: false,
         error: 'Access Denied: QuarkShield Platform Stack Maintenance & Fix Script is restricted to Super Admin only.'
       });
     }
 
-    const isPlatform = tenant.toLowerCase().includes('quarkshield') || tenant.toLowerCase() === 'system' || tenant.toLowerCase() === 'platform';
-    if (isPlatform) {
-      const platformScript = `#!/bin/bash
+    const platformScript = `#!/bin/bash
 # ==============================================================================
 # QuarkShield Platform Stack Maintenance & Upgrade Script
-# Target: quarkshield.ai Production Infrastructure
+# Target: quarkshield.ai Production Infrastructure (https://github.com/spinovation/quarkshield-ai)
 # Generated: ${new Date().toISOString()}
 # Privileged Access: Super Admin Only
 # Security Posture: 0 Active Vulnerabilities | NIST SP 800-218 Aligned
@@ -1080,66 +905,9 @@ echo "📡 Service Health: http://localhost:5050/health"
 echo "🌐 Platform SBOM:   http://localhost:5050/api/sbom/export?tenant=quarkshield.ai"
 echo "======================================================================"
 `;
-      res.setHeader('Content-Type', 'text/x-shellscript');
-      res.setHeader('Content-Disposition', `attachment; filename="quarkshield-platform-upgrade.sh"`);
-      return res.send(platformScript);
-    }
-
-    const dataRes = await pool.query(`
-      SELECT name, version, ecosystem, vulnerabilities
-      FROM sbom_components
-      WHERE (LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global') AND has_vulnerabilities = true
-      ORDER BY name ASC
-    `, [tenant]);
-
-    const npmFixes: string[] = [];
-    const pipFixes: string[] = [];
-    const goFixes: string[] = [];
-    const osFixes: string[] = [];
-
-    for (const r of dataRes.rows) {
-      if (Array.isArray(r.vulnerabilities)) {
-        for (const v of r.vulnerabilities) {
-          if (v.remediationCmd) {
-            if (r.ecosystem === 'npm') npmFixes.push(v.remediationCmd);
-            else if (r.ecosystem === 'pypi') pipFixes.push(v.remediationCmd);
-            else if (r.ecosystem === 'golang') goFixes.push(v.remediationCmd);
-            else osFixes.push(v.remediationCmd);
-          }
-        }
-      }
-    }
-
-    const script = `#!/bin/bash
-# ==============================================================================
-# QuarkShield Automated SBOM Vulnerability Remediation Script
-# Tenant: ${tenant.toUpperCase()}
-# Generated: ${new Date().toISOString()}
-# Total Vulnerable Software Components: ${dataRes.rows.length}
-# ==============================================================================
-
-set -e
-
-echo "🛡️ Starting QuarkShield Automated SBOM Remediation..."
-
-# --- Node.js / npm Packages ---
-${npmFixes.length > 0 ? npmFixes.map(cmd => `echo "Upgrading npm package..."\n${cmd}`).join('\n') : '# No npm vulnerabilities'}
-
-# --- Python / PyPI Packages ---
-${pipFixes.length > 0 ? pipFixes.map(cmd => `echo "Upgrading PyPI package..."\n${cmd}`).join('\n') : '# No Python vulnerabilities'}
-
-# --- Go Modules ---
-${goFixes.length > 0 ? goFixes.map(cmd => `echo "Upgrading Go module..."\n${cmd}`).join('\n') : '# No Go vulnerabilities'}
-
-# --- OS System Packages ---
-${osFixes.length > 0 ? osFixes.map(cmd => `echo "Upgrading OS package..."\n${cmd}`).join('\n') : '# No OS package vulnerabilities'}
-
-echo "✅ QuarkShield SBOM Remediation Complete. All vulnerable packages updated to safe fixed versions."
-`;
-
     res.setHeader('Content-Type', 'text/x-shellscript');
-    res.setHeader('Content-Disposition', `attachment; filename="quarkshield-remediate-${tenant.toLowerCase()}.sh"`);
-    res.send(script);
+    res.setHeader('Content-Disposition', `attachment; filename="quarkshield-platform-upgrade.sh"`);
+    return res.send(platformScript);
   } catch (error: any) {
     console.error('Error generating fix script:', error);
     res.status(500).json({ success: false, error: error.message });
@@ -1153,7 +921,7 @@ echo "✅ QuarkShield SBOM Remediation Complete. All vulnerable packages updated
  */
 export async function getSuperAdminGuide(req: Request, res: Response) {
   try {
-    const isSuperAdmin = checkSuperAdminAccess(req, 'quarkshield.ai');
+    const isSuperAdmin = checkSuperAdminAccess(req);
     if (!isSuperAdmin) {
       return res.status(403).json({
         success: false,

@@ -64,7 +64,6 @@ import { TenantUserManagement } from './TenantUserManagement';
 import { EnterprisePkiVaults } from './EnterprisePkiVaults';
 import { PqcProxyGateway } from './PqcProxyGateway';
 import { IntegrationsHub } from './IntegrationsHub';
-import SbomInventory from './SbomInventory';
 
 export interface InternalUserLog {
   id: string;
@@ -659,7 +658,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   });
 
   // 2. CBOM Inventory State
-  const [cbomSubTab, setCbomSubTab] = useState<'assets' | 'cyclonedx' | 'sbom' | 'json'>('assets');
+  const [cbomSubTab, setCbomSubTab] = useState<'assets' | 'cyclonedx' | 'json'>('assets');
   const [cbomSearch, setCbomSearch] = useState<string>('');
   const [cbomCategory, setCbomCategory] = useState<string>('all');
   const [cbomJsonCopied, setCbomJsonCopied] = useState<boolean>(false);
@@ -2278,7 +2277,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           {[
             { id: 'overview', label: 'Overview & Metrics', icon: Activity },
-            { id: 'cbom', label: 'BOM Inventory', icon: FileCode, badge: 'CBOM + SBOM' },
+            { id: 'cbom', label: 'BOM Inventory', icon: FileCode, badge: 'CBOM' },
             { id: 'integrations', label: 'Integrations Hub', icon: Layers, badge: 'Unified Hub' },
             { id: 'proxy', label: 'Hybrid Quantum TLS Proxy', icon: Radio, badge: 'Inline' },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
@@ -3160,7 +3159,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                         <FileCode size={22} color="var(--accent-cyan, #38bdf8)" />
                         <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#ffffff' }}>
-                          BOM Inventory (CBOM &amp; SBOM)
+                          BOM Inventory (CBOM)
                         </h2>
                         <span style={{
                           fontSize: '0.68rem',
@@ -3175,7 +3174,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         </span>
                       </div>
                       <p style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.82rem', margin: '0.35rem 0 0 0' }}>
-                        Consolidated Cryptographic (CBOM) &amp; Software Bill of Materials (SBOM) tracking cryptographic keys, Shor-vulnerable primitives, software packages, and automated CVE remediation across {client.displayName}.
+                        Comprehensive Cryptographic Bill of Materials (CBOM) tracking cryptographic keys, certificates, Shor-vulnerable primitives, algorithms, and post-quantum migration posture across {client.displayName}.
                       </p>
                     </div>
 
@@ -3206,25 +3205,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           }}
                         >
                           <Layers size={13} /> Asset Inventory (CBOM)
-                        </button>
-                        <button
-                          onClick={() => setCbomSubTab('sbom')}
-                          style={{
-                            padding: '0.4rem 0.8rem',
-                            borderRadius: '4px',
-                            border: 'none',
-                            fontSize: '0.78rem',
-                            fontWeight: 600,
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '0.4rem',
-                            background: cbomSubTab === 'sbom' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                            color: cbomSubTab === 'sbom' ? '#38bdf8' : 'var(--text-muted, #94a3b8)',
-                            transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <Package size={13} /> Software Bill of Materials (SBOM)
                         </button>
                         <button
                           onClick={() => setCbomSubTab('cyclonedx')}
@@ -3571,12 +3551,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   </div>
                 )}
 
-                {/* SUB-TAB 2: SOFTWARE BILL OF MATERIALS (SBOM) & VULNERABILITY REMEDIATION */}
-                {cbomSubTab === 'sbom' && (
-                  <SbomInventory tenant={client.customerId || client.name || 'SPINOVATIONCORP'} apiUrl="" />
-                )}
-
-                {/* SUB-TAB 3: CYCLONEDX 1.6 CBOM */}
+                {/* SUB-TAB 2: CYCLONEDX 1.6 CBOM */}
                 {cbomSubTab === 'cyclonedx' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                     {/* Header Card / KPIs */}
