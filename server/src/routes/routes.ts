@@ -7,6 +7,7 @@ import {
   deleteFleetMachine,
   getFleetCBOM,
   getInstallerScript,
+  getPowerShellInstallerScript,
   ingestTelemetry,
   enqueuePullCommand,
   getTenantDailySnapshots
@@ -105,6 +106,7 @@ router.get('/fleet/cbom', getFleetCBOM);
 
 // Agent Deployment Script & Ingestion
 router.get('/scan/agent/install.sh', getInstallerScript);
+router.get('/scan/agent/install.ps1', getPowerShellInstallerScript);
 router.post('/scan/agent/ingest', ingestTelemetry);
 
 // ==========================================

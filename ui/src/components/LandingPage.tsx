@@ -2143,8 +2143,11 @@ chmod +x quarkshield-scanner
                   </button>
                 </div>
                 <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-{`# Auto-detects architecture, installs systemd service, and begins continuous telemetry
-curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
+{`# 1-Click Installer (Auto-detects architecture & performs local PQC discovery):
+curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash
+
+# Or enroll into your QuarkShield dashboard with your Fleet Token:
+curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --token YOUR_FLEET_TOKEN`}
                 </pre>
               </div>
             </div>
@@ -5747,8 +5750,10 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`}
                       </div>
                     </div>
                     <div style={{ background: 'rgba(0, 0, 0, 0.5)', padding: '0.75rem 1rem', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '0.8rem', color: '#fbbf24' }}>
-                      # Instant 1-Line Installer (detects arch, installs service):<br/>
-                      curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash
+                      # Instant 1-Line Installer (detects arch & runs local scan):<br/>
+                      <code style={{ color: '#38bdf8' }}>curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash</code><br/><br/>
+                      # Enterprise Fleet Enrollment (link to dashboard):<br/>
+                      <code style={{ color: '#38bdf8' }}>curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --token YOUR_FLEET_TOKEN</code>
                     </div>
                   </div>
 

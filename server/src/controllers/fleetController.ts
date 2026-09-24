@@ -384,15 +384,16 @@ export const getInstallerScript = async (req: Request, res: Response) => {
   const host = req.get('host') || 'localhost:5050';
   const proto = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const serverUrl = `${proto}://${host}`;
+  const queryToken = (req.query.token as string || req.query.t as string || '').trim();
 
   const script = `#!/bin/sh
-# Desktop & Host PQC Vulnerability Scanner - Automated 1-Click Installer
-# Universal POSIX deployment script for macOS & Linux fleets
+# QuarkShield.ai Post-Quantum Cryptography Fleet Scanner - Automated Installer
+# Universal POSIX deployment script for Linux & macOS endpoints
 
 set -e
 
 SERVER_URL="${serverUrl}"
-TOKEN=""
+TOKEN="${queryToken}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -402,14 +403,23 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# Check environment variable fallbacks
 if [ -z "$TOKEN" ]; then
-  echo "❌ Error: Missing --token argument."
-  echo "Usage: curl -fsSL $SERVER_URL/api/scan/agent/install.sh | sudo sh -s -- --token YOUR_FLEET_TOKEN"
-  exit 1
+  TOKEN="\${QUARKSHIELD_TOKEN:-\${FLEET_TOKEN:-}}"
+fi
+
+# If interactive terminal and token is still missing, prompt user
+if [ -z "$TOKEN" ] && [ -r /dev/tty ] && [ -c /dev/tty ]; then
+  echo "=================================================="
+  echo " 🛡️ QuarkShield.ai Host PQC Discovery Setup"
+  echo "=================================================="
+  printf "🔑 Enter your Fleet Enrollment Token (or press Enter for Standalone Local Scan): "
+  read -r USER_INPUT </dev/tty || true
+  TOKEN="$(echo "$USER_INPUT" | tr -d '[:space:]')"
 fi
 
 echo "=================================================="
-echo " 🛡️ Desktop & Host PQC Vulnerability Scanner Setup"
+echo " 🛡️ QuarkShield.ai Post-Quantum Fleet Setup"
 echo "=================================================="
 
 OS="$(uname -s)"
@@ -457,15 +467,85 @@ fi
 chmod +x "$INSTALL_DIR/quarkshield-scanner"
 echo "✓ Successfully installed scanner binary."
 
-echo "🚀 Executing initial host cryptographic discovery scan..."
-"$INSTALL_DIR/quarkshield-scanner" --server "$SERVER_URL" --token "$TOKEN" --register --quick || true
-
-echo "=================================================="
-echo "🎉 Setup Complete! Device enrolled in PQC Scanner Fleet."
-echo "=================================================="
+if [ -n "$TOKEN" ]; then
+  echo "🚀 Executing initial host cryptographic discovery scan and enrolling into fleet..."
+  "$INSTALL_DIR/quarkshield-scanner" --server "$SERVER_URL" --token "$TOKEN" --register --quick || true
+  echo "=================================================="
+  echo "🎉 Setup Complete! Device enrolled in QuarkShield PQC Scanner Fleet."
+  echo "=================================================="
+else
+  echo ""
+  echo "⚠️ No Fleet Enrollment Token provided."
+  echo "🚀 Executing local standalone cryptographic audit..."
+  "$INSTALL_DIR/quarkshield-scanner" --quick || true
+  echo "=================================================="
+  echo "✅ Setup Complete! QuarkShield Scanner installed to: $INSTALL_DIR/quarkshield-scanner"
+  echo ""
+  echo "💡 To enroll this device in your central dashboard anytime:"
+  echo "   sudo $INSTALL_DIR/quarkshield-scanner --server $SERVER_URL --token <YOUR_FLEET_TOKEN> --register --quick"
+  echo ""
+  echo "💡 Or re-run the 1-click installer with your token:"
+  echo "   curl -fsSL $SERVER_URL/api/scan/agent/install.sh | sudo bash -s -- --token YOUR_FLEET_TOKEN"
+  echo "=================================================="
+fi
 `;
 
   res.setHeader('Content-Type', 'text/x-shellscript');
+  res.send(script);
+};
+
+export const getPowerShellInstallerScript = async (req: Request, res: Response) => {
+  const host = req.get('host') || 'localhost:5050';
+  const proto = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
+  const serverUrl = `${proto}://${host}`;
+  const queryToken = (req.query.token as string || req.query.t as string || '').trim();
+
+  const script = `# QuarkShield.ai Windows PowerShell 1-Click Installer
+param(
+    [string]$EnrollmentToken = "${queryToken}",
+    [string]$ServerUrl = "${serverUrl}"
+)
+
+if (-not $EnrollmentToken -and $env:QUARKSHIELD_TOKEN) {
+    $EnrollmentToken = $env:QUARKSHIELD_TOKEN
+}
+
+$InstallDir = "$env:ProgramFiles\\QuarkShield"
+if (-not (Test-Path $InstallDir)) {
+    New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+}
+
+$BinaryPath = "$InstallDir\\quarkshield-scanner.exe"
+$DownloadUrl = "$ServerUrl/downloads/quarkshield-scanner-windows-amd64.exe"
+
+Write-Host "==================================================" -ForegroundColor Cyan
+Write-Host " 🛡️ QuarkShield.ai Post-Quantum Fleet Setup (Windows)" -ForegroundColor Cyan
+Write-Host "==================================================" -ForegroundColor Cyan
+Write-Host "⬇️ Downloading QuarkShield Windows Scanner..." -ForegroundColor Gray
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -Uri $DownloadUrl -OutFile $BinaryPath -UseBasicParsing
+
+Write-Host "✓ Installed scanner to: $BinaryPath" -ForegroundColor Green
+
+if ($EnrollmentToken) {
+    Write-Host "🚀 Registering workstation with QuarkShield central fleet..." -ForegroundColor Cyan
+    & $BinaryPath --server $ServerUrl --token $EnrollmentToken --register --quick
+    Write-Host "==================================================" -ForegroundColor Green
+    Write-Host "🎉 Setup Complete! Workstation enrolled in QuarkShield PQC Fleet." -ForegroundColor Green
+    Write-Host "==================================================" -ForegroundColor Green
+} else {
+    Write-Host ""
+    Write-Host "⚠️ No enrollment token provided. Executing local standalone scan..." -ForegroundColor Yellow
+    & $BinaryPath --quick
+    Write-Host "==================================================" -ForegroundColor Green
+    Write-Host "✅ Standalone audit complete! To enroll in your dashboard later:" -ForegroundColor Gray
+    Write-Host "   & '$BinaryPath' --server $ServerUrl --token <YOUR_TOKEN> --register --quick" -ForegroundColor Cyan
+    Write-Host "==================================================" -ForegroundColor Green
+}
+`;
+
+  res.setHeader('Content-Type', 'text/plain');
   res.send(script);
 };
 
