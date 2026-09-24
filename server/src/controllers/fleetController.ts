@@ -384,7 +384,7 @@ export const getInstallerScript = async (req: Request, res: Response) => {
   const host = req.get('host') || 'localhost:5050';
   const proto = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const serverUrl = `${proto}://${host}`;
-  const queryToken = (req.query.token as string || req.query.t as string || '').trim();
+  const queryToken = (req.query.token as string || req.query.t as string || req.query.license as string || req.query.l as string || req.query.key as string || '').trim();
 
   const script = `#!/bin/sh
 # QuarkShield.ai Post-Quantum Cryptography Fleet Scanner - Automated Installer
@@ -397,7 +397,7 @@ TOKEN="${queryToken}"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --token|-t) TOKEN="$2"; shift 2;;
+    --token|-t|--license|-l|--key|-k) TOKEN="$2"; shift 2;;
     --server|-s) SERVER_URL="$2"; shift 2;;
     *) shift 1;;
   esac
@@ -405,7 +405,7 @@ done
 
 # Check environment variable fallbacks
 if [ -z "$TOKEN" ]; then
-  TOKEN="\${QUARKSHIELD_TOKEN:-\${FLEET_TOKEN:-}}"
+  TOKEN="\${QUARKSHIELD_TOKEN:-\${FLEET_TOKEN:-\${QUARKSHIELD_LICENSE:-\${LICENSE_KEY:-}}}}"
 fi
 
 # If interactive terminal and token is still missing, prompt user
@@ -413,7 +413,7 @@ if [ -z "$TOKEN" ] && [ -r /dev/tty ] && [ -c /dev/tty ]; then
   echo "=================================================="
   echo " 🛡️ QuarkShield.ai Host PQC Discovery Setup"
   echo "=================================================="
-  printf "🔑 Enter your Fleet Enrollment Token (or press Enter for Standalone Local Scan): "
+  printf "🔑 Enter your License Key or Fleet Enrollment Token (or press Enter for Standalone Local Scan): "
   read -r USER_INPUT </dev/tty || true
   TOKEN="$(echo "$USER_INPUT" | tr -d '[:space:]')"
 fi
@@ -475,17 +475,17 @@ if [ -n "$TOKEN" ]; then
   echo "=================================================="
 else
   echo ""
-  echo "⚠️ No Fleet Enrollment Token provided."
+  echo "⚠️ No License Key or Fleet Enrollment Token provided."
   echo "🚀 Executing local standalone cryptographic audit..."
   "$INSTALL_DIR/quarkshield-scanner" --quick || true
   echo "=================================================="
   echo "✅ Setup Complete! QuarkShield Scanner installed to: $INSTALL_DIR/quarkshield-scanner"
   echo ""
   echo "💡 To enroll this device in your central dashboard anytime:"
-  echo "   sudo $INSTALL_DIR/quarkshield-scanner --server $SERVER_URL --token <YOUR_FLEET_TOKEN> --register --quick"
+  echo "   sudo $INSTALL_DIR/quarkshield-scanner --server $SERVER_URL --token <YOUR_LICENSE_KEY_OR_TOKEN> --register --quick"
   echo ""
-  echo "💡 Or re-run the 1-click installer with your token:"
-  echo "   curl -fsSL $SERVER_URL/api/scan/agent/install.sh | sudo bash -s -- --token YOUR_FLEET_TOKEN"
+  echo "💡 Or re-run the 1-click installer with your key or token:"
+  echo "   curl -fsSL $SERVER_URL/api/scan/agent/install.sh | sudo bash -s -- --token YOUR_LICENSE_KEY"
   echo "=================================================="
 fi
 `;
@@ -565,16 +565,51 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     if (!token && req.body.token) {
       token = req.body.token;
     }
+    if (!token && req.body.licenseKey) {
+      token = req.body.licenseKey;
+    }
+    if (!token && req.body.license_key) {
+      token = req.body.license_key;
+    }
 
     if (!token) {
-      return res.status(401).json({ error: 'Unauthorized: Fleet token is missing.' });
+      return res.status(401).json({ error: 'Unauthorized: Fleet token or license key is missing.' });
     }
 
+    token = token.trim();
+
+    let tokenRow: any = null;
     const tokenResult = await pool.query('SELECT * FROM fleet_tokens WHERE token = $1', [token]);
-    if (tokenResult.rowCount === 0) {
-      return res.status(401).json({ error: 'Unauthorized: Invalid fleet enrollment token.' });
+    if (tokenResult.rowCount && tokenResult.rowCount > 0) {
+      tokenRow = tokenResult.rows[0];
+    } else {
+      // Also allow directly enrolling via Enterprise / Partner License Key!
+      const licResult = await pool.query(
+        "SELECT * FROM admin_licenses WHERE UPPER(TRIM(license_key)) = UPPER(TRIM($1)) AND status != 'revoked'",
+        [token]
+      );
+      if (licResult.rowCount && licResult.rowCount > 0) {
+        const lic = licResult.rows[0];
+        const existingTokenRes = await pool.query(
+          "SELECT id, name FROM fleet_tokens WHERE LOWER(tenant_name) = LOWER($1) AND status = 'active' ORDER BY created_at ASC LIMIT 1",
+          [lic.tenant_name]
+        );
+        const existingTok = existingTokenRes.rowCount && existingTokenRes.rowCount > 0 ? existingTokenRes.rows[0] : null;
+
+        tokenRow = {
+          id: existingTok ? existingTok.id : null,
+          name: existingTok ? existingTok.name : `Direct License Enrollment (${lic.tenant_name})`,
+          token: lic.license_key,
+          tenant_name: lic.tenant_name,
+          license_key: lic.license_key,
+          status: 'active'
+        };
+      }
     }
-    const tokenRow = tokenResult.rows[0];
+
+    if (!tokenRow) {
+      return res.status(401).json({ error: 'Unauthorized: Invalid fleet enrollment token or license key.' });
+    }
 
     const { hostname, computer_name, hardware_uuid, os, arch, ip, agent_version, assets } = req.body;
     if (!hostname) {
@@ -774,7 +809,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       assignedLicense
     ]);
 
-    await pool.query('UPDATE fleet_tokens SET status = $1, last_sync = CURRENT_TIMESTAMP WHERE id = $2', ['active', tokenRow.id]);
+    if (tokenRow.id) {
+      await pool.query('UPDATE fleet_tokens SET status = $1, last_sync = CURRENT_TIMESTAMP WHERE id = $2', ['active', tokenRow.id]);
+    }
 
     // Purge previous scan findings for this machine to keep ONLY the latest sync data
     await pool.query('DELETE FROM assets WHERE machine_id = $1', [machineId]);

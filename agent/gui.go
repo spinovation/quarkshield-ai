@@ -624,17 +624,6 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 			return
 		}
 
-		// Enforce non-trial active license guard to avoid cross-data pollution
-		lic := GetLicenseInfo()
-		if !lic.IsLicensed || lic.Tier == "trial" || lic.IsExpired {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusForbidden)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"error": "Fleet synchronization requires an activated Partner Evaluation or Corporate Enterprise license key. 7-Day Trial instances cannot sync telemetry to avoid cross-tenant pollution.",
-			})
-			return
-		}
-
 		var req SyncRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -643,10 +632,26 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		if token == "" {
 			token = cfg.Token
 		}
+
+		if strings.HasPrefix(strings.ToUpper(token), "QS-") {
+			_, _ = ActivateLicense(token)
+		}
+
+		lic := GetLicenseInfo()
+
+		if token == "" && (!lic.IsLicensed || lic.Tier == "trial" || lic.IsExpired) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"error": "Fleet synchronization requires an activated Partner Evaluation or Corporate Enterprise license key or Fleet Enrollment Token.",
+			})
+			return
+		}
+
 		if token == "" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid sync request: missing Fleet Enrollment Token"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Invalid sync request: missing Fleet Enrollment Token or License Key"})
 			return
 		}
 
@@ -849,7 +854,7 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 				}
 
 				lic := GetLicenseInfo()
-				if !lic.IsLicensed || lic.Tier == "trial" || lic.IsExpired {
+				if cfg.Token == "" && (!lic.IsLicensed || lic.Tier == "trial" || lic.IsExpired) {
 					continue
 				}
 

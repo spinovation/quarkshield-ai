@@ -343,7 +343,8 @@ func main() {
 	// 1. Define Command-Line Flags
 	pathFlag := flag.String("path", ".", "Target local directory path to scan")
 	serverFlag := flag.String("server", "https://quarkshield.ai", "QuarkShield central server URL")
-	tokenFlag := flag.String("token", "", "QuarkShield.AI Fleet Enrollment Token")
+	tokenFlag := flag.String("token", "", "QuarkShield.AI Fleet Enrollment Token or License Key")
+	licenseFlag := flag.String("license", "", "QuarkShield Enterprise/Partner License Key")
 	registerFlag := flag.Bool("register", false, "Register findings in the central fleet database")
 	outputFlag := flag.String("output", "", "Output file path to save report")
 	quickFlag := flag.Bool("quick", false, "Quick scan common credential directories (~/.ssh, /etc/ssl, etc.)")
@@ -354,7 +355,10 @@ func main() {
 
 	flag.StringVar(pathFlag, "p", ".", "Target directory path (shorthand)")
 	flag.StringVar(serverFlag, "s", "https://quarkshield.ai", "Server URL (shorthand)")
-	flag.StringVar(tokenFlag, "t", "", "Fleet enrollment token (shorthand)")
+	flag.StringVar(tokenFlag, "t", "", "Fleet enrollment token or license key (shorthand)")
+	flag.StringVar(licenseFlag, "l", "", "License key (shorthand)")
+	flag.StringVar(licenseFlag, "key", "", "License key alias")
+	flag.StringVar(licenseFlag, "k", "", "License key shorthand")
 	flag.BoolVar(registerFlag, "r", false, "Register findings (shorthand)")
 	flag.StringVar(outputFlag, "o", "", "Output file (shorthand)")
 	flag.BoolVar(quickFlag, "q", false, "Quick scan mode (shorthand)")
@@ -374,6 +378,21 @@ func main() {
 	}
 
 	flag.Parse()
+
+	tokenVal := strings.TrimSpace(*tokenFlag)
+	licVal := strings.TrimSpace(*licenseFlag)
+	if licVal != "" {
+		if tokenVal == "" {
+			tokenVal = licVal
+		}
+		if _, err := ActivateLicense(licVal); err == nil {
+			fmt.Println("✓ Local license successfully activated.")
+		}
+	} else if strings.HasPrefix(strings.ToUpper(tokenVal), "QS-") {
+		if _, err := ActivateLicense(tokenVal); err == nil {
+			fmt.Println("✓ Local license successfully activated from license key.")
+		}
+	}
 
 	// Handle Active Network & TLS Probe
 	if *probeFlag != "" {
@@ -519,21 +538,29 @@ func main() {
 		} else {
 			fmt.Printf("✓ Report saved to %s\n", *outputFlag)
 		}
-	} else if !*registerFlag && *tokenFlag == "" {
+	} else if !*registerFlag && tokenVal == "" {
 		fmt.Println(string(outputBytes))
 	}
 
 	// 6. Send Telemetry to QuarkShield.AI Central Platform
-	if *tokenFlag != "" || *registerFlag {
+	if tokenVal != "" || *registerFlag {
 		lic := GetLicenseInfo()
-		if !lic.IsLicensed || lic.Tier == "trial" || lic.IsExpired {
-			fmt.Println("❌ Error: Fleet synchronization requires an active Partner Evaluation or Corporate Enterprise license key.")
-			fmt.Println("   7-Day Trial instances cannot sync telemetry to avoid cross-tenant pollution.")
+
+		// If a license key was provided or token starts with QS-, try activating if not yet licensed
+		if !lic.IsLicensed && strings.HasPrefix(strings.ToUpper(tokenVal), "QS-") {
+			_, _ = ActivateLicense(tokenVal)
+			lic = GetLicenseInfo()
+		}
+
+		// Only block if NEITHER a token/key was supplied NOR does the machine have an active license
+		if tokenVal == "" && (!lic.IsLicensed || lic.Tier == "trial" || lic.IsExpired) {
+			fmt.Println("❌ Error: Fleet synchronization requires an active License Key or Fleet Enrollment Token.")
+			fmt.Println("   Pass --token <TOKEN_OR_KEY> or --license <KEY> to enroll this device.")
 			os.Exit(1)
 		}
 
 		fmt.Printf("📡 Transmitting telemetry to QuarkShield server at %s...\n", *serverFlag)
-		err := SendFleetTelemetry(*serverFlag, *tokenFlag, hostname, osName, archName, localIP, allFindings, lic.LicenseKey, lic.TenantName)
+		err := SendFleetTelemetry(*serverFlag, tokenVal, hostname, osName, archName, localIP, allFindings, lic.LicenseKey, lic.TenantName)
 		if err != nil {
 			fmt.Printf("❌ Telemetry failed: %v\n", err)
 			os.Exit(1)
