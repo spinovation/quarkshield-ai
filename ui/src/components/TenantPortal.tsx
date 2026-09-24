@@ -6029,17 +6029,42 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       <Key size={20} color="#38bdf8" />
                       <span>Active Enterprise Licenses ({activeLicenses.length})</span>
                     </h2>
-                    <span style={{
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      color: '#38bdf8',
-                      background: 'rgba(56, 189, 248, 0.12)',
-                      border: '1px solid rgba(56, 189, 248, 0.3)',
-                      padding: '0.25rem 0.75rem',
-                      borderRadius: '12px'
-                    }}>
-                      Fleet Capacity: {usedSeats} / {totalCapacity} Seats Active
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <button
+                        onClick={() => {
+                          setGeneratedTokenData(null);
+                          setShowEnrollModal(true);
+                        }}
+                        style={{
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          color: '#38bdf8',
+                          padding: '0.4rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          transition: 'all 0.15s ease'
+                        }}
+                        title="Enroll a new device or generate fleet token"
+                      >
+                        <Plus size={14} /> Enroll New Device
+                      </button>
+                      <span style={{
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        color: '#38bdf8',
+                        background: 'rgba(56, 189, 248, 0.12)',
+                        border: '1px solid rgba(56, 189, 248, 0.3)',
+                        padding: '0.25rem 0.75rem',
+                        borderRadius: '12px'
+                      }}>
+                        Fleet Capacity: {usedSeats} / {totalCapacity} Seats Active
+                      </span>
+                    </div>
                   </div>
                   <p style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.85rem', margin: '0 0 1.25rem 0' }}>
                     Authorized cryptographic licenses issued to {client.displayName} for silent fleet scanning and PQC posture ingestion.
@@ -6211,6 +6236,29 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           <span style={{ color: '#c084fc' }}>• {machines.filter(m => (m.os||'').toLowerCase().includes('win')).length} Windows</span>
                         </div>
                         <button
+                          onClick={() => {
+                            setGeneratedTokenData(null);
+                            setShowEnrollModal(true);
+                          }}
+                          style={{
+                            background: 'rgba(56, 189, 248, 0.12)',
+                            border: '1px solid rgba(56, 189, 248, 0.3)',
+                            color: '#38bdf8',
+                            padding: '0.25rem 0.65rem',
+                            borderRadius: '6px',
+                            fontSize: '0.75rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            transition: 'all 0.15s ease'
+                          }}
+                          title="Enroll a new device or generate fleet token"
+                        >
+                          <Plus size={13} /> Enroll New Device
+                        </button>
+                        <button
                           onClick={() => setWorkstationsCollapsed(!workstationsCollapsed)}
                           style={{
                             background: 'rgba(255, 255, 255, 0.04)',
@@ -6232,6 +6280,44 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     </div>
 
                     {!workstationsCollapsed && (
+                      machines.length === 0 ? (
+                        <div style={{
+                          textAlign: 'center',
+                          padding: '2.5rem 1rem',
+                          background: 'rgba(0, 0, 0, 0.2)',
+                          borderRadius: '8px',
+                          border: '1px dashed rgba(255, 255, 255, 0.1)',
+                          margin: '0.5rem 0'
+                        }}>
+                          <Laptop size={32} style={{ color: 'var(--text-muted, #94a3b8)', opacity: 0.5, marginBottom: '0.75rem' }} />
+                          <h4 style={{ margin: '0 0 0.35rem 0', color: '#ffffff', fontSize: '0.95rem' }}>No Workstations Enrolled Yet</h4>
+                          <p style={{ margin: '0 0 1rem 0', fontSize: '0.8rem', color: 'var(--text-muted, #94a3b8)', maxWidth: '420px', marginLeft: 'auto', marginRight: 'auto' }}>
+                            Enroll your first macOS, Windows, or Linux workstation to start continuous cryptographic posture auditing and telemetry ingestion.
+                          </p>
+                          <button
+                            onClick={() => {
+                              setGeneratedTokenData(null);
+                              setShowEnrollModal(true);
+                            }}
+                            style={{
+                              background: 'rgba(56, 189, 248, 0.12)',
+                              border: '1px solid rgba(56, 189, 248, 0.35)',
+                              color: '#38bdf8',
+                              padding: '0.45rem 1rem',
+                              borderRadius: '6px',
+                              fontSize: '0.82rem',
+                              fontWeight: 600,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.45rem',
+                              transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <Plus size={14} /> Enroll New Device
+                          </button>
+                        </div>
+                      ) : (
                       <div style={{ overflowX: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                           <thead>
@@ -6387,6 +6473,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           </tbody>
                         </table>
                       </div>
+                      )
                     )}
                   </div>
                 </div>
