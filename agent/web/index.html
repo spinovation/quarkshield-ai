@@ -255,6 +255,42 @@
       border-color: var(--border-bright);
     }
 
+    /* Scan Mode Buttons (Dynamic Highlighting) */
+    .scan-mode-btn {
+      transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    .scan-mode-btn.active-scan-mode {
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-blue)) !important;
+      color: #000 !important;
+      border: 1px solid rgba(0, 242, 254, 0.6) !important;
+      box-shadow: 0 4px 22px rgba(0, 242, 254, 0.45) !important;
+      font-weight: 700 !important;
+      transform: translateY(-1px);
+    }
+
+    .scan-mode-btn.active-scan-mode svg {
+      stroke: #000 !important;
+    }
+
+    .scan-mode-btn:not(.active-scan-mode) {
+      background: rgba(255, 255, 255, 0.05) !important;
+      color: var(--text-main) !important;
+      border: 1px solid rgba(255, 255, 255, 0.12) !important;
+      box-shadow: none !important;
+      font-weight: 600 !important;
+    }
+
+    .scan-mode-btn:not(.active-scan-mode) svg {
+      stroke: currentColor !important;
+    }
+
+    .scan-mode-btn:not(.active-scan-mode):hover {
+      background: rgba(255, 255, 255, 0.09) !important;
+      border-color: var(--border-bright) !important;
+      transform: translateY(-2px);
+    }
+
     .btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -675,14 +711,14 @@
 
       <!-- Scan Buttons -->
       <div class="scan-actions" id="scan-actions-container">
-        <button class="btn btn-primary" id="btn-quick-scan" onclick="triggerScan('quick')">
+        <button class="btn scan-mode-btn active-scan-mode" id="btn-quick-scan" onclick="triggerScan('quick')">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
           </svg>
           ⚡ Quick Scan Workstation
         </button>
 
-        <button class="btn btn-secondary" id="btn-sbom-scan" onclick="triggerScan('sbom')" style="border-color: rgba(56, 189, 248, 0.45); color: #38bdf8; background: rgba(56, 189, 248, 0.08); font-weight: 700;" title="Audit installed runtime packages, cryptographic libraries, and dependencies for CVEs">
+        <button class="btn scan-mode-btn" id="btn-sbom-scan" onclick="triggerScan('sbom')" title="Audit installed runtime packages, cryptographic libraries, and dependencies for CVEs">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>
             <path d="m3.3 7 8.7 5 8.7-5"/>
@@ -691,7 +727,7 @@
           📦 Software BOM (SBOM) Scan
         </button>
 
-        <button class="btn btn-secondary" id="btn-full-scan" onclick="toggleCustomScan()">
+        <button class="btn scan-mode-btn" id="btn-full-scan" onclick="toggleCustomScan()">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
@@ -1593,10 +1629,14 @@
     // 2. Scan Triggers & Folder Selection
     function toggleCustomScan() {
       const box = document.getElementById('custom-path-box');
-      box.style.display = box.style.display === 'none' ? 'block' : 'none';
-      if (box.style.display === 'block') {
+      const isOpening = box.style.display === 'none';
+      box.style.display = isOpening ? 'block' : 'none';
+      if (isOpening) {
         document.getElementById('custom-path-input').focus();
         document.getElementById('network-probe-box').style.display = 'none';
+        updateActiveScanButton('custom');
+      } else {
+        updateActiveScanButton(currentScanMode === 'sbom' ? 'sbom' : 'quick');
       }
     }
 
@@ -1875,6 +1915,24 @@
     let sortColumn = null;
     let sortDirection = 'asc';
 
+    function updateActiveScanButton(mode) {
+      const quickBtn = document.getElementById('btn-quick-scan');
+      const sbomBtn = document.getElementById('btn-sbom-scan');
+      const customBtn = document.getElementById('btn-full-scan');
+
+      if (quickBtn) quickBtn.classList.remove('active-scan-mode');
+      if (sbomBtn) sbomBtn.classList.remove('active-scan-mode');
+      if (customBtn) customBtn.classList.remove('active-scan-mode');
+
+      if (mode === 'sbom') {
+        if (sbomBtn) sbomBtn.classList.add('active-scan-mode');
+      } else if (mode === 'custom') {
+        if (customBtn) customBtn.classList.add('active-scan-mode');
+      } else {
+        if (quickBtn) quickBtn.classList.add('active-scan-mode');
+      }
+    }
+
     async function cancelScan() {
       try {
         document.getElementById('scan-ticker').textContent = '🛑 Halting audit and canceling scan...';
@@ -1904,6 +1962,8 @@
         mode = 'quick';
         isQuick = true;
       }
+
+      updateActiveScanButton(mode);
 
       // UI State: Scanning
       document.getElementById('btn-quick-scan').disabled = true;
@@ -2128,6 +2188,9 @@
 
       const isSbomMode = mode === 'sbom' || (data && data.scanType === 'sbom') || (findings.length > 0 && findings.every(f => f.type === 'package' || f.type === 'sbom'));
       currentScanMode = isSbomMode ? 'sbom' : 'cbom';
+
+      const activeBtnMode = isSbomMode ? 'sbom' : ((data && data.scanType === 'custom') || mode === 'custom' ? 'custom' : 'quick');
+      updateActiveScanButton(activeBtnMode);
 
       if (isSbomMode) {
         if (vulnerableCount > 0) {
