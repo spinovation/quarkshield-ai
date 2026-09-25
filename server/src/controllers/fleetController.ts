@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
+import { maybeSendAlert } from '../lib/alerts';
 
 // ==========================================
 // 1. FLEET TOKENS
@@ -923,8 +924,12 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       const newMap = new Map<string, boolean>();
       for (const a of processedAssets) newMap.set(fp(a.name, a.algorithm, a.path || ''), a.is_vulnerable);
       const driftRows: any[] = [];
+      const newVulnerable: Array<{ name: string; algorithm: string }> = [];
       if (hadBaseline) {
-        for (const [k, vuln] of newMap) if (!prevMap.has(k)) driftRows.push(['added', k, vuln]);
+        for (const [k, vuln] of newMap) if (!prevMap.has(k)) {
+          driftRows.push(['added', k, vuln]);
+          if (vuln) { const [n, a] = String(k).split('|'); newVulnerable.push({ name: n, algorithm: a }); }
+        }
         for (const [k, vuln] of prevMap) if (!newMap.has(k)) driftRows.push(['removed', k, vuln]);
       }
       for (const [changeType, key, vuln] of driftRows) {
@@ -935,6 +940,14 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
           ['drift-' + crypto.randomUUID().substring(0, 12), machineId, assignedTenant, changeType, aname, algo, vuln]
         );
       }
+      // DEF-54: notify (email + webhook) on new vulnerable assets or a high score.
+      maybeSendAlert({
+        tenant: assignedTenant,
+        machineId,
+        hostname: cleanHost,
+        riskScore: machineRiskScore,
+        newVulnerable,
+      }).catch(() => {});
     } catch (driftErr) {
       console.warn('Drift recording failed:', driftErr);
     }
