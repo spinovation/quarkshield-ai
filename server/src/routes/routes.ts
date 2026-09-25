@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, requireSuperAdmin, requireTenantAccess } from '../middleware/auth';
+import { exportExecutiveReport } from '../controllers/reportController';
 import { twoFactorStatus, twoFactorSetup, twoFactorVerify, twoFactorDisable } from '../controllers/twoFactorController';
 import {
   getFleetTokens,
@@ -115,6 +116,7 @@ router.post('/auth/logout', logout);
 router.get('/auth/me', getMe);
 
 // TOTP 2FA management (authenticated)
+router.get('/reports/executive', requireAuth, requireTenantAccess, exportExecutiveReport);
 router.get('/2fa/status', requireAuth, twoFactorStatus);
 router.post('/2fa/setup', requireAuth, twoFactorSetup);
 router.post('/2fa/verify', requireAuth, twoFactorVerify);
