@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/json"
@@ -57,6 +58,41 @@ func generateID() string {
 		result[i] = chars[rand.Intn(len(chars))]
 	}
 	return string(result)
+}
+
+// parsePrivateKeyDetails parses a PEM private-key block (PKCS#1, SEC1/EC, or
+// PKCS#8) and returns the true algorithm and key size. Returns ok=false for
+// encrypted or OpenSSH-format keys, which the caller then estimates.
+func parsePrivateKeyDetails(block *pem.Block) (string, int, bool) {
+	if strings.Contains(block.Type, "ENCRYPTED") {
+		return "", 0, false
+	}
+	if strings.Contains(block.Type, "RSA PRIVATE KEY") {
+		if k, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil && k.N != nil {
+			return "RSA", k.N.BitLen(), true
+		}
+	}
+	if strings.Contains(block.Type, "EC PRIVATE KEY") {
+		if k, err := x509.ParseECPrivateKey(block.Bytes); err == nil && k.Params() != nil {
+			return "ECDSA", k.Params().BitSize, true
+		}
+	}
+	// PKCS#8 ("BEGIN PRIVATE KEY") — RSA, ECDSA or Ed25519.
+	if k, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		switch key := k.(type) {
+		case *rsa.PrivateKey:
+			if key.N != nil {
+				return "RSA", key.N.BitLen(), true
+			}
+		case *ecdsa.PrivateKey:
+			if key.Params() != nil {
+				return "ECDSA", key.Params().BitSize, true
+			}
+		case ed25519.PrivateKey:
+			return "Ed25519", 256, true
+		}
+	}
+	return "", 0, false
 }
 
 func estimateRsaKeySize(base64Data string) int {
@@ -321,27 +357,40 @@ func AuditPEMCertificate(pemString string, label string, path string) AuditResul
 	}
 
 	if description == "" {
-		// Heuristics fallback for key files
-		base64Len := len(block.Bytes)
-		if strings.Contains(block.Type, "RSA") || base64Len > 400 {
-			algorithm = "RSA"
-			if base64Len > 800 {
-				keySize = 4096
-			} else if base64Len > 250 {
-				keySize = 2048
-			} else {
-				keySize = 1024
-			}
-			if keySize < 2048 {
+		// Parse the private key for its true algorithm and size (SC-08). Only if
+		// parsing fails (e.g. an encrypted or OpenSSH-format key) do we fall back
+		// to a length-based estimate.
+		if pkAlgo, pkSize, ok := parsePrivateKeyDetails(block); ok {
+			algorithm = pkAlgo
+			keySize = pkSize
+			if algorithm == "RSA" && keySize < 2048 {
 				riskLevel = "critical"
 			}
-			description = fmt.Sprintf("Quantum-vulnerable RSA-%d %s file.", keySize, strings.ToLower(block.Type))
-			explainer = "Shor's Algorithm factoring prime moduli. Plaintext private keys on disk also vulnerable to credential harvesting."
+			description = fmt.Sprintf("Quantum-vulnerable %s-%d %s.", algorithm, keySize, strings.ToLower(block.Type))
+			explainer = "Private key parsed directly. Shor's Algorithm defeats RSA/ECC asymmetric keys; plaintext keys on disk are also a credential-harvesting risk."
 		} else {
-			algorithm = "ECDSA / ECDH"
-			keySize = 256
-			description = fmt.Sprintf("Quantum-vulnerable Elliptic Curve %s file.", strings.ToLower(block.Type))
-			explainer = "Discrete logarithm solved in polynomial time via Shor's Algorithm."
+			// Heuristic fallback for unparseable/encrypted/OpenSSH keys.
+			base64Len := len(block.Bytes)
+			if strings.Contains(block.Type, "RSA") || base64Len > 400 {
+				algorithm = "RSA"
+				if base64Len > 800 {
+					keySize = 4096
+				} else if base64Len > 250 {
+					keySize = 2048
+				} else {
+					keySize = 1024
+				}
+				if keySize < 2048 {
+					riskLevel = "critical"
+				}
+				description = fmt.Sprintf("Quantum-vulnerable RSA (estimated %d-bit) %s file.", keySize, strings.ToLower(block.Type))
+				explainer = "Shor's Algorithm factoring prime moduli. Plaintext private keys on disk also vulnerable to credential harvesting."
+			} else {
+				algorithm = "ECDSA / ECDH"
+				keySize = 256
+				description = fmt.Sprintf("Quantum-vulnerable Elliptic Curve %s file.", strings.ToLower(block.Type))
+				explainer = "Discrete logarithm solved in polynomial time via Shor's Algorithm."
+			}
 		}
 	}
 

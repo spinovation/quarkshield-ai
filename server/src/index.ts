@@ -96,6 +96,15 @@ const possibleUiPaths = [
 ].filter(Boolean) as string[];
 
 const uiDistDir = possibleUiPaths.find(p => fs.existsSync(p));
+// Unknown /api and /downloads paths must 404 rather than fall through to the SPA
+// (DEF-14): returning index.html with a 200 made broken links look like they work.
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/') || req.path.startsWith('/downloads/')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  next();
+});
+
 if (uiDistDir) {
   console.log(`Serving Web UI from: ${uiDistDir}`);
   app.use(express.static(uiDistDir));

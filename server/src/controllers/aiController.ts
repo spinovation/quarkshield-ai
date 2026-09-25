@@ -224,7 +224,7 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
             'anthropic-version': '2023-06-01'
           },
           body: JSON.stringify({
-            model: 'claude-3-5-sonnet-20241022',
+            model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
             max_tokens: 3000,
             system: systemInstruction,
             messages: claudeMessages
@@ -1747,7 +1747,7 @@ Please generate the structured 7-slide board presentation JSON following the exa
                 'anthropic-version': '2023-06-01'
               },
               body: JSON.stringify({
-                model: 'claude-3-5-sonnet-20241022',
+                model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
                 max_tokens: 4000,
                 system: systemInstruction,
                 messages: [{ role: 'user', content: prompt }]
@@ -2127,7 +2127,7 @@ Please generate the complete report following the exact system instructions and 
                 'anthropic-version': '2023-06-01'
               },
               body: JSON.stringify({
-                model: 'claude-3-5-sonnet-20241022',
+                model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
                 max_tokens: 4000,
                 system: systemInstruction,
                 messages: [{ role: 'user', content: prompt }]

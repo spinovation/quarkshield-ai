@@ -143,7 +143,9 @@ export const getFleetMachines = async (req: Request, res: Response) => {
         m.arch,
         m.ip,
         m.agent_version as "agentVersion",
-        m.status,
+        -- DEF-37: a machine with no telemetry for > 30 min is reported offline
+        -- (nothing else ever transitions it back to offline after ingest).
+        CASE WHEN m.last_seen < NOW() - INTERVAL '30 minutes' THEN 'offline' ELSE m.status END as "status",
         m.risk_level as "riskLevel",
         m.quantum_risk_score as "quantumRiskScore",
         m.asset_count as "assetCount",
