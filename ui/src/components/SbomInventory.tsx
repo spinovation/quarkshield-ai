@@ -68,9 +68,8 @@ interface SbomInventoryProps {
   isSuperAdmin?: boolean;
 }
 
-export default function SbomInventory({ tenant = 'quarkshield.ai', apiUrl = '', isSuperAdmin = true }: SbomInventoryProps) {
-  // SBOM is strictly and exclusively for Super Admin auditing quarkshield.ai production platform stack
-  const activeTenant = 'quarkshield.ai';
+export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '', isSuperAdmin = false }: SbomInventoryProps) {
+  const activeTenant = tenant || 'SPINOVATIONCORP';
 
   const [components, setComponents] = useState<SbomComponent[]>([]);
   const [stats, setStats] = useState<SbomStats>({
@@ -103,7 +102,8 @@ export default function SbomInventory({ tenant = 'quarkshield.ai', apiUrl = '', 
       setGuideLoading(true);
       try {
         const res = await fetch(`${apiUrl}/api/sbom/superadmin-guide?format=json&admin=true`, {
-          headers: { 'x-admin-role': 'super_admin' }
+          headers: { 'x-admin-role': 'super_admin' },
+          credentials: 'include'
         });
         if (res.ok) {
           const data = await res.json();
@@ -126,8 +126,8 @@ export default function SbomInventory({ tenant = 'quarkshield.ai', apiUrl = '', 
         headers['x-admin-role'] = 'super_admin';
       }
       const [compRes, statsRes] = await Promise.all([
-        fetch(`${apiUrl}/api/sbom/components?tenant=${tenantParam}&limit=200`, { headers }),
-        fetch(`${apiUrl}/api/sbom/stats?tenant=${tenantParam}`, { headers })
+        fetch(`${apiUrl}/api/sbom/components?tenant=${tenantParam}&limit=200`, { headers, credentials: 'include' }),
+        fetch(`${apiUrl}/api/sbom/stats?tenant=${tenantParam}`, { headers, credentials: 'include' })
       ]);
 
       if (compRes.ok) {
@@ -212,8 +212,8 @@ export default function SbomInventory({ tenant = 'quarkshield.ai', apiUrl = '', 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Super Admin Privileged Access Banner & Scope Selector */}
-      {isSuperAdmin && (
+      {/* Header Banner */}
+      {isSuperAdmin ? (
         <div style={{
           background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.12) 0%, rgba(56, 189, 248, 0.12) 100%)',
           border: '1px solid rgba(168, 85, 247, 0.4)',
@@ -256,6 +256,51 @@ export default function SbomInventory({ tenant = 'quarkshield.ai', apiUrl = '', 
             </span>
             <span style={{ fontSize: '0.74rem', color: '#c084fc', borderLeft: '1px solid rgba(255, 255, 255, 0.15)', paddingLeft: '0.6rem' }}>
               github.com/spinovation/quarkshield-ai
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.08) 0%, rgba(168, 85, 247, 0.08) 100%)',
+          border: '1px solid rgba(56, 189, 248, 0.3)',
+          borderRadius: '12px',
+          padding: '1.25rem 1.5rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem'
+        }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
+              <Package size={20} color="#38bdf8" />
+              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#ffffff' }}>
+                Software Bill of Materials (SBOM) &amp; Automated CVE Correlation
+              </h3>
+              <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.5rem', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.4)', fontWeight: 700 }}>
+                Continuous Supply Chain Analysis
+              </span>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)', maxWidth: '780px' }}>
+              Automated software inventory correlated across enrolled endpoint operating systems and connected code repositories. Real-time NVD/GitHub CVE detection with CVSS ratings and 1-click remediation scripts.
+            </p>
+          </div>
+
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.65rem',
+            background: 'rgba(0, 0, 0, 0.45)',
+            padding: '0.5rem 1rem',
+            borderRadius: '8px',
+            border: '1px solid rgba(56, 189, 248, 0.25)'
+          }}>
+            <ShieldCheck size={15} color="#38bdf8" />
+            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#ffffff' }}>
+              {activeTenant} Scope
+            </span>
+            <span style={{ fontSize: '0.74rem', color: '#38bdf8', borderLeft: '1px solid rgba(255, 255, 255, 0.15)', paddingLeft: '0.6rem' }}>
+              Endpoint OS &amp; Repositories
             </span>
           </div>
         </div>

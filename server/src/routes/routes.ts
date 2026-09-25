@@ -264,12 +264,12 @@ router.get('/proxy/template', (req, res) => {
 });
 
 // =========================================================================
-// PLATFORM SBOM & VULNERABILITY FIX ENGINE (super admin only)
+// SOFTWARE BILL OF MATERIALS (SBOM) & VULNERABILITY FIX ENGINE
 // =========================================================================
-router.get('/sbom/components', requireSuperAdmin, getSbomComponents);
-router.get('/sbom/stats', requireSuperAdmin, getSbomStats);
-router.get('/sbom/export', requireSuperAdmin, exportSbom);
-router.get('/sbom/fix-script', requireSuperAdmin, getFixScript);
+router.get('/sbom/components', requireAuth, requireTenantAccess, getSbomComponents);
+router.get('/sbom/stats', requireAuth, requireTenantAccess, getSbomStats);
+router.get('/sbom/export', requireAuth, requireTenantAccess, exportSbom);
+router.get('/sbom/fix-script', requireAuth, requireTenantAccess, getFixScript);
 router.get('/sbom/superadmin-guide', requireSuperAdmin, getSuperAdminGuide);
 
 // =========================================================================

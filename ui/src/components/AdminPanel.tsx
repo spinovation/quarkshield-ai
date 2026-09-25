@@ -43,7 +43,6 @@ import {
   FileText
 } from 'lucide-react';
 import { TenantUserManagement } from './TenantUserManagement';
-import SbomInventory from './SbomInventory';
 
 export interface PlatformOperator {
   id: string;
@@ -238,7 +237,7 @@ interface UserInfo {
 interface AdminPanelProps {
   currentUserEmail?: string;
   onLogout?: () => void;
-  initialSubTab?: 'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics' | 'platform_sbom';
+  initialSubTab?: 'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics';
   onMirrorTenant?: (tenantSlug: string) => void;
 }
 
@@ -249,7 +248,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [activeSubTab, setActiveSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics' | 'platform_sbom'>(initialSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics'>(initialSubTab);
 
   // Platform Operators (Super Admin User Registry) State
   const [operators, setOperators] = useState<PlatformOperator[]>(() => {
@@ -2279,32 +2278,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
         >
           <Globe size={16} />
           <span>SEO & GEO Analytics</span>
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('platform_sbom')}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: activeSubTab === 'platform_sbom' ? '#a855f7' : 'var(--text-secondary)',
-            borderBottom: activeSubTab === 'platform_sbom' ? '2px solid #a855f7' : '2px solid transparent',
-            padding: '0.5rem 0.25rem',
-            cursor: 'pointer',
-            fontWeight: activeSubTab === 'platform_sbom' ? 600 : 500,
-            fontSize: '0.92rem',
-            transition: 'all 0.2s',
-            outline: 'none',
-            whiteSpace: 'nowrap',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.4rem'
-          }}
-        >
-          <Layers size={16} />
-          <span>Platform Stack SBOM (quarkshield.ai)</span>
-          <span style={{ fontSize: '0.68rem', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.4)', padding: '0.1rem 0.45rem', borderRadius: '10px', fontWeight: 700 }}>
-            Super Admin Only
-          </span>
         </button>
       </div>
 
@@ -6163,13 +6136,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
               </table>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Super Admin Exclusive: Platform Stack SBOM (quarkshield.ai) */}
-      {activeSubTab === 'platform_sbom' && (
-        <div style={{ marginTop: '1.5rem' }}>
-          <SbomInventory tenant="quarkshield.ai" isSuperAdmin={true} apiUrl="" />
         </div>
       )}
 

@@ -66,6 +66,7 @@ import { TenantUserManagement } from './TenantUserManagement';
 import { EnterprisePkiVaults } from './EnterprisePkiVaults';
 import { PqcProxyGateway } from './PqcProxyGateway';
 import { IntegrationsHub } from './IntegrationsHub';
+import SbomInventory from './SbomInventory';
 
 export interface InternalUserLog {
   id: string;
@@ -715,7 +716,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   });
 
   // 2. CBOM Inventory State
-  const [cbomSubTab, setCbomSubTab] = useState<'assets' | 'cyclonedx' | 'json' | 'drift'>('assets');
+  const [cbomSubTab, setCbomSubTab] = useState<'assets' | 'cyclonedx' | 'json' | 'drift' | 'sbom'>('assets');
   const [cbomSearch, setCbomSearch] = useState<string>('');
   const [cbomCategory, setCbomCategory] = useState<string>('all');
   const [cbomJsonCopied, setCbomJsonCopied] = useState<boolean>(false);
@@ -3888,6 +3889,25 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         >
                           <Activity size={13} /> Fleet Drift
                         </button>
+                        <button
+                          onClick={() => setCbomSubTab('sbom')}
+                          style={{
+                            padding: '0.4rem 0.8rem',
+                            borderRadius: '4px',
+                            border: 'none',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            background: cbomSubTab === 'sbom' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                            color: cbomSubTab === 'sbom' ? '#38bdf8' : 'var(--text-muted, #94a3b8)',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <Package size={13} /> Software BOM (SBOM) &amp; CVEs
+                        </button>
                       </div>
 
                       {/* Export Standard CBOM */}
@@ -4819,6 +4839,16 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                )}
+
+                {cbomSubTab === 'sbom' && (
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <SbomInventory
+                      tenant={client?.name || cleanSlug}
+                      apiUrl=""
+                      isSuperAdmin={false}
+                    />
                   </div>
                 )}
               </div>
