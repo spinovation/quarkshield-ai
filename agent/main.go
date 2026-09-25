@@ -352,6 +352,7 @@ func main() {
 	guiFlag := flag.Bool("gui", false, "Launch interactive Post-Quantum Guard Web GUI")
 	uninstallFlag := flag.Bool("uninstall", false, "Uninstall Post-Quantum Guard from this workstation")
 	probeFlag := flag.String("probe", "", "Active outbound TCP/TLS socket probe against target (e.g. microsoft.com:443)")
+	adcsFlag := flag.Bool("adcs", false, "Discover Active Directory Certificate Services (Windows) and report the CA inventory to the server")
 
 	flag.StringVar(pathFlag, "p", ".", "Target directory path (shorthand)")
 	flag.StringVar(serverFlag, "s", "https://quarkshield.ai", "Server URL (shorthand)")
@@ -392,6 +393,33 @@ func main() {
 		if _, err := ActivateLicense(tokenVal); err == nil {
 			fmt.Println("✓ Local license successfully activated from license key.")
 		}
+	}
+
+	// Handle AD CS discovery (Windows, domain-joined host) and report to server.
+	if *adcsFlag {
+		fmt.Printf("==================================================\n")
+		fmt.Printf(" 🏛️  QuarkShield Active Directory Certificate Services Discovery\n")
+		fmt.Printf("==================================================\n")
+		token := *tokenFlag
+		if token == "" {
+			token = *licenseFlag
+		}
+		if token == "" {
+			fmt.Println("❌ A fleet enrollment token is required (--token) to report AD CS inventory.")
+			os.Exit(1)
+		}
+		assets, caName, err := DiscoverADCS()
+		if err != nil {
+			fmt.Printf("❌ AD CS discovery failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✦ Discovered %d AD CS objects from CA '%s'.\n", len(assets), caName)
+		if err := ReportADCS(*serverFlag, token, caName, assets); err != nil {
+			fmt.Printf("❌ Failed to report AD CS inventory: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("✅ AD CS inventory reported to QuarkShield.")
+		os.Exit(0)
 	}
 
 	// Handle Active Network & TLS Probe

@@ -171,6 +171,18 @@ export const testPkiConnector = async (req: Request, res: Response) => {
       }
     }
 
+    // AD CS is push-based (the on-prem agent reports). Report its ingest status.
+    if (c.provider === 'ad_cs') {
+      return res.json({
+        success: true, connectorId: id, provider: c.provider, status: 'AGENT-REPORTED',
+        lastReportAt: c.last_sync_at,
+        keysDiscovered: c.total_keys_discovered,
+        message: c.total_keys_discovered > 0
+          ? `AD CS inventory last reported by the host agent at ${c.last_sync_at}.`
+          : 'Awaiting the first AD CS report from an enrolled host agent (run the agent with --adcs on a domain-joined Windows host).',
+      });
+    }
+
     // Preview providers: not yet implemented. Be honest rather than fake healthy.
     res.json({
       success: true, connectorId: id, provider: c.provider, endpoint: c.endpoint_url,
@@ -257,9 +269,107 @@ export const getPkiSyncedAssets = async (req: Request, res: Response) => {
 };
 
 // ==============================================================================
+// AD CS AGENT REPORT (Phase 3): on-prem Windows agent pushes CA inventory here.
+// Authenticated by a fleet enrollment token (resolves the tenant); persists the
+// reported CA certs / templates as real assets under a per-tenant ad_cs connector.
+// ==============================================================================
+const resolveTenantFromToken = async (token: string): Promise<string | null> => {
+  if (!token) return null;
+  const t = token.trim();
+  const ft = await pool.query('SELECT tenant_name FROM fleet_tokens WHERE token = $1', [t]);
+  if (ft.rowCount && ft.rows[0].tenant_name) return ft.rows[0].tenant_name;
+  const lic = await pool.query("SELECT tenant_name FROM admin_licenses WHERE UPPER(TRIM(license_key)) = UPPER(TRIM($1)) AND status != 'revoked'", [t]);
+  if (lic.rowCount && lic.rows[0].tenant_name) return lic.rows[0].tenant_name;
+  return null;
+};
+
+export const reportAdcs = async (req: Request, res: Response) => {
+  try {
+    let token = (req.headers['x-connector-token'] as string) || '';
+    const auth = req.headers['authorization'];
+    if (!token && auth && auth.startsWith('Bearer ')) token = auth.slice(7);
+    if (!token && req.body.token) token = req.body.token;
+    if (!token) return res.status(401).json({ error: 'Fleet enrollment token required.' });
+
+    const tenant = await resolveTenantFromToken(token);
+    if (!tenant) return res.status(401).json({ error: 'Invalid or unrecognized enrollment token.' });
+
+    const { caName, assets } = req.body;
+    if (!Array.isArray(assets)) return res.status(400).json({ error: 'Expected an assets array.' });
+
+    // Find-or-create the tenant's AD CS connector (one per reported CA host).
+    const connName = `AD CS: ${caName || 'Enterprise CA'}`;
+    const existing = await pool.query(
+      "SELECT id FROM pki_connectors WHERE provider = 'ad_cs' AND LOWER(tenant_name) = LOWER($1) AND name = $2 LIMIT 1",
+      [tenant, connName]
+    );
+    let connectorId: string;
+    if (existing.rowCount && existing.rows[0].id) {
+      connectorId = existing.rows[0].id;
+    } else {
+      connectorId = 'conn-' + crypto.randomUUID().substring(0, 10);
+      await pool.query(
+        `INSERT INTO pki_connectors (id, tenant_name, name, provider, endpoint_url, auth_type, config_summary,
+           sync_status, total_keys_discovered, vulnerable_keys_count, pqc_ready_count, last_sync_at)
+         VALUES ($1, $2, $3, 'ad_cs', $4, 'agent', '{}', 'active', 0, 0, 0, NOW())`,
+        [connectorId, tenant, connName, caName || '']
+      );
+    }
+
+    // Normalize agent-reported assets to the DiscoveredAsset shape and persist.
+    const norm: DiscoveredAsset[] = assets.map((a: any) => ({
+      name: String(a.name || 'Unknown AD CS object'),
+      type: a.type || (a.isTemplate ? 'template' : 'ca_root'),
+      algo: String(a.algo || a.algorithm || 'unknown'),
+      size: Number(a.size || a.keySize || 0),
+      vuln: a.vuln !== undefined ? !!a.vuln : /^(rsa|ecdsa|ecc|ec|dsa|ed25519)/i.test(String(a.algo || '')),
+      risk: a.risk || 'high',
+      threat: String(a.threat || 'AD CS-issued classical key; vulnerable to a CRQC.'),
+      rot: !!a.rot,
+      expiresAt: a.expiresAt ? new Date(a.expiresAt) : null,
+    }));
+
+    // A fresh report replaces the connector's inventory (idempotent re-reports).
+    await pool.query('DELETE FROM pki_synced_assets WHERE connector_id = $1', [connectorId]);
+    await pool.query("DELETE FROM assets WHERE source = 'enterprise_pki' AND (source_ref = $1 OR source_ref = $2)", [connectorId, connName]).catch(() => {});
+
+    const result = await persistAssets(connectorId, tenant, 'ad_cs', connName, norm);
+    return res.json({ success: true, connectorId, tenant, ...result, message: `Ingested ${result.total} AD CS objects.` });
+  } catch (err: any) {
+    console.error('Error ingesting AD CS report:', err);
+    res.status(500).json({ error: 'Failed to ingest AD CS report: ' + err.message });
+  }
+};
+
+/** Recompute a connector's summary counts from its currently-stored assets. */
+async function recomputeConnectorCounts(connectorId: string) {
+  const r = await pool.query(
+    `SELECT COUNT(*)::int AS total,
+            COUNT(*) FILTER (WHERE is_vulnerable)::int AS vuln,
+            COUNT(*) FILTER (WHERE NOT is_vulnerable)::int AS pqc
+     FROM pki_synced_assets WHERE connector_id = $1`,
+    [connectorId]
+  );
+  const { total = 0, vuln = 0, pqc = 0 } = r.rows[0] || {};
+  await pool.query(
+    `UPDATE pki_connectors SET total_keys_discovered = $1, vulnerable_keys_count = $2, pqc_ready_count = $3, sync_status = 'active' WHERE id = $4`,
+    [total, vuln, pqc, connectorId]
+  );
+  return { total, vulnerable: vuln, pqcReady: pqc };
+}
+
+// ==============================================================================
 // DISCOVERY WORKER ENGINE
 // ==============================================================================
 async function executeDiscoverySync(connectorId: string, tenantName: string, provider: string, connectorName: string) {
+  // AD CS is discovered on-prem by the host agent and pushed to the server
+  // (POST /api/scan/adcs/report). There is no server-side pull, so a "sync" here
+  // must NOT clear or fabricate data — it recomputes counts from whatever the
+  // agent last reported.
+  if (provider === 'ad_cs') {
+    return recomputeConnectorCounts(connectorId);
+  }
+
   // Clear old assets for this connector
   await pool.query('DELETE FROM pki_synced_assets WHERE connector_id = $1', [connectorId]);
   await pool.query("DELETE FROM assets WHERE source IN ('cloud_kms', 'enterprise_pki') AND (source_ref = $1 OR source_ref = $2)", [connectorId, connectorName]).catch(() => {});

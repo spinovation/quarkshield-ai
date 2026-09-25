@@ -81,7 +81,8 @@ import {
   testPkiConnector,
   syncPkiConnector,
   deletePkiConnector,
-  getPkiSyncedAssets
+  getPkiSyncedAssets,
+  reportAdcs
 } from '../controllers/pkiConnectorController';
 import {
   getProxies,
@@ -127,6 +128,7 @@ router.get('/news/cnsa', getCnsaNews);
 router.get('/scan/agent/install.sh', getInstallerScript);
 router.get('/scan/agent/install.ps1', getPowerShellInstallerScript);
 router.post('/scan/agent/ingest', ingestTelemetry);
+router.post('/scan/adcs/report', reportAdcs);
 router.post('/scan/license/verify', verifyLicenseKey);
 router.post('/probe', probeEndpoint);
 router.post('/support/contact', submitSupportTicket);

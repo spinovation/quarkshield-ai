@@ -216,3 +216,36 @@ func RegisterAssets(serverURL string, assets []AuditResult) error {
 
 	return nil
 }
+
+// ReportADCS posts the discovered Active Directory Certificate Services inventory
+// to the server's push endpoint (POST /api/scan/adcs/report). The fleet
+// enrollment token authenticates and resolves the tenant server-side.
+func ReportADCS(serverURL string, token string, caName string, assets []ADCSAsset) error {
+	cleanServer := strings.TrimRight(serverURL, "/")
+	body := map[string]interface{}{
+		"caName": caName,
+		"token":  token,
+		"assets": assets,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	url := fmt.Sprintf("%s/api/scan/adcs/report", cleanServer)
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Connector-Token", token)
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+	return nil
+}
