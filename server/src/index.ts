@@ -1,6 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
@@ -29,10 +31,31 @@ app.use(cors({
   },
   credentials: true,
 }));
+// Security headers. CSP is disabled here because the SPA/index.html is served
+// by this same app and a strict default CSP would block its inline assets;
+// enable a tuned CSP once the frontend asset origins are enumerated.
+app.use(helmet({
+  contentSecurityPolicy: false,
+  crossOriginEmbedderPolicy: false,
+}));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 app.use(cookieParser());
 app.use(attachUser);
+
+// Rate limit authentication endpoints to blunt credential stuffing / brute force
+// and password-reset abuse (DEF-04).
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please wait a few minutes and try again.' },
+});
+app.use('/api/auth/login', authLimiter);
+app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api/auth/change-password', authLimiter);
+app.use('/api/scan/license/verify', authLimiter);
 
 // Determine and serve compiled agent downloads
 const possibleDownloadPaths = [

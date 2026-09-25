@@ -2185,7 +2185,7 @@ export const onboardUser = async (req: Request, res: Response) => {
     ]);
 
     // Generate initial secure temporary password
-    const initialTempPassword = `QS-${cleanTenant.charAt(0).toUpperCase() + cleanTenant.slice(1)}-${Math.floor(1000 + Math.random() * 9000)}!`;
+    const initialTempPassword = `QS-${crypto.randomBytes(9).toString('base64url')}!`;
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = crypto.createHash('sha256').update(initialTempPassword + salt).digest('hex');
 
