@@ -867,6 +867,20 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		openBrowser(serverURL)
 	}()
 
+	// Alias listener on port 41723 to ensure any references redirect to the active port
+	if port != 41723 {
+		go func() {
+			aliasListener, aliasErr := net.Listen("tcp", "127.0.0.1:41723")
+			if aliasErr == nil {
+				defer aliasListener.Close()
+				_ = http.Serve(aliasListener, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					target := fmt.Sprintf("http://127.0.0.1:%d%s", port, r.RequestURI)
+					http.Redirect(w, r, target, http.StatusTemporaryRedirect)
+				}))
+			}
+		}()
+	}
+
 	// Background Automated Daily Sync Worker
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)
