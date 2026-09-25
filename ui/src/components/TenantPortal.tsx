@@ -3271,48 +3271,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   Dedicated Tenant Pod • Workspace: <span style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{client.name}</span> • App Port: <span style={{ color: '#c084fc', fontFamily: 'monospace' }}>{client.appPort || 5002}</span> • DB Port: <span style={{ color: '#c084fc', fontFamily: 'monospace' }}>{client.dbPort || 5434}</span>
                 </div>
               </div>
-
-              <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <button
-                  onClick={() => {
-                    setGeneratedTokenData(null);
-                    setShowEnrollModal(true);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.45rem',
-                    fontSize: '0.82rem',
-                    padding: '0.45rem 0.95rem',
-                    background: 'linear-gradient(135deg, rgba(56, 189, 248, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)',
-                    border: '1px solid rgba(56, 189, 248, 0.45)',
-                    color: '#38bdf8',
-                    fontWeight: 700,
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    boxShadow: '0 0 10px rgba(56, 189, 248, 0.15)'
-                  }}
-                  title="Generate Fleet Enrollment Token & Rollout Commands"
-                >
-                  <Key size={14} color="#38bdf8" /> Fleet Enrollment Token
-                </button>
-                <button 
-                  onClick={fetchTenantData} 
-                  className="btn-secondary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', padding: '0.45rem 0.8rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', color: '#ffffff', borderRadius: '6px', cursor: 'pointer' }}
-                >
-                  <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh Telemetry
-                </button>
-                <button 
-                  onClick={() => {
-                    setActiveTab('integrations');
-                  }}
-                  className="btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', padding: '0.45rem 0.95rem', background: 'linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)', border: 'none', color: '#000000', fontWeight: 700, borderRadius: '6px', cursor: 'pointer' }}
-                >
-                  <Layers size={13} /> Integrations Hub
-                </button>
-              </div>
             </div>
           </header>
         {loading ? (
