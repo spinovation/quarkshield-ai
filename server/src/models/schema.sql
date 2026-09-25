@@ -543,3 +543,34 @@ VALUES
   ('qs-plat-15', 'quarkshield.ai', 'os_runtime', 'Alpine Linux 3.22 (x86_64)', '/usr/bin/curl', 'curl', '8.22.0-r0', 'os_pkg', 'pkg:alpine/curl@8.22.0-r0', 'curl', false, 0, 'none', '[{"cveId": "CLEAN", "title": "Verified 0 Known Vulnerabilities", "cvssScore": 0.0, "severity": "low", "fixedVersion": "8.22.0-r0+", "remediationCmd": "apk upgrade --no-cache curl", "description": "Multiprotocol file and network transfer command-line tool."}]'::jsonb)
 ON CONFLICT (id) DO NOTHING;
 
+
+-- =========================================================================
+-- FINAL CONSOLIDATED MIGRATIONS (run after all tables exist)
+-- These re-apply ADD COLUMN IF NOT EXISTS for columns whose original ALTER
+-- statements appear earlier in this file than the CREATE TABLE they target.
+-- On a fresh database those early ALTERs are skipped (table not yet created);
+-- repeating them here guarantees the columns exist. All are idempotent, so
+-- existing databases are unaffected. Also adds columns used by the code that
+-- were never defined anywhere (fleet_tokens/fleet_machines tenant_name,
+-- license_key).
+-- =========================================================================
+
+-- git_scans (ALTER originally precedes its CREATE)
+ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255) DEFAULT 'SPINOVATIONCORP';
+
+-- admin_licenses (ALTERs originally precede its CREATE)
+ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS customer_id VARCHAR(100);
+ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS contact_name VARCHAR(255);
+ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255);
+
+-- tenant_users (auth columns; ALTERs originally precede its CREATE)
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS customer_id VARCHAR(100);
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS password_hash VARCHAR(255);
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS salt VARCHAR(255);
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN DEFAULT false;
+
+-- fleet_tokens / fleet_machines columns referenced by code but never defined
+ALTER TABLE fleet_tokens ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
+ALTER TABLE fleet_tokens ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
