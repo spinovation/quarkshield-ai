@@ -30,20 +30,29 @@ lipo -create -output quarkshield-scanner-darwin-universal quarkshield-scanner-da
 
 # 3. Assemble & Sign QuarkShield.app bundle
 echo "📦 [4/6] Updating QuarkShield.app bundle..."
-mkdir -p QuarkShield.app/Contents/MacOS
-mkdir -p QuarkShield.app/Contents/Resources
-cp -f quarkshield-scanner-darwin-universal QuarkShield.app/Contents/MacOS/quarkshield-scanner
-chmod +x QuarkShield.app/Contents/MacOS/quarkshield-scanner
+APP_STAGE="/tmp/quarkshield_app_stage_$$"
+rm -rf "$APP_STAGE"
+mkdir -p "$APP_STAGE/QuarkShield.app/Contents/MacOS"
+mkdir -p "$APP_STAGE/QuarkShield.app/Contents/Resources"
+cp -f quarkshield-scanner-darwin-universal "$APP_STAGE/QuarkShield.app/Contents/MacOS/quarkshield-scanner"
+chmod +x "$APP_STAGE/QuarkShield.app/Contents/MacOS/quarkshield-scanner"
+if [ -f Info.plist ]; then
+  cp -f Info.plist "$APP_STAGE/QuarkShield.app/Contents/Info.plist"
+fi
 if [ -f app_icon.icns ]; then
-  cp -f app_icon.icns QuarkShield.app/Contents/Resources/AppIcon.icns
+  cp -f app_icon.icns "$APP_STAGE/QuarkShield.app/Contents/Resources/AppIcon.icns"
 fi
 
 # Code signing identity detection
 SIGN_IDENTITY=""
-if security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID Application"; then
   SIGN_IDENTITY=$(security find-identity -v -p codesigning | grep "Developer ID Application" | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
   echo "🔑 Detected Apple Developer ID: $SIGN_IDENTITY"
 fi
+
+# Strip extended attributes, AppleDouble files, and resource forks to ensure clean codesigning
+dot_clean -m "$APP_STAGE/QuarkShield.app" 2>/dev/null || true
+xattr -cr "$APP_STAGE/QuarkShield.app" 2>/dev/null || true
 
 if [ -n "$SIGN_IDENTITY" ]; then
   echo "🔑 Signing Mach-O binaries with Apple Developer ID..."
@@ -51,31 +60,38 @@ if [ -n "$SIGN_IDENTITY" ]; then
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" quarkshield-scanner-darwin-amd64
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" quarkshield-scanner-darwin-universal
   echo "🔑 Signing QuarkShield.app with Apple Developer ID (Hardened Runtime)..."
-  codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" QuarkShield.app
+  codesign --force --deep --options runtime --timestamp --sign "$SIGN_IDENTITY" "$APP_STAGE/QuarkShield.app"
 else
   echo "⚠️ Developer ID not found, using ad-hoc signing"
-  codesign --force --deep --sign - QuarkShield.app
+  codesign --force --deep --sign - "$APP_STAGE/QuarkShield.app"
+fi
+
+# Update /Applications/QuarkShield.app if installed
+if [ -d "/Applications/QuarkShield.app" ]; then
+  echo "🔄 Updating /Applications/QuarkShield.app with signed release bundle..."
+  rm -rf /Applications/QuarkShield.app
+  cp -R "$APP_STAGE/QuarkShield.app" /Applications/QuarkShield.app
 fi
 
 # 4. Create ZIP distribution
 echo "🗜️ [5/6] Creating ZIP distribution..."
-ZIP_STAGE="zip_stage_$$"
+ZIP_STAGE="/tmp/zip_stage_$$"
 rm -rf "$ZIP_STAGE" quarkshield-scanner-macos.zip
 mkdir -p "$ZIP_STAGE"
-cp -R QuarkShield.app "$ZIP_STAGE/"
+cp -R "$APP_STAGE/QuarkShield.app" "$ZIP_STAGE/"
 cp Start-QuarkShield.command "$ZIP_STAGE/"
 cp Trust-QuarkShield.command "$ZIP_STAGE/" 2>/dev/null || true
 cp Trust-FedMitigate.command "$ZIP_STAGE/" 2>/dev/null || true
 cp README-macOS.txt "$ZIP_STAGE/README.txt"
-(cd "$ZIP_STAGE" && zip -9 -r ../quarkshield-scanner-macos.zip QuarkShield.app Start-QuarkShield.command Trust-QuarkShield.command Trust-FedMitigate.command README.txt)
+(cd "$ZIP_STAGE" && zip -9 -r "$SCRIPT_DIR/quarkshield-scanner-macos.zip" QuarkShield.app Start-QuarkShield.command Trust-QuarkShield.command Trust-FedMitigate.command README.txt)
 rm -rf "$ZIP_STAGE"
 
 # 5. Create DMG disk image
 echo "💿 [6/6] Generating QuarkShield-macOS.dmg disk image..."
-STAGE_DIR="dmg_stage_$$"
+STAGE_DIR="/tmp/dmg_stage_$$"
 rm -rf "$STAGE_DIR" QuarkShield-macOS.dmg
 mkdir -p "$STAGE_DIR"
-cp -R QuarkShield.app "$STAGE_DIR/"
+cp -R "$APP_STAGE/QuarkShield.app" "$STAGE_DIR/"
 ln -s /Applications "$STAGE_DIR/Applications"
 cp Start-QuarkShield.command "$STAGE_DIR/"
 cp Trust-QuarkShield.command "$STAGE_DIR/" 2>/dev/null || true
@@ -83,7 +99,8 @@ cp Trust-FedMitigate.command "$STAGE_DIR/" 2>/dev/null || true
 cp README-macOS.txt "$STAGE_DIR/README.txt"
 
 hdiutil create -volname "QuarkShield Guard" -srcfolder "$STAGE_DIR" -ov -format UDZO QuarkShield-macOS.dmg || echo "⚠️ DMG creation deferred (sandboxed environment). Universal .app and .zip ready."
-rm -rf "$STAGE_DIR"
+rm -rf "$STAGE_DIR" "$APP_STAGE"
+rm -rf QuarkShield.app 2>/dev/null || true
 
 if [ -n "$SIGN_IDENTITY" ]; then
   echo "🔑 Signing QuarkShield-macOS.dmg with Apple Developer ID..."

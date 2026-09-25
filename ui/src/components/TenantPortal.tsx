@@ -516,7 +516,17 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     vulnerableAssets: 98,
     avgRiskScore: 87
   });
-  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'pki' | 'proxy' | 'copilot' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'pki' | 'proxy' | 'copilot' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const t = p.get('tab');
+      if (t === 'sbom' || t === 'cbom') return 'cbom';
+      if (t && ['overview', 'integrations', 'repositories', 'pki', 'proxy', 'copilot', 'planner', 'settings'].includes(t)) {
+        return t as any;
+      }
+    } catch (e) {}
+    return 'overview';
+  });
   const [settingsSubTab, setSettingsSubTab] = useState<'profile' | 'users' | 'license' | 'planner'>('profile');
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState<boolean>(true);
   const [deploymentTierTab, setDeploymentTierTab] = useState<'tier1' | 'tier2' | 'tier3' | 'desktop'>('tier1');
@@ -716,7 +726,15 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   });
 
   // 2. CBOM Inventory State
-  const [cbomSubTab, setCbomSubTab] = useState<'assets' | 'cyclonedx' | 'json' | 'drift' | 'sbom'>('assets');
+  const [cbomSubTab, setCbomSubTab] = useState<'assets' | 'cyclonedx' | 'json' | 'drift' | 'sbom'>(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const s = p.get('subtab');
+      if (s === 'sbom' || p.get('tab') === 'sbom') return 'sbom';
+      if (s && ['assets', 'cyclonedx', 'json', 'drift'].includes(s)) return s as any;
+    } catch (e) {}
+    return 'assets';
+  });
   const [cbomSearch, setCbomSearch] = useState<string>('');
   const [cbomCategory, setCbomCategory] = useState<string>('all');
   const [cbomJsonCopied, setCbomJsonCopied] = useState<boolean>(false);

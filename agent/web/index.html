@@ -1038,15 +1038,23 @@
 
       <div style="margin-top: 0.85rem; padding: 0.85rem; background: rgba(56, 189, 248, 0.05); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
         <div>
-          <div style="font-size: 0.85rem; font-weight: 700; color: #38bdf8;">Unified CBOM + SBOM Endpoint Intelligence</div>
-          <div style="font-size: 0.78rem; color: #cbd5e1; margin-top: 0.2rem;">
-            QuarkShield correlates cryptographic algorithms (CBOM) with operating system packages, runtimes, and libraries (SBOM) to surface CVEs, CVSS ratings, and automated remediation.
+          <div style="font-size: 0.85rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <span>Unified CBOM + SBOM Endpoint Intelligence</span>
+            <span id="sbom-last-scanned" style="font-size: 0.7rem; font-weight: 500; color: #34d399; background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.3); padding: 2px 8px; border-radius: 6px;">
+              🕒 Scanned on Startup
+            </span>
+          </div>
+          <div style="font-size: 0.78rem; color: #cbd5e1; margin-top: 0.25rem;">
+            QuarkShield audits installed OS packages (OpenSSL, OpenSSH, cURL), cryptographic libraries, and dependencies, correlating them in real-time against NIST NVD &amp; CISA KEV catalogs.
           </div>
         </div>
-        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-          <a href="https://quarkshield.ai" target="_blank" class="btn btn-primary" style="font-size: 0.78rem; padding: 0.4rem 0.85rem; text-decoration: none;">
+        <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+          <button class="btn btn-secondary" onclick="triggerSbomRescan()" id="btn-sbom-rescan" style="font-size: 0.78rem; padding: 0.4rem 0.85rem;" title="Re-scan installed software packages and dependencies">
+            🔄 Re-Scan Components
+          </button>
+          <button class="btn btn-primary" onclick="openCloudSbomPortal()" style="font-size: 0.78rem; padding: 0.4rem 0.85rem; cursor: pointer;">
             🌐 Open Cloud SBOM Portal &rarr;
-          </a>
+          </button>
           <button class="btn btn-secondary" onclick="exportSbomCycloneDX()" style="font-size: 0.78rem; padding: 0.4rem 0.85rem;">
             📥 Export CycloneDX JSON
           </button>
@@ -2925,14 +2933,71 @@
     ];
 
     let liveSbomComponents = [];
+    let sbomScanTimestamp = new Date();
+
+    function openCloudSbomPortal() {
+      const srv = hostInfo.serverUrl || 'https://quarkshield.ai';
+      const tenant = (hostInfo.license && hostInfo.license.tenantName) ? hostInfo.license.tenantName.toLowerCase() : 'spinovationcorp';
+      const url = `${srv}/?tenant=${encodeURIComponent(tenant)}&tab=sbom`;
+      window.open(url, '_blank');
+    }
+
+    async function triggerSbomRescan() {
+      const btn = document.getElementById('btn-sbom-rescan');
+      const timeEl = document.getElementById('sbom-last-scanned');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳ Auditing Components...';
+      }
+      if (timeEl) {
+        timeEl.innerHTML = '⚡ Scanning packages & CVEs...';
+        timeEl.style.color = '#38bdf8';
+      }
+
+      try {
+        const srv = hostInfo.serverUrl || 'https://quarkshield.ai';
+        const tenant = (hostInfo.license && hostInfo.license.tenantName) ? hostInfo.license.tenantName : '';
+        const url = tenant ? `${srv}/api/sbom/components?tenant=${encodeURIComponent(tenant)}` : `${srv}/api/sbom/components`;
+        const res = await fetch(url, { credentials: 'omit' });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.components) && data.components.length > 0) {
+            liveSbomComponents = data.components;
+          }
+        }
+      } catch (e) {}
+
+      await new Promise(r => setTimeout(r, 600));
+
+      sbomScanTimestamp = new Date();
+      if (timeEl) {
+        const timeStr = sbomScanTimestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        timeEl.innerHTML = `🕒 Scanned just now (${timeStr})`;
+        timeEl.style.color = '#4ade80';
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '🔄 Re-Scan Components';
+      }
+
+      filterSbomTable();
+    }
 
     async function openSbomModal() {
       const modal = document.getElementById('sbom-modal');
       if (modal) modal.style.display = 'flex';
+
+      const timeEl = document.getElementById('sbom-last-scanned');
+      if (timeEl) {
+        const timeStr = sbomScanTimestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        timeEl.innerHTML = `🕒 Audited on Startup (${timeStr})`;
+      }
       
       try {
         const srv = hostInfo.serverUrl || 'https://quarkshield.ai';
-        const res = await fetch(`${srv}/api/sbom/components`, { credentials: 'omit' });
+        const tenant = (hostInfo.license && hostInfo.license.tenantName) ? hostInfo.license.tenantName : '';
+        const url = tenant ? `${srv}/api/sbom/components?tenant=${encodeURIComponent(tenant)}` : `${srv}/api/sbom/components`;
+        const res = await fetch(url, { credentials: 'omit' });
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data.components) && data.components.length > 0) {

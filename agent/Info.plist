@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>QuarkShield</string>
+    <key>CFBundleDisplayName</key>
+    <string>QuarkShield Post-Quantum Guard for Mac</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.fedmitigate.quarkshield</string>
+    <key>CFBundleVersion</key>
+    <string>2.1.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>2.1.0</string>
+    <key>CFBundleExecutable</key>
+    <string>quarkshield-scanner</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 FedMitigate LLC. All rights reserved.</string>
+    <key>CFBundleGetInfoString</key>
+    <string>QuarkShield Post-Quantum Guard for Mac by FedMitigate LLC</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSUIElement</key>
+    <string>0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>
