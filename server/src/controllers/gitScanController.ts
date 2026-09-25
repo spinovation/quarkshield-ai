@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { execFile } from 'child_process';
+import { assertPublicHost } from '../utils/ssrf';
 
 export interface GitFinding {
   id: string;
@@ -512,11 +513,11 @@ function buildAuthenticatedUrl(repoUrl: string, token?: string, username?: strin
 
   try {
     const urlObj = new URL(sanitizedDisplayUrl);
-    if (urlObj.hostname.includes('github.com')) {
+    if (urlObj.hostname === 'github.com' || urlObj.hostname.endsWith('.github.com')) {
       // GitHub PAT format
       urlObj.username = 'x-access-token';
       urlObj.password = cleanToken;
-    } else if (urlObj.hostname.includes('bitbucket.org')) {
+    } else if (urlObj.hostname === 'bitbucket.org' || urlObj.hostname.endsWith('.bitbucket.org')) {
       // Bitbucket App Password / Token format
       if (cleanUser) {
         urlObj.username = cleanUser;
@@ -525,7 +526,7 @@ function buildAuthenticatedUrl(repoUrl: string, token?: string, username?: strin
         urlObj.username = 'x-token-auth';
         urlObj.password = cleanToken;
       }
-    } else if (urlObj.hostname.includes('gitlab.com')) {
+    } else if (urlObj.hostname === 'gitlab.com' || urlObj.hostname.endsWith('.gitlab.com')) {
       urlObj.username = 'oauth2';
       urlObj.password = cleanToken;
     } else {
@@ -564,6 +565,14 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
   // Basic security check on repoUrl to prevent command injection
   if (!/^https?:\/\/[a-zA-Z0-9_\-\.\:\@\/]+$/.test(repoUrl.trim())) {
     return res.status(400).json({ error: 'Invalid repository URL format. Please provide a standard HTTPS git URL.' });
+  }
+
+  // SSRF guard: only allow cloning from public hosts (no localhost/metadata/internal).
+  try {
+    const parsed = new URL(repoUrl.trim());
+    await assertPublicHost(parsed.hostname);
+  } catch (ssrfErr: any) {
+    return res.status(400).json({ error: `Refused: ${ssrfErr.message || 'invalid repository host'}. Only public git hosts can be scanned.` });
   }
 
   const { safeUrl, sanitizedDisplayUrl } = buildAuthenticatedUrl(repoUrl, token, username);

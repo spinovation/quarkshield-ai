@@ -3,6 +3,7 @@ import pool from '../config/db';
 import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
 import { signSession, setSessionCookie, clearSessionCookie, isSuperRole } from '../middleware/auth';
+import { assertPublicHost } from '../utils/ssrf';
 import os from 'os';
 import tls from 'tls';
 import fs from 'fs';
@@ -2339,6 +2340,16 @@ export const probeEndpoint = async (req: Request, res: Response) => {
       host = parts[0];
       port = parseInt(parts[1], 10) || 443;
     }
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return res.status(400).json({ error: 'Invalid port.' });
+    }
+
+    // SSRF guard: refuse internal/loopback/link-local targets before connecting.
+    try {
+      await assertPublicHost(host);
+    } catch (ssrfErr: any) {
+      return res.status(400).json({ error: `Refused: ${ssrfErr.message}. Only public internet endpoints can be probed.` });
+    }
 
     // 1. Try native Go PQC scanner binary (has native NIST FIPS 203 ML-KEM curve support)
     const candidates = [
@@ -2354,7 +2365,7 @@ export const probeEndpoint = async (req: Request, res: Response) => {
 
     if (scannerBin) {
       const tmpOutput = path.join(os.tmpdir(), `probe-${Date.now()}-${Math.random().toString(36).substring(2, 7)}.json`);
-      execFile(scannerBin, ['--probe', host, '-o', tmpOutput], { timeout: 12000 }, (execErr) => {
+      execFile(scannerBin, ['--probe', `${host}:${port}`, '-o', tmpOutput], { timeout: 12000 }, (execErr) => {
         if (!execErr && fs.existsSync(tmpOutput)) {
           try {
             const rawData = fs.readFileSync(tmpOutput, 'utf-8');
@@ -2410,6 +2421,7 @@ export const probeEndpoint = async (req: Request, res: Response) => {
     fallbackSocketProbe();
 
     function fallbackSocketProbe() {
+      let responded = false;
       const socket = tls.connect({
         host,
         port,
@@ -2418,6 +2430,8 @@ export const probeEndpoint = async (req: Request, res: Response) => {
         timeout: 8000
       }, () => {
       try {
+        if (responded) { socket.destroy(); return; }
+        responded = true;
         const cipher = socket.getCipher();
         const protocol = socket.getProtocol();
         const peerCert = socket.getPeerCertificate(true);
@@ -2464,16 +2478,23 @@ export const probeEndpoint = async (req: Request, res: Response) => {
         });
       } catch (innerErr: any) {
         socket.destroy();
+        if (responded) return;
+        responded = true;
         res.status(500).json({ error: 'Failed to inspect TLS certificate chain: ' + innerErr.message });
       }
     });
 
     socket.on('error', (err) => {
+      socket.destroy();
+      if (responded) return;
+      responded = true;
       res.status(502).json({ error: `Connection failed to ${host}:${port}: ${err.message}` });
     });
 
     socket.on('timeout', () => {
       socket.destroy();
+      if (responded) return;
+      responded = true;
       res.status(504).json({ error: `Connection timed out connecting to ${host}:${port}` });
     });
     }
