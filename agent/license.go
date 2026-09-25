@@ -17,8 +17,11 @@ import (
 	"time"
 )
 
-// QuarkShield Master HMAC Secret for Offline License Verification
-const LicenseSigningSecret = "QuarkShield_PQC_Fleet_Master_License_Secret_2026"
+// QuarkShield HMAC secret for offline license verification.
+// Override at build time to match the server:
+//   go build -ldflags "-X main.LicenseSigningSecret=$SECRET"
+// (DEF-20) Keep this in sync with the server LICENSE_SIGNING_SECRET.
+var LicenseSigningSecret = "QuarkShield_PQC_Fleet_Master_License_Secret_2026"
 
 type LicenseState struct {
 	InstallID  string    `json:"installId"`
@@ -174,10 +177,8 @@ func ValidateLicenseKey(key string) (tier string, tenant string, expiresAt time.
 	expectedSig := hex.EncodeToString(mac.Sum(nil))[:8] // Truncated to 8 hex chars for compact key
 
 	if !strings.EqualFold(sigHex, expectedSig) {
-		// Backwards compatible check for demo testing
-		if sigHex != "TESTKEY1" && sigHex != "QUARK001" {
-			return "", "", time.Time{}, fmt.Errorf("cryptographic signature verification failed for license key")
-		}
+		// Backdoor signatures (TESTKEY1 / QUARK001) removed (DEF-20).
+		return "", "", time.Time{}, fmt.Errorf("cryptographic signature verification failed for license key")
 	}
 
 	return tier, tenant, expiresAt, nil
@@ -358,7 +359,6 @@ func ActivateLicense(key string) (LicenseInfoResponse, error) {
 // HandleLicenseAPI handles GET /api/license
 func HandleLicenseAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == http.MethodOptions {
 		return
 	}
@@ -370,7 +370,6 @@ func HandleLicenseAPI(w http.ResponseWriter, r *http.Request) {
 // HandleActivateLicenseAPI handles POST /api/license/activate
 func HandleActivateLicenseAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	if r.Method == http.MethodOptions {
 		return
 	}

@@ -115,6 +115,48 @@ func unregisterWindowsUninstall() {
 }
 
 // StartGUI launches the local embedded Post-Quantum Guard Web UI
+// localGuard protects the local GUI HTTP server from other websites and from
+// DNS-rebinding attacks (DEF-41). The GUI listens on 127.0.0.1 and previously
+// had no Origin/Host/CSRF checks, so any page the user visited could drive it:
+// exfiltrate scan results, re-point the agent's server/token, or uninstall it.
+//
+// The guard enforces, for /api/* requests:
+//   - Host must be a loopback address on this port (blocks DNS rebinding, where
+//     an attacker's domain resolves to 127.0.0.1 but carries its own Host).
+//   - Sec-Fetch-Site (sent by modern browsers) must be same-origin/none; any
+//     cross-site or same-site request (fetch, form, img, navigation) is refused.
+//   - If an Origin header is present it must be this exact local origin.
+// No permissive CORS headers are ever sent, so cross-origin reads are blocked.
+func localGuard(next http.Handler, port int) http.Handler {
+	allowedHosts := map[string]bool{
+		fmt.Sprintf("127.0.0.1:%d", port): true,
+		fmt.Sprintf("localhost:%d", port): true,
+		fmt.Sprintf("[::1]:%d", port):     true,
+	}
+	allowedOrigins := map[string]bool{
+		fmt.Sprintf("http://127.0.0.1:%d", port): true,
+		fmt.Sprintf("http://localhost:%d", port): true,
+		fmt.Sprintf("http://[::1]:%d", port):     true,
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			if !allowedHosts[r.Host] {
+				http.Error(w, "Forbidden (host)", http.StatusForbidden)
+				return
+			}
+			if sfs := r.Header.Get("Sec-Fetch-Site"); sfs != "" && sfs != "same-origin" && sfs != "none" {
+				http.Error(w, "Forbidden (cross-site)", http.StatusForbidden)
+				return
+			}
+			if origin := r.Header.Get("Origin"); origin != "" && !allowedOrigins[origin] {
+				http.Error(w, "Forbidden (origin)", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func StartGUI(preferredPort int, defaultServer string, defaultToken string) error {
 	// 0. Single-instance upgrade: if an existing QuarkShield Guard instance is already running on the port,
 	// gracefully tell the previous background process to exit so the new version takes over immediately.
@@ -811,7 +853,7 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 	serverURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	server = &http.Server{
-		Handler: mux,
+		Handler: localGuard(mux, port),
 	}
 
 	fmt.Println("==================================================")
