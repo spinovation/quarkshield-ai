@@ -102,6 +102,15 @@ import {
   getFixScript,
   getSuperAdminGuide
 } from '../controllers/sbomController';
+import {
+  createCheckoutSession,
+  getRegistrationStatus,
+  createCustomCheckoutSession,
+  sendCustomCheckoutEmail,
+  getCustomCheckoutInvites,
+  createCustomerPortalSession,
+  handleStripeWebhook
+} from '../controllers/billingController';
 
 const router = Router();
 
@@ -262,6 +271,17 @@ router.get('/sbom/stats', requireSuperAdmin, getSbomStats);
 router.get('/sbom/export', requireSuperAdmin, exportSbom);
 router.get('/sbom/fix-script', requireSuperAdmin, getFixScript);
 router.get('/sbom/superadmin-guide', requireSuperAdmin, getSuperAdminGuide);
+
+// =========================================================================
+// STRIPE BILLING & COMMERCIAL PAYMENTS
+// =========================================================================
+router.post('/billing/checkout', createCheckoutSession);
+router.get('/billing/registration-status/:sessionId', getRegistrationStatus);
+router.post('/billing/webhook', handleStripeWebhook);
+router.post('/billing/custom-checkout', requireSuperAdmin, createCustomCheckoutSession);
+router.post('/billing/custom-checkout/:id/send', requireSuperAdmin, sendCustomCheckoutEmail);
+router.get('/billing/custom-checkout/invites', requireSuperAdmin, getCustomCheckoutInvites);
+router.post('/billing/portal-session', requireAuth, requireTenantAccess, createCustomerPortalSession);
 
 export default router;
 

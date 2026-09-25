@@ -43,14 +43,25 @@ export function installAuthInterceptor(): void {
 
     const res = await originalFetch(input as any, nextInit);
 
-    if (res.status === 401 && isApiUrl(url) && !isAuthEndpoint(url) && !onResetPage() && !redirecting) {
+    const hadSession = SESSION_KEYS.some(k => {
+      try {
+        const v = localStorage.getItem(k) || sessionStorage.getItem(k);
+        return v && v !== 'null' && v !== 'undefined';
+      } catch {
+        return false;
+      }
+    });
+
+    if (res.status === 401 && isApiUrl(url) && !isAuthEndpoint(url) && !onResetPage() && !redirecting && hadSession) {
       redirecting = true;
       try {
         SESSION_KEYS.forEach(k => { localStorage.removeItem(k); sessionStorage.removeItem(k); });
       } catch { /* ignore storage errors */ }
-      // Send the user to the sign-in (landing) page.
+      // Send the user to the sign-in (landing) page only if not already on it.
       const base = window.location.protocol + '//' + window.location.host + '/';
-      window.location.replace(base + '?session=expired');
+      if (!window.location.search.includes('session=expired')) {
+        window.location.replace(base + '?session=expired');
+      }
     }
 
     return res;

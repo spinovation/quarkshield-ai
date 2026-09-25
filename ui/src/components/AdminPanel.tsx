@@ -39,7 +39,8 @@ import {
   Cpu,
   Eye,
   EyeOff,
-  Shield
+  Shield,
+  FileText
 } from 'lucide-react';
 import { TenantUserManagement } from './TenantUserManagement';
 import SbomInventory from './SbomInventory';
@@ -562,6 +563,103 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [showMailConfig, setShowMailConfig] = useState(false);
   const [savingMailSettings, setSavingMailSettings] = useState(false);
   const [mailSaveMsg, setMailSaveMsg] = useState<string | null>(null);
+
+  // Stripe Custom Deals / Payment Links
+  const [showStripeDealModal, setShowStripeDealModal] = useState(false);
+  const [customInvites, setCustomInvites] = useState<any[]>([]);
+  const [customDealForm, setCustomDealForm] = useState({
+    companyName: '',
+    contactName: '',
+    email: '',
+    amount: '4500',
+    interval: 'month' as 'month' | 'year' | 'one_time',
+    seats: 75,
+    description: 'Bespoke Enterprise / Partner PQC Migration License'
+  });
+  const [dealLoading, setDealLoading] = useState(false);
+  const [createdDealUrl, setCreatedDealUrl] = useState<string | null>(null);
+  const [createdDealId, setCreatedDealId] = useState<string | null>(null);
+  const [dealCopySuccess, setDealCopySuccess] = useState(false);
+  const [sendingInviteId, setSendingInviteId] = useState<string | null>(null);
+  const [inviteStatusMsg, setInviteStatusMsg] = useState<string | null>(null);
+
+  const fetchCustomInvites = async () => {
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch('/api/billing/custom-checkout/invites', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCustomInvites(Array.isArray(data) ? data : []);
+      }
+    } catch (_) {}
+  };
+
+  const handleCreateCustomDeal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customDealForm.email.trim() || !customDealForm.amount) return;
+    setDealLoading(true);
+    setInviteStatusMsg(null);
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch('/api/billing/custom-checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          companyName: customDealForm.companyName.trim(),
+          contactName: customDealForm.contactName.trim(),
+          email: customDealForm.email.trim(),
+          amountCents: Math.round(parseFloat(customDealForm.amount) * 100),
+          recurring: customDealForm.interval !== 'one_time',
+          interval: customDealForm.interval === 'year' ? 'year' : 'month',
+          seats: customDealForm.seats,
+          description: customDealForm.description.trim()
+        })
+      });
+      const data = await res.json();
+      if (res.ok && data.checkoutUrl) {
+        setCreatedDealUrl(data.checkoutUrl);
+        setCreatedDealId(data.inviteId);
+        fetchCustomInvites();
+      } else {
+        alert(data.error || 'Failed to create custom deal');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Network error');
+    } finally {
+      setDealLoading(false);
+    }
+  };
+
+  const handleSendInviteEmail = async (inviteId: string) => {
+    setSendingInviteId(inviteId);
+    setInviteStatusMsg(null);
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch(`/api/billing/custom-checkout/${inviteId}/send`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setInviteStatusMsg(data.message || 'Invitation dispatched');
+        fetchCustomInvites();
+      } else {
+        alert(data.error || 'Failed to dispatch invitation email');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to send invite email');
+    } finally {
+      setSendingInviteId(null);
+    }
+  };
 
   const toggleWorkstationsCollapse = (orgKey: string) => {
     setCollapsedWorkstations(prev => ({
@@ -1462,6 +1560,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       fetchAnalytics();
     } else if (activeSubTab === 'licenses' || activeSubTab === 'registry') {
       fetchLicenses();
+      fetchCustomInvites();
     }
   }, [activeSubTab]);
 
@@ -1667,6 +1766,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       alert(`Error: ${err.message}`);
     } finally {
       setIsRefreshing(false);
+    }
+  };
+
+  // Download Executive Audit Report for any tenant (Super Admin)
+  const downloadExecutiveReport = async (tenant: string, format: 'pdf' | 'docx') => {
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch(`/api/reports/executive?tenant=${encodeURIComponent(tenant)}&format=${format}`, {
+        headers,
+        credentials: 'include'
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Server returned HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `QuarkShield-Executive-Report-${tenant.toUpperCase()}-${new Date().toISOString().split('T')[0]}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Failed to download executive report:', err);
+      alert(`Executive report export error: ${err.message}`);
     }
   };
 
@@ -3366,6 +3494,54 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                               </button>
                             )}
 
+                            {/* Executive Audit Reports (PDF & DOCX) */}
+                            {client?.name && (
+                              <div style={{ display: 'inline-flex', gap: '0.25rem' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => downloadExecutiveReport(client.name, 'pdf')}
+                                  title={`Download Executive Post-Quantum Audit Report (PDF) for ${client?.displayName || client?.name}`}
+                                  style={{
+                                    padding: '0.35rem 0.55rem',
+                                    fontSize: '0.75rem',
+                                    background: 'rgba(239, 68, 68, 0.12)',
+                                    color: '#f87171',
+                                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    fontWeight: 600,
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  <FileText size={12} /> PDF
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => downloadExecutiveReport(client.name, 'docx')}
+                                  title={`Download Executive Post-Quantum Audit Report (DOCX) for ${client?.displayName || client?.name}`}
+                                  style={{
+                                    padding: '0.35rem 0.55rem',
+                                    fontSize: '0.75rem',
+                                    background: 'rgba(59, 130, 246, 0.12)',
+                                    color: '#60a5fa',
+                                    border: '1px solid rgba(59, 130, 246, 0.35)',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    fontWeight: 600,
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  <FileText size={12} /> Word
+                                </button>
+                              </div>
+                            )}
+
                             {/* Deploy / Decom Button */}
                             {isProvisioned ? (
                               <button
@@ -4195,9 +4371,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
           {/* Issue New License Form Card */}
           <div className="glass-panel" style={{ padding: '1.5rem', background: 'var(--bg-card)', border: '1px solid var(--border-normal)', borderRadius: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
-              <Plus size={20} style={{ color: 'var(--accent-cyan)' }} />
-              <h3 style={{ fontSize: '1.2rem', fontWeight: 600, margin: 0 }}>Issue Partner or Corporate License Key</h3>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <Plus size={20} style={{ color: 'var(--accent-cyan)' }} />
+                <h3 style={{ fontSize: '1.2rem', fontWeight: 600, margin: 0 }}>Issue Partner or Corporate License Key</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowStripeDealModal(true);
+                  fetchCustomInvites();
+                  setCreatedDealUrl(null);
+                  setCreatedDealId(null);
+                  setInviteStatusMsg(null);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(168, 85, 247, 0.25) 100%)',
+                  border: '1px solid rgba(168, 85, 247, 0.45)',
+                  color: '#c084fc',
+                  padding: '0.45rem 0.95rem',
+                  borderRadius: '7px',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  transition: 'all 0.2s',
+                  boxShadow: '0 2px 10px rgba(168, 85, 247, 0.2)'
+                }}
+              >
+                <CreditCard size={15} /> Create Stripe Payment Link
+              </button>
             </div>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', marginBottom: '1.25rem' }}>
               Generate an HMAC-SHA256 cryptographically signed license token. Scanners can verify this token offline or link into QuarkShield Central Cloud Fleet.
@@ -4602,6 +4807,144 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                 <code style={{ color: '#38bdf8', display: 'block', wordBreak: 'break-all' }}>
                   {generatedLicense.intuneGuidance}
                 </code>
+              </div>
+            </div>
+          )}
+
+          {/* Custom Deals & Payment Links Card */}
+          {customInvites.length > 0 && (
+            <div className="glass-panel" style={{
+              padding: '1.25rem 1.5rem',
+              background: 'rgba(15, 23, 42, 0.75)',
+              border: '1px solid rgba(168, 85, 247, 0.35)',
+              borderRadius: '12px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                  <CreditCard size={18} color="#c084fc" />
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 600, margin: 0, color: '#ffffff' }}>
+                    Stripe Custom Deals &amp; Bespoke Checkout Links ({customInvites.length})
+                  </h3>
+                  <span style={{ fontSize: '0.72rem', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)', padding: '0.15rem 0.5rem', borderRadius: '4px', fontWeight: 700 }}>
+                    ACTIVE STRIPE INTEGRATION
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowStripeDealModal(true);
+                    setCreatedDealUrl(null);
+                    setCreatedDealId(null);
+                    setInviteStatusMsg(null);
+                  }}
+                  className="btn-secondary"
+                  style={{
+                    padding: '0.35rem 0.85rem',
+                    fontSize: '0.8rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                    color: '#c084fc',
+                    border: '1px solid rgba(168, 85, 247, 0.4)'
+                  }}
+                >
+                  <Plus size={14} /> New Custom Deal
+                </button>
+              </div>
+
+              {inviteStatusMsg && (
+                <div style={{ padding: '0.6rem 0.9rem', marginBottom: '0.75rem', borderRadius: '6px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid #10b981', color: '#4ade80', fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <CheckCircle2 size={16} /> {inviteStatusMsg}
+                </div>
+              )}
+
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)', textAlign: 'left', color: 'var(--text-secondary)', fontSize: '0.75rem', textTransform: 'uppercase' }}>
+                      <th style={{ padding: '0.6rem 0.75rem' }}>Invite ID</th>
+                      <th style={{ padding: '0.6rem 0.75rem' }}>Customer / Email</th>
+                      <th style={{ padding: '0.6rem 0.75rem' }}>Package Description</th>
+                      <th style={{ padding: '0.6rem 0.75rem' }}>Amount</th>
+                      <th style={{ padding: '0.6rem 0.75rem' }}>Payment Status</th>
+                      <th style={{ padding: '0.6rem 0.75rem', textAlign: 'center' }}>Checkout Link &amp; Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customInvites.map(inv => (
+                      <tr key={inv.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                        <td style={{ padding: '0.65rem 0.75rem', fontFamily: 'monospace', color: '#38bdf8', fontSize: '0.78rem' }}>
+                          {inv.id}
+                        </td>
+                        <td style={{ padding: '0.65rem 0.75rem' }}>
+                          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{inv.customerName || 'Bespoke Client'}</div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem' }}>{inv.customerEmail}</div>
+                        </td>
+                        <td style={{ padding: '0.65rem 0.75rem', color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
+                          {inv.description}
+                        </td>
+                        <td style={{ padding: '0.65rem 0.75rem', fontWeight: 700, color: '#38bdf8' }}>
+                          ${((inv.amountCents || 0) / 100).toLocaleString()}
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 400, marginLeft: '0.2rem' }}>
+                            {inv.recurring ? `/${inv.billingInterval || 'mo'}` : '(one-time)'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '0.65rem 0.75rem' }}>
+                          {inv.status === 'paid' ? (
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', padding: '0.15rem 0.5rem', borderRadius: '4px' }}>
+                              PAID &amp; ACTIVE
+                            </span>
+                          ) : inv.status === 'sent' ? (
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, background: 'rgba(245, 158, 11, 0.15)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.3)', padding: '0.15rem 0.5rem', borderRadius: '4px' }}>
+                              EMAIL DISPATCHED
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '0.72rem', fontWeight: 700, background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)', padding: '0.15rem 0.5rem', borderRadius: '4px' }}>
+                              LINK CREATED
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.65rem 0.75rem', textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                            {inv.checkoutUrl && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(inv.checkoutUrl);
+                                  setInviteStatusMsg(`Copied checkout link for ${inv.customerEmail}`);
+                                  setTimeout(() => setInviteStatusMsg(null), 3000);
+                                }}
+                                className="btn-secondary"
+                                style={{ padding: '0.3rem 0.6rem', fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}
+                                title="Copy Stripe Checkout URL"
+                              >
+                                <Copy size={12} /> Copy Link
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleSendInviteEmail(inv.id)}
+                              disabled={sendingInviteId === inv.id}
+                              className="btn-primary"
+                              style={{
+                                padding: '0.3rem 0.65rem',
+                                fontSize: '0.75rem',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
+                                background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                                border: '1px solid #38bdf8'
+                              }}
+                              title="Dispatch or resend invoice email with Stripe checkout link"
+                            >
+                              <Send size={12} /> {sendingInviteId === inv.id ? 'Sending...' : 'Send Email'}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
@@ -6638,6 +6981,369 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                 </form>
               )}
             </div>
+          </div>
+        </div>
+      )}
+      {/* ========================================================================= */}
+      {/* MODAL: STRIPE BESPOKE DEAL & PAYMENT LINK GENERATOR */}
+      {/* ========================================================================= */}
+      {showStripeDealModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.8)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            background: 'var(--bg-sidebar)',
+            maxWidth: '580px',
+            width: '100%',
+            borderRadius: '12px',
+            border: '1.5px solid rgba(168, 85, 247, 0.5)',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(168, 85, 247, 0.05)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <CreditCard size={20} color="#c084fc" />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ffffff' }}>
+                    Generate Stripe Payment Link
+                  </h3>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Bespoke pricing for MSP Partners and Large Enterprises
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowStripeDealModal(false);
+                  setCreatedDealUrl(null);
+                  setCreatedDealId(null);
+                  setInviteStatusMsg(null);
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {createdDealUrl ? (
+              <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
+                <div style={{
+                  background: 'rgba(16, 185, 129, 0.1)',
+                  border: '1px solid rgba(16, 185, 129, 0.35)',
+                  borderRadius: '8px',
+                  padding: '1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem'
+                }}>
+                  <CheckCircle2 size={24} color="#4ade80" style={{ flexShrink: 0 }} />
+                  <div>
+                    <div style={{ fontWeight: 700, color: '#4ade80', fontSize: '0.95rem' }}>
+                      Stripe Checkout Link Ready!
+                    </div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      A secure checkout session has been created on Stripe for <strong>{customDealForm.companyName || customDealForm.email}</strong>.
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                    Stripe Checkout URL:
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      readOnly
+                      value={createdDealUrl}
+                      style={{
+                        flex: 1,
+                        padding: '0.6rem 0.8rem',
+                        background: 'rgba(0,0,0,0.4)',
+                        border: '1px solid rgba(255,255,255,0.12)',
+                        borderRadius: '6px',
+                        color: '#38bdf8',
+                        fontSize: '0.84rem',
+                        fontFamily: 'monospace'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(createdDealUrl);
+                        setDealCopySuccess(true);
+                        setTimeout(() => setDealCopySuccess(false), 2500);
+                      }}
+                      className="btn-secondary"
+                      style={{ padding: '0.6rem 0.9rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap' }}
+                    >
+                      {dealCopySuccess ? <Check size={14} color="#4ade80" /> : <Copy size={14} />}
+                      {dealCopySuccess ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                {inviteStatusMsg && (
+                  <div style={{ padding: '0.6rem 0.8rem', borderRadius: '6px', background: 'rgba(0, 242, 254, 0.1)', border: '1px solid rgba(0, 242, 254, 0.3)', color: '#00f2fe', fontSize: '0.82rem' }}>
+                    {inviteStatusMsg}
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCreatedDealUrl(null);
+                      setCreatedDealId(null);
+                      setInviteStatusMsg(null);
+                    }}
+                    className="btn-secondary"
+                    style={{ fontSize: '0.85rem', padding: '0.6rem 1rem' }}
+                  >
+                    Generate Another Link
+                  </button>
+
+                  {createdDealId && (
+                    <button
+                      type="button"
+                      disabled={sendingInviteId === createdDealId}
+                      onClick={() => handleSendInviteEmail(createdDealId)}
+                      className="btn-primary"
+                      style={{
+                        fontSize: '0.85rem',
+                        padding: '0.6rem 1.25rem',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.45rem',
+                        background: 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
+                        border: '1px solid #38bdf8'
+                      }}
+                    >
+                      <Send size={14} />
+                      {sendingInviteId === createdDealId ? 'Sending...' : `Send Invoice to ${customDealForm.email}`}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleCreateCustomDeal} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                      Organization / Partner Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. Apex Defense MSSP"
+                      value={customDealForm.companyName}
+                      onChange={(e) => setCustomDealForm(prev => ({ ...prev, companyName: e.target.value }))}
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.8rem',
+                        background: 'rgba(0, 0, 0, 0.35)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '6px',
+                        color: '#ffffff',
+                        fontSize: '0.88rem'
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                      Contact Name
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. John Doe"
+                      value={customDealForm.contactName}
+                      onChange={(e) => setCustomDealForm(prev => ({ ...prev, contactName: e.target.value }))}
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.8rem',
+                        background: 'rgba(0, 0, 0, 0.35)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '6px',
+                        color: '#ffffff',
+                        fontSize: '0.88rem'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                    Recipient Corporate Email *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="partner@defense-msp.com"
+                    value={customDealForm.email}
+                    onChange={(e) => setCustomDealForm(prev => ({ ...prev, email: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '0.65rem 0.8rem',
+                      background: 'rgba(0, 0, 0, 0.35)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '6px',
+                      color: '#ffffff',
+                      fontSize: '0.88rem'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                      Deal Amount (USD) *
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      step="1"
+                      placeholder="4500"
+                      value={customDealForm.amount}
+                      onChange={(e) => setCustomDealForm(prev => ({ ...prev, amount: e.target.value }))}
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.8rem',
+                        background: 'rgba(0, 0, 0, 0.35)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '6px',
+                        color: '#ffffff',
+                        fontSize: '0.88rem'
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                      Billing Frequency
+                    </label>
+                    <select
+                      value={customDealForm.interval}
+                      onChange={(e) => setCustomDealForm(prev => ({ ...prev, interval: e.target.value as any }))}
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.8rem',
+                        background: 'rgba(0, 0, 0, 0.35)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '6px',
+                        color: '#ffffff',
+                        fontSize: '0.88rem'
+                      }}
+                    >
+                      <option value="month">Monthly Recurring</option>
+                      <option value="year">Annual Recurring</option>
+                      <option value="one_time">One-Time Payment</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                      Allocated Seats
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={customDealForm.seats}
+                      onChange={(e) => setCustomDealForm(prev => ({ ...prev, seats: parseInt(e.target.value) || 50 }))}
+                      style={{
+                        width: '100%',
+                        padding: '0.65rem 0.8rem',
+                        background: 'rgba(0, 0, 0, 0.35)',
+                        border: '1px solid rgba(255, 255, 255, 0.12)',
+                        borderRadius: '6px',
+                        color: '#ffffff',
+                        fontSize: '0.88rem'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                    Deal Description / Contract Note
+                  </label>
+                  <input
+                    type="text"
+                    value={customDealForm.description}
+                    onChange={(e) => setCustomDealForm(prev => ({ ...prev, description: e.target.value }))}
+                    style={{
+                      width: '100%',
+                      padding: '0.65rem 0.8rem',
+                      background: 'rgba(0, 0, 0, 0.35)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '6px',
+                      color: '#ffffff',
+                      fontSize: '0.88rem'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowStripeDealModal(false)}
+                    className="btn-secondary"
+                    style={{ padding: '0.65rem 1.25rem', borderRadius: '6px' }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={dealLoading}
+                    className="btn-primary"
+                    style={{
+                      padding: '0.65rem 1.5rem',
+                      borderRadius: '6px',
+                      fontWeight: 700,
+                      background: 'linear-gradient(135deg, #a855f7 0%, #7e22ce 100%)',
+                      border: 'none',
+                      color: '#ffffff',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    {dealLoading ? (
+                      <>
+                        <RefreshCw size={15} className="spin" /> Generating Link on Stripe...
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard size={15} /> Create Payment Link
+                      </>
+                    )}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuarkShield.ai — Subscription Status</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    :root {
+      --bg-dark: #0a0f1d;
+      --panel-bg: rgba(15, 23, 42, 0.85);
+      --accent-cyan: #38bdf8;
+      --accent-green: #34d399;
+      --text-primary: #ffffff;
+      --text-secondary: #94a3b8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg-dark);
+      color: var(--text-primary);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+      background-image: 
+        radial-gradient(circle at 50% 20%, rgba(56, 189, 248, 0.12) 0%, transparent 60%),
+        radial-gradient(circle at 80% 80%, rgba(168, 85, 247, 0.08) 0%, transparent 50%);
+    }
+    .card {
+      background: var(--panel-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 2.5rem;
+      max-width: 580px;
+      width: 100%;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      text-align: center;
+    }
+    .icon-box {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 1.5rem auto;
+    }
+    .icon-success {
+      background: rgba(52, 211, 153, 0.15);
+      border: 2px solid rgba(52, 211, 153, 0.4);
+      color: var(--accent-green);
+    }
+    .icon-cancel {
+      background: rgba(239, 68, 68, 0.15);
+      border: 2px solid rgba(239, 68, 68, 0.4);
+      color: #ef4444;
+    }
+    h1 {
+      font-size: 1.6rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.75rem;
+    }
+    p {
+      color: var(--text-secondary);
+      font-size: 0.95rem;
+      line-height: 1.6;
+      margin-bottom: 1.75rem;
+    }
+    .details-box {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 1.25rem;
+      margin-bottom: 2rem;
+      text-align: left;
+      font-size: 0.88rem;
+    }
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.4rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-label { color: var(--text-secondary); }
+    .detail-val { font-weight: 600; color: #ffffff; font-family: monospace; }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+      color: #000000;
+      font-weight: 700;
+      font-size: 0.95rem;
+      padding: 0.85rem 1.75rem;
+      border-radius: 8px;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+      transition: all 0.2s;
+    }
+    .btn:hover {
+      box-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+      transform: translateY(-1px);
+    }
+    .spinner {
+      border: 3px solid rgba(56, 189, 248, 0.2);
+      border-top: 3px solid var(--accent-cyan);
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      margin: 1rem auto;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <div class="card" id="mainCard">
+    <div class="spinner" id="loadingSpinner"></div>
+    <h1 id="statusTitle">Verifying Stripe Subscription...</h1>
+    <p id="statusDesc">Please wait while our control plane processes your payment and activates your post-quantum cryptography workspace.</p>
+    <div id="detailsContainer" style="display: none;" class="details-box"></div>
+    <a href="/" class="btn" id="actionBtn" style="display: none;">Return to QuarkShield</a>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get('status');
+    const sessionId = params.get('session_id');
+    const isCustom = params.get('custom') === '1';
+
+    const titleEl = document.getElementById('statusTitle');
+    const descEl = document.getElementById('statusDesc');
+    const spinnerEl = document.getElementById('loadingSpinner');
+    const detailsEl = document.getElementById('detailsContainer');
+    const actionBtn = document.getElementById('actionBtn');
+
+    if (status === 'cancelled') {
+      spinnerEl.style.display = 'none';
+      titleEl.innerHTML = 'Checkout Cancelled';
+      descEl.innerText = 'Your payment session was cancelled and no charges were made. You can return to QuarkShield to review our plans at any time.';
+      actionBtn.style.display = 'inline-flex';
+      actionBtn.innerText = 'Back to Plans & Pricing';
+      actionBtn.href = '/#pricing';
+    } else if (isCustom) {
+      spinnerEl.style.display = 'none';
+      titleEl.innerHTML = '🎉 Enterprise Payment Confirmed!';
+      descEl.innerText = 'Thank you for your business. Your bespoke agreement payment has been received and verified. Your onboarding team has been notified and your license details have been sent to your email.';
+      actionBtn.style.display = 'inline-flex';
+      actionBtn.innerText = 'Go to QuarkShield';
+      actionBtn.href = '/';
+    } else if (sessionId) {
+      // Poll registration status
+      let attempts = 0;
+      const pollStatus = async () => {
+        try {
+          attempts++;
+          const res = await fetch(`/api/billing/registration-status/${sessionId}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'completed') {
+              spinnerEl.style.display = 'none';
+              titleEl.innerHTML = '🎉 Workspace Provisioned!';
+              descEl.innerText = 'Your subscription is active. Your isolated cryptographic workspace and license keys have been generated.';
+              
+              detailsEl.style.display = 'block';
+              detailsEl.innerHTML = `
+                <div class="detail-row">
+                  <span class="detail-label">Status</span>
+                  <span class="detail-val" style="color: #4ade80;">Active & Provisioned</span>
+                </div>
+                <div class="detail-row">
+                  <span class="detail-label">Subdomain</span>
+                  <span class="detail-val">${data.subdomain}.quarkshield.ai</span>
+                </div>
+                ${data.licenseKey ? `
+                <div class="detail-row">
+                  <span class="detail-label">License Key</span>
+                  <span class="detail-val" style="font-size: 0.78rem;">${data.licenseKey}</span>
+                </div>` : ''}
+              `;
+
+              actionBtn.style.display = 'inline-flex';
+              actionBtn.innerText = 'Launch Workspace Login';
+              actionBtn.href = '/';
+              return;
+            }
+          }
+        } catch (e) {
+          console.error(e);
+        }
+
+        if (attempts < 10) {
+          setTimeout(pollStatus, 2000);
+        } else {
+          spinnerEl.style.display = 'none';
+          titleEl.innerHTML = 'Payment Received!';
+          descEl.innerText = 'Your Stripe subscription is confirmed. Your workspace provisioning is finishing in the background. Check your email for direct access details.';
+          actionBtn.style.display = 'inline-flex';
+          actionBtn.innerText = 'Go to Login';
+          actionBtn.href = '/';
+        }
+      };
+
+      pollStatus();
+    } else {
+      spinnerEl.style.display = 'none';
+      titleEl.innerHTML = 'Payment Processed';
+      descEl.innerText = 'Thank you for subscribing to QuarkShield. Please check your email for onboarding details.';
+      actionBtn.style.display = 'inline-flex';
+      actionBtn.href = '/';
+    }
+  </script>
+</body>
+</html>

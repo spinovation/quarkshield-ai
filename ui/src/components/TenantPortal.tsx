@@ -58,7 +58,8 @@ import {
   Save,
   Phone,
   Filter,
-  Package
+  Package,
+  CreditCard
 } from 'lucide-react';
 import MoscaMigrationPlanner from './MoscaMigrationPlanner';
 import { TenantUserManagement } from './TenantUserManagement';
@@ -532,6 +533,32 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const [totpSuccess, setTotpSuccess] = useState<boolean>(false);
   const [copiedBackupCodes, setCopiedBackupCodes] = useState<boolean>(false);
   const [activeLicKeyCopied, setActiveLicKeyCopied] = useState<boolean>(false);
+  const [portalLoading, setPortalLoading] = useState<boolean>(false);
+
+  const handleOpenStripePortal = async () => {
+    setPortalLoading(true);
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch('/api/billing/portal-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ tenantSlug: client.name })
+      });
+      const data = await res.json();
+      if (res.ok && data.portalUrl) {
+        window.location.href = data.portalUrl;
+      } else {
+        alert(data.error || 'Stripe Customer Portal is only available for accounts with an active Stripe subscription. Contact support@quarkshield.ai for billing inquiries.');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to connect to billing portal.');
+    } finally {
+      setPortalLoading(false);
+    }
+  };
 
   // Identity & Role Computations
   const [currentUserRole, setCurrentUserRole] = useState<string>(() => {
@@ -688,11 +715,27 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   });
 
   // 2. CBOM Inventory State
-  const [cbomSubTab, setCbomSubTab] = useState<'assets' | 'cyclonedx' | 'json'>('assets');
+  const [cbomSubTab, setCbomSubTab] = useState<'assets' | 'cyclonedx' | 'json' | 'drift'>('assets');
   const [cbomSearch, setCbomSearch] = useState<string>('');
   const [cbomCategory, setCbomCategory] = useState<string>('all');
   const [cbomJsonCopied, setCbomJsonCopied] = useState<boolean>(false);
   const [cbomAttestationMode, setCbomAttestationMode] = useState<boolean>(false);
+
+  // Drift & Executive Report State
+  interface DriftEvent {
+    id: string;
+    machineId: string;
+    tenantName: string;
+    changeType: 'added' | 'removed';
+    assetName: string;
+    algorithm: string;
+    isVulnerable: boolean;
+    detectedAt: string;
+  }
+  const [driftEvents, setDriftEvents] = useState<DriftEvent[]>([]);
+  const [isLoadingDrift, setIsLoadingDrift] = useState<boolean>(false);
+  const [driftSearch, setDriftSearch] = useState<string>('');
+  const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
 
   // 3. External Repositories State
   const [repoSubTab, setRepoSubTab] = useState<'git' | 'cloud'>('git');
@@ -1493,6 +1536,54 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     URL.revokeObjectURL(url);
   };
 
+  // Download Executive Audit Report (PDF or DOCX)
+  const downloadExecutiveReport = async (format: 'pdf' | 'docx') => {
+    try {
+      setIsGeneratingReport(true);
+      const tenantParam = encodeURIComponent(client?.name || cleanSlug || 'all');
+      const res = await fetch(`/api/reports/executive?tenant=${tenantParam}&format=${format}`, {
+        credentials: 'include'
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Server returned HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `QuarkShield-Executive-Report-${(client?.name || cleanSlug || 'fleet').toUpperCase()}-${new Date().toISOString().split('T')[0]}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('Failed to download executive report:', err);
+      alert(`Executive report export error: ${err.message}`);
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
+  // Fetch Cryptographic Drift Events
+  const fetchDriftEvents = async () => {
+    try {
+      setIsLoadingDrift(true);
+      const tenantParam = encodeURIComponent(client?.name || cleanSlug || '');
+      const res = await fetch(`/api/fleet/drift?tenant=${tenantParam}&limit=100`, {
+        credentials: 'include'
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDriftEvents(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.warn('Could not fetch drift events:', err);
+    } finally {
+      setIsLoadingDrift(false);
+    }
+  };
+
   // High-performance memoized CBOM preview (first 20 components) to prevent browser thread freeze on large fleets
   const cbomPreviewJson = useMemo(() => {
     return JSON.stringify(buildCycloneDxDocument(cbomAttestationMode, 20), null, 2);
@@ -1598,6 +1689,20 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         throw new Error(errData.error || 'Git repository scan failed.');
       }
     } catch (err: any) {
+      const msg = err?.message || '';
+      if (
+        msg.includes('Refused:') ||
+        msg.includes('Only public') ||
+        msg.includes('Invalid repository URL') ||
+        msg.toLowerCase().includes('private') ||
+        msg.toLowerCase().includes('loopback') ||
+        msg.toLowerCase().includes('ssrf')
+      ) {
+        setGitScanError(msg);
+        setGitScanResults(null);
+        setGitScanStep('');
+        return;
+      }
       console.warn('Git scan endpoint error, presenting fallback simulated findings for preview:', err);
       setGitScanResults({
         id: `scan-${Date.now()}`,
@@ -3761,6 +3866,28 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         >
                           <Code2 size={13} /> Raw JSON &amp; Export
                         </button>
+                        <button
+                          onClick={() => {
+                            setCbomSubTab('drift');
+                            fetchDriftEvents();
+                          }}
+                          style={{
+                            padding: '0.4rem 0.8rem',
+                            borderRadius: '4px',
+                            border: 'none',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            background: cbomSubTab === 'drift' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
+                            color: cbomSubTab === 'drift' ? '#38bdf8' : 'var(--text-muted, #94a3b8)',
+                            transition: 'all 0.15s ease'
+                          }}
+                        >
+                          <Activity size={13} /> Fleet Drift
+                        </button>
                       </div>
 
                       {/* Export Standard CBOM */}
@@ -3804,6 +3931,52 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         }}
                       >
                         <ShieldCheck size={14} color="#c084fc" /> Export Attested CBOM (CDXA)
+                      </button>
+
+                      {/* Export Executive Report (PDF) */}
+                      <button
+                        onClick={() => downloadExecutiveReport('pdf')}
+                        disabled={isGeneratingReport}
+                        title="Download white-labeled Executive C-Suite Post-Quantum Audit Report (PDF)"
+                        style={{
+                          background: 'rgba(239, 68, 68, 0.12)',
+                          border: '1px solid rgba(239, 68, 68, 0.35)',
+                          color: '#f87171',
+                          padding: '0.45rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: isGeneratingReport ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'Executive PDF'}
+                      </button>
+
+                      {/* Export Executive Report (DOCX) */}
+                      <button
+                        onClick={() => downloadExecutiveReport('docx')}
+                        disabled={isGeneratingReport}
+                        title="Download editable Microsoft Word Executive Audit Report (DOCX)"
+                        style={{
+                          background: 'rgba(59, 130, 246, 0.12)',
+                          border: '1px solid rgba(59, 130, 246, 0.35)',
+                          color: '#60a5fa',
+                          padding: '0.45rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: isGeneratingReport ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'Executive DOCX'}
                       </button>
 
                       {/* Enroll Workstations / Fleet Token */}
@@ -4450,6 +4623,202 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     }}>
                       {cbomPreviewJson}
                     </pre>
+                  </div>
+                )}
+
+                {/* Cryptographic Drift Subtab View */}
+                {cbomSubTab === 'drift' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                    {/* Drift Metrics Summary */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                      gap: '1rem'
+                    }}>
+                      <div style={{
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '8px',
+                        padding: '1rem'
+                      }}>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total Drift Events</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#38bdf8', marginTop: '0.35rem' }}>{driftEvents.length}</div>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Continuous cryptographic diffs</div>
+                      </div>
+
+                      <div style={{
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '8px',
+                        padding: '1rem'
+                      }}>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Assets Added</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#34d399', marginTop: '0.35rem' }}>
+                          {driftEvents.filter(e => e.changeType === 'added').length}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Newly discovered keys &amp; certs</div>
+                      </div>
+
+                      <div style={{
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '8px',
+                        padding: '1rem'
+                      }}>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Assets Decommissioned</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#94a3b8', marginTop: '0.35rem' }}>
+                          {driftEvents.filter(e => e.changeType === 'removed').length}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Removed from monitored endpoints</div>
+                      </div>
+
+                      <div style={{
+                        background: 'rgba(255, 255, 255, 0.02)',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '8px',
+                        padding: '1rem'
+                      }}>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Vulnerable Additions</div>
+                        <div style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f87171', marginTop: '0.35rem' }}>
+                          {driftEvents.filter(e => e.changeType === 'added' && e.isVulnerable).length}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: '0.2rem' }}>Classical / quantum-vulnerable</div>
+                      </div>
+                    </div>
+
+                    {/* Filter & Refresh Toolbar */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: '220px' }}>
+                        <div style={{ position: 'relative', width: '100%', maxWidth: '360px' }}>
+                          <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }} />
+                          <input
+                            type="text"
+                            placeholder="Filter drift by asset, algorithm, or machine..."
+                            value={driftSearch}
+                            onChange={(e) => setDriftSearch(e.target.value)}
+                            style={{
+                              width: '100%',
+                              padding: '0.5rem 0.75rem 0.5rem 2.25rem',
+                              background: 'rgba(255, 255, 255, 0.03)',
+                              border: '1px solid rgba(255, 255, 255, 0.1)',
+                              borderRadius: '6px',
+                              color: '#fff',
+                              fontSize: '0.8rem'
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={fetchDriftEvents}
+                        disabled={isLoadingDrift}
+                        style={{
+                          background: 'rgba(56, 189, 248, 0.1)',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          color: '#38bdf8',
+                          padding: '0.5rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: isLoadingDrift ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem'
+                        }}
+                      >
+                        <RefreshCw size={13} className={isLoadingDrift ? 'animate-spin' : ''} />
+                        {isLoadingDrift ? 'Refreshing...' : 'Refresh Drift Log'}
+                      </button>
+                    </div>
+
+                    {/* Drift Table */}
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.02)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '8px',
+                      overflowX: 'auto'
+                    }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.8rem' }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(255, 255, 255, 0.02)' }}>
+                            <th style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontWeight: 600 }}>Change</th>
+                            <th style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontWeight: 600 }}>Asset Name</th>
+                            <th style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontWeight: 600 }}>Algorithm</th>
+                            <th style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontWeight: 600 }}>Quantum Status</th>
+                            <th style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontWeight: 600 }}>Machine ID</th>
+                            <th style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontWeight: 600 }}>Detected At</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {driftEvents
+                            .filter(e => {
+                              if (!driftSearch) return true;
+                              const q = driftSearch.toLowerCase();
+                              return (
+                                (e.assetName || '').toLowerCase().includes(q) ||
+                                (e.algorithm || '').toLowerCase().includes(q) ||
+                                (e.machineId || '').toLowerCase().includes(q)
+                              );
+                            })
+                            .map((ev, idx) => (
+                              <tr key={ev.id || idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                                <td style={{ padding: '0.75rem 1rem' }}>
+                                  <span style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.25rem',
+                                    padding: '0.2rem 0.55rem',
+                                    borderRadius: '4px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 700,
+                                    textTransform: 'uppercase',
+                                    background: ev.changeType === 'added' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(248, 113, 113, 0.15)',
+                                    color: ev.changeType === 'added' ? '#34d399' : '#f87171',
+                                    border: `1px solid ${ev.changeType === 'added' ? 'rgba(52, 211, 153, 0.3)' : 'rgba(248, 113, 113, 0.3)'}`
+                                  }}>
+                                    {ev.changeType === 'added' ? '+ ADDED' : '- REMOVED'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '0.75rem 1rem', fontWeight: 600, color: '#f1f5f9' }}>
+                                  {ev.assetName}
+                                </td>
+                                <td style={{ padding: '0.75rem 1rem', fontFamily: 'monospace', color: '#38bdf8' }}>
+                                  {ev.algorithm}
+                                </td>
+                                <td style={{ padding: '0.75rem 1rem' }}>
+                                  <span style={{
+                                    padding: '0.15rem 0.5rem',
+                                    borderRadius: '4px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 600,
+                                    background: ev.isVulnerable ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                                    color: ev.isVulnerable ? '#f87171' : '#34d399'
+                                  }}>
+                                    {ev.isVulnerable ? 'Quantum Vulnerable' : 'Post-Quantum Secure'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '0.75rem 1rem', color: '#94a3b8', fontSize: '0.75rem', fontFamily: 'monospace' }}>
+                                  {ev.machineId ? ev.machineId.substring(0, 16) : '-'}
+                                </td>
+                                <td style={{ padding: '0.75rem 1rem', color: '#64748b', fontSize: '0.75rem' }}>
+                                  {ev.detectedAt ? new Date(ev.detectedAt).toLocaleString() : '-'}
+                                </td>
+                              </tr>
+                            ))}
+                          {driftEvents.length === 0 && !isLoadingDrift && (
+                            <tr>
+                              <td colSpan={6} style={{ padding: '2.5rem', textAlign: 'center', color: '#64748b' }}>
+                                <Activity size={24} style={{ margin: '0 auto 0.75rem', opacity: 0.5, color: '#38bdf8' }} />
+                                <div style={{ fontWeight: 600, color: '#94a3b8' }}>No Cryptographic Drift Detected</div>
+                                <div style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#64748b' }}>
+                                  Monitored endpoints have not reported added or removed cryptographic assets relative to their baseline.
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -6521,6 +6890,28 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       >
                         <Plus size={14} /> Enroll New Device
                       </button>
+                      <button
+                        onClick={handleOpenStripePortal}
+                        disabled={portalLoading}
+                        style={{
+                          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(168, 85, 247, 0.2) 100%)',
+                          border: '1px solid rgba(168, 85, 247, 0.4)',
+                          color: '#c084fc',
+                          padding: '0.4rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: portalLoading ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          transition: 'all 0.15s ease'
+                        }}
+                        title="Manage subscription, invoices, and payment cards on Stripe Customer Portal"
+                      >
+                        <CreditCard size={14} />
+                        {portalLoading ? 'Opening Portal...' : 'Manage Billing & Invoices (Stripe)'}
+                      </button>
                       <span style={{
                         fontSize: '0.78rem',
                         fontWeight: 700,
@@ -7683,6 +8074,15 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap' }}
                         >
                           <Key size={14} /> View License
+                        </button>
+                        <button
+                          onClick={handleOpenStripePortal}
+                          disabled={portalLoading}
+                          className="btn-secondary"
+                          style={{ fontSize: '0.8rem', padding: '0.45rem 0.85rem', display: 'flex', alignItems: 'center', gap: '0.4rem', whiteSpace: 'nowrap', color: '#c084fc', borderColor: 'rgba(168, 85, 247, 0.4)' }}
+                          title="Manage subscription and billing on Stripe Customer Portal"
+                        >
+                          <CreditCard size={14} /> {portalLoading ? 'Opening...' : 'Stripe Billing'}
                         </button>
                       </div>
                     </div>

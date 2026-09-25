@@ -7,6 +7,11 @@
 
 **QuarkShield.ai** is an end-to-end, enterprise-grade Cryptographic Observability, Discovery, and Post-Quantum Cryptographic (PQC) Transition Management Platform. It continuously audits infrastructure, servers, and endpoints to synthesize **CycloneDX 1.6 Cryptographic Bills of Materials (CBOM)**, identifies Harvest Now, Decrypt Later (HNDL) exposure, and orchestrates migration to quantum-resistant standards (ML-KEM, ML-DSA, SLH-DSA).
 
+> 📍 **Local Workstation Path**: `/Users/sridhargs/Documents/Antigravity/Quantum RAP/desktop-pqc-scanner`  
+> 🔗 **Remote Git Repository**: `https://github.com/spinovation/quarkshield-ai.git` (`main` branch)  
+> 🌐 **Live Production Server**: `13.140.40.99` (`https://quarkshield.ai`)  
+> 📖 **Detailed Architecture & Subsystems**: See [docs/CODEBASE_LOCATION_AND_ARCHITECTURE.md](docs/CODEBASE_LOCATION_AND_ARCHITECTURE.md)
+
 ---
 
 ## 🌟 Architecture & Core Capabilities

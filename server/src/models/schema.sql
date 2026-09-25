@@ -585,3 +585,48 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_prt_token_hash ON password_reset_tokens(token_hash);
+
+-- =========================================================================
+-- STRIPE BILLING & PAYMENT INTEGRATION SCHEMA
+-- =========================================================================
+ALTER TABLE admin_clients ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR(100);
+ALTER TABLE admin_clients ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR(100);
+ALTER TABLE admin_clients ADD COLUMN IF NOT EXISTS stripe_price_id VARCHAR(100);
+ALTER TABLE admin_clients ADD COLUMN IF NOT EXISTS billing_interval VARCHAR(20) DEFAULT 'monthly';
+
+CREATE TABLE IF NOT EXISTS pending_registrations (
+  id VARCHAR(100) PRIMARY KEY,
+  stripe_session_id VARCHAR(255) UNIQUE NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  company_name VARCHAR(255) NOT NULL,
+  contact_name VARCHAR(255),
+  tier VARCHAR(50) NOT NULL,
+  billing_interval VARCHAR(20) DEFAULT 'monthly',
+  subdomain VARCHAR(100),
+  status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'completed', 'failed'
+  failure_reason TEXT,
+  result_client_id VARCHAR(100),
+  result_license_key VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pending_reg_session ON pending_registrations(stripe_session_id);
+
+CREATE TABLE IF NOT EXISTS custom_checkout_invites (
+  id VARCHAR(100) PRIMARY KEY,
+  customer_name VARCHAR(255),
+  customer_email VARCHAR(255) NOT NULL,
+  description VARCHAR(500) NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  recurring BOOLEAN DEFAULT false,
+  billing_interval VARCHAR(20), -- 'month', 'year'
+  checkout_url TEXT,
+  stripe_session_id VARCHAR(255),
+  status VARCHAR(50) DEFAULT 'created', -- 'created', 'sent', 'paid'
+  email_subject VARCHAR(255),
+  email_body TEXT,
+  sent_at TIMESTAMP WITH TIME ZONE,
+  paid_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_custom_invites_session ON custom_checkout_invites(stripe_session_id);

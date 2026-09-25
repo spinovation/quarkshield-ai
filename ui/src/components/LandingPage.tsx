@@ -219,11 +219,51 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
         setGuideModal(null);
         setShowCareerModal(false);
         setShowSupportModal(false);
+        setShowStripeModal(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
+
+  // Stripe Billing & Checkout State
+  const [billingInterval, setBillingInterval] = useState<'monthly' | 'annual'>('monthly');
+  const [showStripeModal, setShowStripeModal] = useState(false);
+  const [checkoutTier, setCheckoutTier] = useState<'entry' | 'scale' | 'enterprise'>('scale');
+  const [checkoutForm, setCheckoutForm] = useState({ companyName: '', contactName: '', email: '' });
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
+
+  const handleStartStripeCheckout = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!checkoutForm.companyName.trim() || !checkoutForm.email.trim()) {
+      setCheckoutError('Please provide both your company name and corporate email address.');
+      return;
+    }
+    setCheckoutLoading(true);
+    setCheckoutError(null);
+    try {
+      const res = await fetch('/api/billing/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tier: checkoutTier,
+          billingInterval,
+          companyName: checkoutForm.companyName.trim(),
+          contactName: checkoutForm.contactName.trim(),
+          email: checkoutForm.email.trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.checkoutUrl) {
+        throw new Error(data.error || 'Failed to initialize Stripe checkout session.');
+      }
+      window.location.href = data.checkoutUrl;
+    } catch (err: any) {
+      setCheckoutError(err.message || 'Payment system error. Please try again.');
+      setCheckoutLoading(false);
+    }
+  };
 
   // CNSA 2.0 & PQC Regulatory Intelligence Feed state
   const [cnsaNews, setCnsaNews] = useState<CnsaNewsItem[]>([]);
@@ -297,6 +337,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       const data: ProbeResult = await res.json();
       setProbeResult(data);
     } catch (err: any) {
+      const msg = err?.message || '';
+      if (
+        msg.includes('Refused:') ||
+        msg.includes('Only public') ||
+        msg.includes('Invalid port') ||
+        msg.includes('Target host:port') ||
+        msg.toLowerCase().includes('private') ||
+        msg.toLowerCase().includes('loopback') ||
+        msg.toLowerCase().includes('ssrf')
+      ) {
+        setProbeError(msg);
+        setProbeResult(null);
+        return;
+      }
       console.warn('Backend TLS probe returned error, providing live simulation:', err);
       // High-fidelity fallback for offline/sandbox demonstration
       const isKyber = targetToProbe.toLowerCase().includes('cloudflare') || targetToProbe.toLowerCase().includes('google');
@@ -2655,6 +2709,67 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
             }}>
               Predictable subscription tiers designed for rapid adoption, enterprise expansion, and MSP partners.
             </p>
+
+            {/* Billing Interval Toggle (Monthly / Annual) */}
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              marginTop: '1.5rem',
+              background: 'rgba(15, 23, 42, 0.6)',
+              padding: '0.35rem',
+              borderRadius: '10px',
+              border: '1px solid rgba(255, 255, 255, 0.1)'
+            }}>
+              <button
+                type="button"
+                onClick={() => setBillingInterval('monthly')}
+                style={{
+                  padding: '0.45rem 1.1rem',
+                  borderRadius: '7px',
+                  fontSize: '0.88rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  border: billingInterval === 'monthly' ? '1px solid #00f2fe' : 'none',
+                  background: billingInterval === 'monthly' ? 'rgba(0, 242, 254, 0.18)' : 'transparent',
+                  color: billingInterval === 'monthly' ? '#00f2fe' : 'var(--text-secondary)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Monthly Billing
+              </button>
+              <button
+                type="button"
+                onClick={() => setBillingInterval('annual')}
+                style={{
+                  padding: '0.45rem 1.1rem',
+                  borderRadius: '7px',
+                  fontSize: '0.88rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  border: billingInterval === 'annual' ? '1px solid #10b981' : 'none',
+                  background: billingInterval === 'annual' ? 'rgba(16, 185, 129, 0.18)' : 'transparent',
+                  color: billingInterval === 'annual' ? '#10b981' : 'var(--text-secondary)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Annual Billing
+                <span style={{
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: '#000000',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  padding: '0.15rem 0.45rem',
+                  borderRadius: '20px'
+                }}>
+                  SAVE ~17%
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Pricing Grid */}
@@ -2694,8 +2809,12 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
 
                 <div style={{ marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>$300</span>
-                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>/month</span>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>
+                      {billingInterval === 'annual' ? '$250' : '$300'}
+                    </span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      {billingInterval === 'annual' ? '/mo ($3,000/yr)' : '/month'}
+                    </span>
                     <span style={{ fontSize: '0.92rem', color: '#38bdf8', fontWeight: 600, marginLeft: '0.25rem' }}>(5 seats)</span>
                   </div>
                 </div>
@@ -2732,7 +2851,11 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
               </div>
 
               <button
-                onClick={() => setShowSignInModal(true)}
+                onClick={() => {
+                  setCheckoutTier('entry');
+                  setShowStripeModal(true);
+                  setCheckoutError(null);
+                }}
                 style={{
                   background: 'rgba(56, 189, 248, 0.12)',
                   border: '1px solid rgba(56, 189, 248, 0.4)',
@@ -2801,8 +2924,12 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
 
                 <div style={{ marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>$2,500</span>
-                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>/Month</span>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>
+                      {billingInterval === 'annual' ? '$2,083' : '$2,500'}
+                    </span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      {billingInterval === 'annual' ? '/mo ($25,000/yr)' : '/Month'}
+                    </span>
                     <span style={{ fontSize: '0.92rem', color: '#fbbf24', fontWeight: 600, marginLeft: '0.25rem' }}>Up to 50 endpoints</span>
                   </div>
                 </div>
@@ -2839,7 +2966,11 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
               </div>
 
               <button
-                onClick={() => setShowSignInModal(true)}
+                onClick={() => {
+                  setCheckoutTier('scale');
+                  setShowStripeModal(true);
+                  setCheckoutError(null);
+                }}
                 style={{
                   background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
                   border: 'none',
@@ -2892,8 +3023,12 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
 
                 <div style={{ marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>$10,000</span>
-                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>/month</span>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>
+                      {billingInterval === 'annual' ? '$8,333' : '$10,000'}
+                    </span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      {billingInterval === 'annual' ? '/mo ($100,000/yr)' : '/month'}
+                    </span>
                     <span style={{ fontSize: '0.92rem', color: '#c084fc', fontWeight: 600, marginLeft: '0.25rem' }}>· Up to 250 endpoints</span>
                   </div>
                 </div>
@@ -2930,7 +3065,11 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
               </div>
 
               <button
-                onClick={() => setShowSignInModal(true)}
+                onClick={() => {
+                  setCheckoutTier('enterprise');
+                  setShowStripeModal(true);
+                  setCheckoutError(null);
+                }}
                 style={{
                   background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(127, 0, 255, 0.3) 100%)',
                   border: '1px solid rgba(168, 85, 247, 0.5)',
@@ -4464,6 +4603,228 @@ curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --t
                 ) : (
                   <>
                     <Lock size={15} /> Sign In to Console
+                  </>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: STRIPE SECURE CHECKOUT (ENTRY, SCALE, ENTERPRISE) */}
+      {/* ========================================================================= */}
+      {showStripeModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.8)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 2000,
+          padding: '1.5rem'
+        }}>
+          <div className="glass-panel" style={{
+            background: 'var(--bg-sidebar)',
+            maxWidth: '520px',
+            width: '100%',
+            borderRadius: '14px',
+            border: checkoutTier === 'scale'
+              ? '1.5px solid rgba(245, 158, 11, 0.6)'
+              : checkoutTier === 'enterprise'
+                ? '1.5px solid rgba(168, 85, 247, 0.6)'
+                : '1.5px solid rgba(56, 189, 248, 0.6)',
+            boxShadow: '0 20px 60px rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }}>
+            {/* Modal Header */}
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '1.25rem 1.5rem',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+              background: 'rgba(255, 255, 255, 0.02)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <Shield size={20} color={checkoutTier === 'scale' ? '#fbbf24' : checkoutTier === 'enterprise' ? '#c084fc' : '#38bdf8'} />
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: '#ffffff' }}>
+                    Subscribe to {checkoutTier === 'entry' ? 'ENTRY Assessment' : checkoutTier === 'scale' ? 'SCALE Fleet' : 'ENTERPRISE Pro'}
+                  </h3>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Instant automated provisioning via Stripe
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowStripeModal(false);
+                  setCheckoutError(null);
+                }}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Plan Summary Bar */}
+            <div style={{
+              padding: '1rem 1.5rem',
+              background: 'rgba(0, 0, 0, 0.3)',
+              borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between'
+            }}>
+              <div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Selected Plan
+                </div>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>
+                  {checkoutTier.toUpperCase()} ({billingInterval === 'annual' ? 'Annual' : 'Monthly'})
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: '1.35rem', fontWeight: 900, color: checkoutTier === 'scale' ? '#fbbf24' : checkoutTier === 'enterprise' ? '#c084fc' : '#38bdf8' }}>
+                  {checkoutTier === 'entry'
+                    ? (billingInterval === 'annual' ? '$3,000' : '$300')
+                    : checkoutTier === 'scale'
+                      ? (billingInterval === 'annual' ? '$25,000' : '$2,500')
+                      : (billingInterval === 'annual' ? '$100,000' : '$10,000')
+                  }
+                  <span style={{ fontSize: '0.75rem', fontWeight: 500, color: 'var(--text-muted)' }}>
+                    /{billingInterval === 'annual' ? 'yr' : 'mo'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Checkout Form */}
+            <form onSubmit={handleStartStripeCheckout} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {checkoutError && (
+                <div style={{ padding: '0.75rem', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid var(--status-vulnerable)', color: '#f87171', fontSize: '0.85rem' }}>
+                  {checkoutError}
+                </div>
+              )}
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                  Company / Organization Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Acme Aerospace Corp"
+                  value={checkoutForm.companyName}
+                  onChange={(e) => setCheckoutForm(prev => ({ ...prev, companyName: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '0.7rem 0.9rem',
+                    background: 'rgba(0, 0, 0, 0.35)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: '7px',
+                    color: '#ffffff',
+                    fontSize: '0.92rem'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                  Contact Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Jane Doe"
+                  value={checkoutForm.contactName}
+                  onChange={(e) => setCheckoutForm(prev => ({ ...prev, contactName: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '0.7rem 0.9rem',
+                    background: 'rgba(0, 0, 0, 0.35)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: '7px',
+                    color: '#ffffff',
+                    fontSize: '0.92rem'
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--text-secondary)' }}>
+                  Corporate Email (Billing &amp; Super Admin) *
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="admin@acme.com"
+                  value={checkoutForm.email}
+                  onChange={(e) => setCheckoutForm(prev => ({ ...prev, email: e.target.value }))}
+                  style={{
+                    width: '100%',
+                    padding: '0.7rem 0.9rem',
+                    background: 'rgba(0, 0, 0, 0.35)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    borderRadius: '7px',
+                    color: '#ffffff',
+                    fontSize: '0.92rem'
+                  }}
+                />
+              </div>
+
+              <div style={{
+                fontSize: '0.78rem',
+                color: 'var(--text-muted)',
+                lineHeight: 1.5,
+                background: 'rgba(0, 242, 254, 0.04)',
+                border: '1px solid rgba(0, 242, 254, 0.12)',
+                borderRadius: '6px',
+                padding: '0.65rem 0.85rem'
+              }}>
+                🔒 You will be redirected to Stripe's PCI-DSS Level 1 compliant checkout to finalize your payment securely. Your QuarkShield tenant and license keys will be provisioned immediately.
+              </div>
+
+              <button
+                type="submit"
+                disabled={checkoutLoading}
+                className="btn-primary"
+                style={{
+                  padding: '0.85rem',
+                  borderRadius: '8px',
+                  fontWeight: 800,
+                  cursor: checkoutLoading ? 'wait' : 'pointer',
+                  marginTop: '0.5rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.95rem',
+                  background: checkoutTier === 'scale'
+                    ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                    : checkoutTier === 'enterprise'
+                      ? 'linear-gradient(135deg, #a855f7 0%, #7e22ce 100%)'
+                      : 'linear-gradient(135deg, #00f2fe 0%, #4facfe 100%)',
+                  color: checkoutTier === 'scale' ? '#000000' : '#ffffff',
+                  border: 'none',
+                  boxShadow: '0 4px 18px rgba(0,0,0,0.4)'
+                }}
+              >
+                {checkoutLoading ? (
+                  <>
+                    <RefreshCw size={16} className="spin" /> Connecting to Stripe...
+                  </>
+                ) : (
+                  <>
+                    <Lock size={16} /> Proceed to Stripe Checkout <ArrowRight size={16} />
                   </>
                 )}
               </button>

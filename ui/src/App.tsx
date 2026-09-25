@@ -698,11 +698,13 @@ export default function App() {
   };
 
   useEffect(() => {
-    fetchMachines();
-    fetchTokens();
-    fetchCBOM();
-    fetchClients();
-  }, []);
+    if (viewMode !== 'landing') {
+      fetchMachines();
+      fetchTokens();
+      fetchCBOM();
+      fetchClients();
+    }
+  }, [viewMode]);
 
   // Close dropdown on outside click
   useEffect(() => {
