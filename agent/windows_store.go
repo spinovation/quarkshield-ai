@@ -127,8 +127,12 @@ func AuditWindowsSchannel() []AuditResult {
 		$cipherKey = "HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL\Ciphers\$c"
 		$cEnabled = (Get-ItemProperty -Path $cipherKey -ErrorAction SilentlyContinue).Enabled
 		# In Schannel, 3DES is enabled by default on Windows unless explicitly disabled
-		if ($cEnabled -ne 0) {
-			if ($c -eq "Triple DES 168") {
+		if ($c -eq "Triple DES 168") {
+			if ($cEnabled -ne 0) {
+				$findings += "CIPHER:$c"
+			}
+		} else {
+			if ($cEnabled -eq 1) {
 				$findings += "CIPHER:$c"
 			}
 		}

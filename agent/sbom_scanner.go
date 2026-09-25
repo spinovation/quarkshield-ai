@@ -116,7 +116,10 @@ func auditOpenSslPackage() (AuditResult, bool) {
 		"/usr/local/bin/openssl",
 		"/usr/bin/openssl",
 		"C:\\Program Files\\OpenSSL-Win64\\bin\\openssl.exe",
+		"C:\\Program Files (x86)\\OpenSSL-Win32\\bin\\openssl.exe",
 		"C:\\Program Files\\Git\\usr\\bin\\openssl.exe",
+		"C:\\tools\\openssl\\bin\\openssl.exe",
+		"C:\\vcpkg\\installed\\x64-windows\\tools\\openssl\\openssl.exe",
 	})
 	if binPath == "" {
 		return AuditResult{}, false
@@ -204,6 +207,8 @@ func auditOpenSshPackage() (AuditResult, bool) {
 		"/opt/homebrew/bin/ssh",
 		"C:\\Windows\\System32\\OpenSSH\\ssh.exe",
 		"C:\\Program Files\\OpenSSH\\ssh.exe",
+		"C:\\Program Files\\OpenSSH-Win64\\ssh.exe",
+		"C:\\Program Files\\Git\\usr\\bin\\ssh.exe",
 	})
 	if binPath == "" {
 		return AuditResult{}, false
@@ -300,6 +305,7 @@ func auditCurlPackage() (AuditResult, bool) {
 		"/opt/homebrew/bin/curl",
 		"C:\\Windows\\System32\\curl.exe",
 		"C:\\Program Files\\cURL\\bin\\curl.exe",
+		"C:\\Program Files\\Git\\mingw64\\bin\\curl.exe",
 	})
 	if binPath == "" {
 		return AuditResult{}, false
@@ -381,6 +387,8 @@ func auditGitPackage() (AuditResult, bool) {
 		"/usr/local/bin/git",
 		"/opt/homebrew/bin/git",
 		"C:\\Program Files\\Git\\cmd\\git.exe",
+		"C:\\Program Files\\Git\\bin\\git.exe",
+		"C:\\Program Files (x86)\\Git\\cmd\\git.exe",
 	})
 	if binPath == "" {
 		return AuditResult{}, false
@@ -429,10 +437,21 @@ func auditPythonCrypto() (AuditResult, bool) {
 		"/usr/local/bin/python3",
 		"/opt/homebrew/bin/python3",
 		"C:\\Python312\\python.exe",
+		"C:\\Python311\\python.exe",
+		"C:\\Python310\\python.exe",
 		"C:\\Program Files\\Python312\\python.exe",
+		"C:\\Program Files\\Python311\\python.exe",
+		"C:\\Program Files\\Python310\\python.exe",
 	})
 	if pyBin == "" {
-		pyBin = findExecutable("python", nil)
+		pyBin = findExecutable("python", []string{
+			"C:\\Python312\\python.exe",
+			"C:\\Python311\\python.exe",
+			"C:\\Program Files\\Python312\\python.exe",
+		})
+	}
+	if pyBin == "" {
+		pyBin = findExecutable("py", nil)
 	}
 	if pyBin == "" {
 		return AuditResult{}, false
@@ -548,18 +567,64 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 			}
 		}
 	} else if runtime.GOOS == "windows" {
-		// Audit Windows installed applications via winget or Program Files
-		reportProgress("Auditing Windows application runtimes...")
+		reportProgress("Auditing Windows application runtimes & registry...")
+		seenPkgs := make(map[string]bool)
+
+		// 1. Audit Registry Installed Applications via PowerShell
+		psScript := `Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*, HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and ($_.DisplayName -match '(?i)OpenSSL|PuTTY|WireGuard|OpenVPN|GnuPG|Python|Node\.js|Git|Docker|Go Programming|WinSCP|7-Zip') } | Select-Object -Unique DisplayName, DisplayVersion, InstallLocation | ForEach-Object { "$($_.DisplayName)|$($_.DisplayVersion)|$($_.InstallLocation)" }`
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
+		hideConsole(cmd)
+		if out, err := cmd.Output(); err == nil {
+			lines := strings.Split(string(out), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" || !strings.Contains(line, "|") {
+					continue
+				}
+				parts := strings.Split(line, "|")
+				dispName := strings.TrimSpace(parts[0])
+				dispVer := "Installed"
+				if len(parts) >= 2 && strings.TrimSpace(parts[1]) != "" {
+					dispVer = strings.TrimSpace(parts[1])
+				}
+				loc := "Windows Registry"
+				if len(parts) >= 3 && strings.TrimSpace(parts[2]) != "" {
+					loc = strings.TrimSpace(parts[2])
+				}
+				key := strings.ToLower(dispName)
+				if !seenPkgs[key] {
+					seenPkgs[key] = true
+					results = append(results, createPkgAuditResult(dispName, dispVer, "Windows Software (Registry)", loc))
+				}
+			}
+		}
+
+		// 2. Direct Program Files Inspection fallback & supplement
 		programPaths := []string{
 			"C:\\Program Files\\PuTTY\\putty.exe",
+			"C:\\Program Files (x86)\\PuTTY\\putty.exe",
 			"C:\\Program Files\\WireGuard\\wireguard.exe",
 			"C:\\Program Files (x86)\\GnuPG\\bin\\gpg.exe",
+			"C:\\Program Files\\GnuPG\\bin\\gpg.exe",
+			"C:\\Program Files\\OpenVPN\\bin\\openvpn.exe",
+			"C:\\Program Files (x86)\\OpenVPN\\bin\\openvpn.exe",
+			"C:\\Program Files (x86)\\WinSCP\\WinSCP.exe",
+			"C:\\Program Files\\WinSCP\\WinSCP.exe",
+			"C:\\Program Files\\nodejs\\node.exe",
+			"C:\\Program Files\\Go\\bin\\go.exe",
+			"C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe",
+			"C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+			"C:\\Program Files\\7-Zip\\7z.exe",
 		}
 		for _, p := range programPaths {
 			if _, err := os.Stat(p); err == nil {
 				base := filepath.Base(p)
 				name := strings.TrimSuffix(base, ".exe")
-				results = append(results, createPkgAuditResult(name, "Installed", "Windows Application", p))
+				key := strings.ToLower(name)
+				if !seenPkgs[key] {
+					seenPkgs[key] = true
+					results = append(results, createPkgAuditResult(name, "Installed", "Windows Application", p))
+				}
 			}
 		}
 	}
