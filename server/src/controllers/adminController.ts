@@ -4,6 +4,31 @@ import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
 import { signSession, setSessionCookie, clearSessionCookie, isSuperRole } from '../middleware/auth';
 import { assertPublicHost } from '../utils/ssrf';
+import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
+
+/**
+ * Enforce TOTP 2FA at login when the account has it enabled. Accepts a TOTP code
+ * or a one-time recovery code (which is then consumed).
+ */
+const check2fa = async (
+  table: 'admin_users' | 'tenant_users',
+  row: any,
+  totpCode: string | undefined
+): Promise<{ ok: true } | { ok: false; status: number; body: any }> => {
+  if (!row.two_factor_enabled) return { ok: true };
+  if (!totpCode) {
+    return { ok: false, status: 200, body: { success: false, twoFactorRequired: true, message: 'Enter your authenticator code.' } };
+  }
+  const secret = row.two_factor_secret ? decryptSecret(row.two_factor_secret) : null;
+  if (secret && verifyTotp(totpCode, secret)) return { ok: true };
+  const codes = row.two_factor_recovery_codes ? JSON.parse(row.two_factor_recovery_codes) : [];
+  const remaining = consumeRecoveryCode(totpCode, codes);
+  if (remaining) {
+    await pool.query(`UPDATE ${table} SET two_factor_recovery_codes = $1 WHERE id = $2`, [JSON.stringify(remaining), row.id]);
+    return { ok: true };
+  }
+  return { ok: false, status: 401, body: { error: 'Invalid 2FA code.' } };
+};
 import os from 'os';
 import tls from 'tls';
 import fs from 'fs';
@@ -2526,7 +2551,7 @@ export const probeEndpoint = async (req: Request, res: Response) => {
 // ==============================================================================
 export const unifiedLogin = async (req: Request, res: Response) => {
   try {
-    const { identifier, password } = req.body;
+    const { identifier, password, totpCode } = req.body;
     if (!identifier || !identifier.trim()) {
       return res.status(400).json({ error: 'Email or workspace identifier is required.' });
     }
@@ -2539,7 +2564,7 @@ export const unifiedLogin = async (req: Request, res: Response) => {
 
     // ---- 1. Platform operator (admin_users) by email or id ----
     const adminUserResult = await pool.query(
-      'SELECT id, email, role, company, password_hash, salt, row_locked, must_change_password FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
+      'SELECT id, email, role, company, password_hash, salt, row_locked, must_change_password, two_factor_enabled, two_factor_secret, two_factor_recovery_codes FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
       [cleanId]
     );
     if (adminUserResult.rows.length > 0) {
@@ -2550,6 +2575,8 @@ export const unifiedLogin = async (req: Request, res: Response) => {
       const v = await verifyPassword(password, u.password_hash, u.salt);
       if (!v.ok) return res.status(401).json({ error: INVALID });
       if (u.row_locked) return res.status(403).json({ error: 'This account is locked. Contact an administrator.' });
+      const tfa = await check2fa('admin_users', u, totpCode);
+      if (!tfa.ok) return res.status(tfa.status).json(tfa.body);
       if (v.needsUpgrade) {
         const newHash = await hashPassword(password);
         await pool.query('UPDATE admin_users SET password_hash = $1, salt = NULL WHERE id = $2', [newHash, u.id]);
@@ -2579,6 +2606,7 @@ export const unifiedLogin = async (req: Request, res: Response) => {
     // ---- 2. Tenant user (tenant_users) by email ----
     const tenantUserResult = await pool.query(
       `SELECT tu.id, tu.email, tu.tenant_name, tu.role, tu.password_hash, tu.salt, tu.status, tu.must_change_password,
+              tu.two_factor_enabled, tu.two_factor_secret, tu.two_factor_recovery_codes,
               c.customer_id, c.display_name, c.subscription_tier, c.account_type, c.status AS client_status
        FROM tenant_users tu
        LEFT JOIN admin_clients c ON LOWER(c.name) = LOWER(tu.tenant_name)
@@ -2600,6 +2628,8 @@ export const unifiedLogin = async (req: Request, res: Response) => {
       if (tu.client_status && tu.client_status !== 'active') {
         return res.status(403).json({ error: 'This workspace is not active. Contact support.' });
       }
+      const tfaT = await check2fa('tenant_users', tu, totpCode);
+      if (!tfaT.ok) return res.status(tfaT.status).json(tfaT.body);
       if (v.needsUpgrade) {
         const newHash = await hashPassword(password);
         await pool.query('UPDATE tenant_users SET password_hash = $1, salt = NULL WHERE id = $2', [newHash, tu.id]);

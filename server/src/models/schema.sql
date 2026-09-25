@@ -532,3 +532,7 @@ ALTER TABLE fleet_tokens ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_tokens ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
+
+-- TOTP 2FA recovery-code hashes (two_factor_secret already exists on both tables)
+ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;

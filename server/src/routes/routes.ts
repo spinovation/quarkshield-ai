@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { requireAuth, requireSuperAdmin, requireTenantAccess } from '../middleware/auth';
+import { twoFactorStatus, twoFactorSetup, twoFactorVerify, twoFactorDisable } from '../controllers/twoFactorController';
 import {
   getFleetTokens,
   createFleetToken,
@@ -107,6 +108,12 @@ router.post('/auth/forgot-password', forgotPassword);
 router.post('/auth/change-password', changePassword);
 router.post('/auth/logout', logout);
 router.get('/auth/me', getMe);
+
+// TOTP 2FA management (authenticated)
+router.get('/2fa/status', requireAuth, twoFactorStatus);
+router.post('/2fa/setup', requireAuth, twoFactorSetup);
+router.post('/2fa/verify', requireAuth, twoFactorVerify);
+router.post('/2fa/disable', requireAuth, twoFactorDisable);
 
 // ==========================================
 // PUBLIC endpoints (no session required)
