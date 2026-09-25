@@ -30,7 +30,19 @@ export interface SessionUser {
   role: string;       // superadmin | root_admin | admin | secops | auditor | user ...
   accountType: string; // superadmin | partner | corporate | tenant
   tenant: string | null; // tenant slug this session is scoped to (null for super admin)
+  pending2fa?: boolean; // true = tenant policy requires 2FA but the user has not enrolled;
+                        // the session may only reach the 2FA enrollment endpoints until then.
 }
+
+// Endpoints a pending-2FA session may still reach so the user can finish enrollment.
+// Matched against the path with any leading "/api" stripped, because req.path is
+// relative to the router's mount point ("/2fa/setup", not "/api/2fa/setup").
+const PENDING_2FA_ALLOWED = new Set<string>([
+  '/2fa/status', '/2fa/setup', '/2fa/verify',
+  '/auth/me', '/auth/logout',
+]);
+const isPending2faAllowed = (p: string): boolean =>
+  PENDING_2FA_ALLOWED.has(p.replace(/^\/api/, ''));
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace
@@ -93,6 +105,12 @@ export const attachUser = (req: Request, _res: Response, next: NextFunction): vo
 export const requireAuth = (req: Request, res: Response, next: NextFunction): void => {
   if (!req.user) {
     res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  // A pending-2FA session (tenant policy requires 2FA, user not yet enrolled) may
+  // only reach the enrollment endpoints until it completes setup.
+  if (req.user.pending2fa && !isPending2faAllowed(req.path)) {
+    res.status(403).json({ error: 'Two-factor enrollment required', mustEnroll2FA: true });
     return;
   }
   next();

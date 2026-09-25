@@ -2607,7 +2607,8 @@ export const unifiedLogin = async (req: Request, res: Response) => {
     const tenantUserResult = await pool.query(
       `SELECT tu.id, tu.email, tu.tenant_name, tu.role, tu.password_hash, tu.salt, tu.status, tu.must_change_password,
               tu.two_factor_enabled, tu.two_factor_secret, tu.two_factor_recovery_codes,
-              c.customer_id, c.display_name, c.subscription_tier, c.account_type, c.status AS client_status
+              c.customer_id, c.display_name, c.subscription_tier, c.account_type, c.status AS client_status,
+              c.two_factor_policy
        FROM tenant_users tu
        LEFT JOIN admin_clients c ON LOWER(c.name) = LOWER(tu.tenant_name)
        WHERE LOWER(tu.email) = $1
@@ -2642,6 +2643,29 @@ export const unifiedLogin = async (req: Request, res: Response) => {
       if (tu.role === 'admin') mappedRole = isPartner ? 'Partner Admin' : 'Corporate Admin';
       else if (tu.role === 'secops') mappedRole = 'SOC Analyst';
       else if (tu.role === 'auditor') mappedRole = 'Compliance Auditor';
+
+      // DEF-12b: enforce the tenant's 2FA policy. If policy requires 2FA and the
+      // user has not enrolled, grant only a restricted session that can reach the
+      // 2FA enrollment endpoints, and tell the client to force setup.
+      const policy = tu.two_factor_policy || 'optional';
+      const policyRequires2fa = policy === 'mandatory' || (policy === 'admins_only' && tu.role === 'admin');
+      if (policyRequires2fa && !tu.two_factor_enabled) {
+        const pendingToken = signSession({ sub: tu.id, email: tu.email, role: tu.role || 'secops', accountType: 'tenant', tenant: tu.tenant_name, pending2fa: true });
+        setSessionCookie(res, pendingToken);
+        return res.json({
+          success: true,
+          token: pendingToken,
+          accountType: 'tenant',
+          mustEnroll2FA: true,
+          role: mappedRole,
+          userEmail: tu.email,
+          workspace: tu.tenant_name,
+          target: 'tenant',
+          redirectUrl: `https://${tu.tenant_name}.quarkshield.ai`,
+          message: 'Your organization requires two-factor authentication. Please set it up to continue.'
+        });
+      }
+
       const token = signSession({ sub: tu.id, email: tu.email, role: tu.role || 'secops', accountType: 'tenant', tenant: tu.tenant_name });
       setSessionCookie(res, token);
       await pool.query('UPDATE tenant_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [tu.id]).catch(() => {});

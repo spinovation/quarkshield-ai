@@ -6,6 +6,7 @@ import {
   encryptSecret, decryptSecret,
   generateRecoveryCodes,
 } from '../utils/twofactor';
+import { signSession, setSessionCookie } from '../middleware/auth';
 
 /**
  * TOTP 2FA management. All routes require an authenticated session (req.user).
@@ -54,6 +55,11 @@ export const twoFactorVerify = async (req: Request, res: Response) => {
     `UPDATE ${table} SET two_factor_enabled = true, two_factor_recovery_codes = $1 WHERE id = $2`,
     [JSON.stringify(hashes), req.user.sub]
   );
+  // Upgrade a pending-2FA session to a full session now that enrollment is done.
+  if (req.user.pending2fa) {
+    const { sub, email, role, accountType, tenant } = req.user;
+    setSessionCookie(res, signSession({ sub, email, role, accountType, tenant }));
+  }
   return res.json({ success: true, enabled: true, recoveryCodes: plain });
 };
 
