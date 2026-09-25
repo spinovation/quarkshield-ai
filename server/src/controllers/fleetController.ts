@@ -869,6 +869,17 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       await pool.query('UPDATE fleet_tokens SET status = $1, last_sync = CURRENT_TIMESTAMP WHERE id = $2', ['active', tokenRow.id]);
     }
 
+    // Capture the previous asset fingerprints BEFORE replacing them, so we can
+    // record what changed since the last scan (DEF-36 drift detection).
+    const prevAssetsRes = await pool.query(
+      "SELECT name, algorithm, COALESCE(path,'') AS path, is_vulnerable FROM assets WHERE machine_id = $1",
+      [machineId]
+    );
+    const fp = (name: string, algo: string, path: string) => `${name}|${algo}|${path}`;
+    const prevMap = new Map<string, boolean>();
+    for (const r of prevAssetsRes.rows) prevMap.set(fp(r.name, r.algorithm, r.path || ''), r.is_vulnerable);
+    const hadBaseline = prevMap.size > 0; // don't emit "added" drift for the first-ever scan
+
     // Purge previous scan findings for this machine to keep ONLY the latest sync data
     await pool.query('DELETE FROM assets WHERE machine_id = $1', [machineId]);
 
@@ -905,6 +916,27 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         a.recommendation, a.explainer, a.compliance_violations, a.machine_id,
         a.path, assignedTenant, 'endpoint_deploy', cleanHost
       ]);
+    }
+
+    // Record drift: assets added/removed since the previous scan (DEF-36).
+    try {
+      const newMap = new Map<string, boolean>();
+      for (const a of processedAssets) newMap.set(fp(a.name, a.algorithm, a.path || ''), a.is_vulnerable);
+      const driftRows: any[] = [];
+      if (hadBaseline) {
+        for (const [k, vuln] of newMap) if (!prevMap.has(k)) driftRows.push(['added', k, vuln]);
+        for (const [k, vuln] of prevMap) if (!newMap.has(k)) driftRows.push(['removed', k, vuln]);
+      }
+      for (const [changeType, key, vuln] of driftRows) {
+        const [aname, algo] = String(key).split('|');
+        await pool.query(
+          `INSERT INTO fleet_drift_events (id, machine_id, tenant_name, change_type, asset_name, algorithm, is_vulnerable)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+          ['drift-' + crypto.randomUUID().substring(0, 12), machineId, assignedTenant, changeType, aname, algo, vuln]
+        );
+      }
+    } catch (driftErr) {
+      console.warn('Drift recording failed:', driftErr);
     }
 
     // Upsert today's Daily Historical Snapshot for this tenant
@@ -978,6 +1010,78 @@ export const enqueuePullCommand = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error queuing pull command:', err);
     res.status(500).json({ error: 'Failed to queue command.' });
+  }
+};
+
+// Cryptographic drift history for a tenant (or a single machine) — DEF-36.
+export const getFleetDrift = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    const machineId = (req.query.machine_id as string) || '';
+    const limit = Math.min(Number(req.query.limit) || 100, 500);
+    const params: any[] = [];
+    let where = '';
+    if (tenant) { params.push(`%${tenant}%`); where += `${params.length === 1 ? ' WHERE' : ' AND'} LOWER(COALESCE(tenant_name,'')) LIKE LOWER($${params.length})`; }
+    if (machineId) { params.push(machineId); where += `${params.length === 1 ? ' WHERE' : ' AND'} machine_id = $${params.length}`; }
+    params.push(limit);
+    const result = await pool.query(
+      `SELECT id, machine_id as "machineId", tenant_name as "tenantName", change_type as "changeType",
+              asset_name as "assetName", algorithm, is_vulnerable as "isVulnerable", detected_at as "detectedAt"
+       FROM fleet_drift_events${where} ORDER BY detected_at DESC LIMIT $${params.length}`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err: any) {
+    console.error('Error fetching drift events:', err);
+    res.status(500).json({ error: 'Failed to retrieve drift history.' });
+  }
+};
+
+// DEF-38: the host agent polls this to pick up on-demand commands (e.g. an
+// admin-triggered "scan now"). Authenticated by the fleet enrollment token;
+// resolves the agent's machine and returns + marks its pending commands.
+export const agentFetchCommands = async (req: Request, res: Response) => {
+  try {
+    let token = (req.headers['x-connector-token'] as string) || '';
+    const auth = req.headers['authorization'];
+    if (!token && auth && auth.startsWith('Bearer ')) token = auth.slice(7).trim();
+    if (!token && req.body?.token) token = req.body.token;
+    if (!token) return res.status(401).json({ error: 'Fleet enrollment token required.' });
+
+    // Resolve tenant from the token (fleet token or license key).
+    let tenant = '';
+    const ft = await pool.query('SELECT tenant_name FROM fleet_tokens WHERE token = $1', [token]);
+    if (ft.rows[0]?.tenant_name) tenant = ft.rows[0].tenant_name;
+    else {
+      const lic = await pool.query("SELECT tenant_name FROM admin_licenses WHERE UPPER(TRIM(license_key)) = UPPER(TRIM($1)) AND status != 'revoked'", [token]);
+      if (lic.rows[0]?.tenant_name) tenant = lic.rows[0].tenant_name;
+    }
+    if (!tenant) return res.status(401).json({ error: 'Invalid enrollment token.' });
+
+    const hwUuid = (req.body?.hardware_uuid || req.query.hardware_uuid || '').toString().trim();
+    const host = (req.body?.hostname || req.query.hostname || '').toString().trim();
+    const m = await pool.query(
+      `SELECT id FROM fleet_machines
+       WHERE LOWER(tenant_name) = LOWER($1)
+         AND ((hardware_uuid IS NOT NULL AND hardware_uuid <> '' AND hardware_uuid = $2) OR LOWER(hostname) = LOWER($3))
+       ORDER BY last_seen DESC LIMIT 1`,
+      [tenant, hwUuid, host]
+    );
+    if (m.rowCount === 0) return res.json({ commands: [] });
+    const machineId = m.rows[0].id;
+
+    const cmds = await pool.query(
+      "SELECT id, command, details FROM fleet_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC",
+      [machineId]
+    );
+    if (cmds.rowCount && cmds.rowCount > 0) {
+      const ids = cmds.rows.map(c => c.id);
+      await pool.query("UPDATE fleet_commands SET status = 'dispatched' WHERE id = ANY($1)", [ids]);
+    }
+    res.json({ machineId, commands: cmds.rows });
+  } catch (err: any) {
+    console.error('Error fetching agent commands:', err);
+    res.status(500).json({ error: 'Failed to fetch commands.' });
   }
 };
 

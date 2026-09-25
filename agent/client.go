@@ -249,3 +249,45 @@ func ReportADCS(serverURL string, token string, caName string, assets []ADCSAsse
 	}
 	return nil
 }
+
+// FetchAgentCommands polls the server for pending on-demand commands for this
+// machine (DEF-38). The fleet token authenticates and resolves the tenant; the
+// server returns the machine's pending commands and marks them dispatched.
+func FetchAgentCommands(serverURL string, token string) ([]string, error) {
+	cleanServer := strings.TrimRight(serverURL, "/")
+	hostname, _ := os.Hostname()
+	body := map[string]string{
+		"token":         token,
+		"hardware_uuid": GetHardwareUUID(),
+		"hostname":      hostname,
+	}
+	payload, _ := json.Marshal(body)
+	req, err := http.NewRequest("POST", cleanServer+"/api/scan/agent/commands", bytes.NewBuffer(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Connector-Token", token)
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("commands request failed (HTTP %d)", resp.StatusCode)
+	}
+	var parsed struct {
+		Commands []struct {
+			Command string `json:"command"`
+		} `json:"commands"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, c := range parsed.Commands {
+		out = append(out, c.Command)
+	}
+	return out, nil
+}

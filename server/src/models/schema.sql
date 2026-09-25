@@ -537,6 +537,21 @@ ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
 ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
 
+-- Cryptographic drift events (DEF-36): per-asset added/removed between scans of
+-- the same machine, so posture changes are visible, not just daily aggregates.
+CREATE TABLE IF NOT EXISTS fleet_drift_events (
+  id VARCHAR(100) PRIMARY KEY,
+  machine_id VARCHAR(100),
+  tenant_name VARCHAR(255),
+  change_type VARCHAR(20) NOT NULL,   -- added | removed
+  asset_name VARCHAR(255),
+  algorithm VARCHAR(100),
+  is_vulnerable BOOLEAN DEFAULT false,
+  detected_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_drift_machine ON fleet_drift_events(machine_id);
+CREATE INDEX IF NOT EXISTS idx_drift_tenant ON fleet_drift_events(tenant_name);
+
 -- Support tickets + attachments (Help/Feedback widget). Attachments store the
 -- actual bytes so screenshots/logs are retained, not just filenames (DEF-48).
 CREATE TABLE IF NOT EXISTS support_tickets (

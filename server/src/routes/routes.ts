@@ -12,7 +12,9 @@ import {
   getPowerShellInstallerScript,
   ingestTelemetry,
   enqueuePullCommand,
-  getTenantDailySnapshots
+  getTenantDailySnapshots,
+  getFleetDrift,
+  agentFetchCommands
 } from '../controllers/fleetController';
 import {
   getClients,
@@ -128,6 +130,7 @@ router.get('/news/cnsa', getCnsaNews);
 router.get('/scan/agent/install.sh', getInstallerScript);
 router.get('/scan/agent/install.ps1', getPowerShellInstallerScript);
 router.post('/scan/agent/ingest', ingestTelemetry);
+router.post('/scan/agent/commands', agentFetchCommands);
 router.post('/scan/adcs/report', reportAdcs);
 router.post('/scan/license/verify', verifyLicenseKey);
 router.post('/probe', probeEndpoint);
@@ -143,6 +146,7 @@ router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines
 router.delete('/fleet/machines/:id', requireAuth, deleteFleetMachine);
 router.post('/fleet/machines/:machineId/pull', requireAuth, enqueuePullCommand);
 router.get('/tenant/:tenant/daily-snapshots', requireAuth, requireTenantAccess, getTenantDailySnapshots);
+router.get('/fleet/drift', requireAuth, requireTenantAccess, getFleetDrift);
 router.get('/fleet/cbom', requireAuth, requireTenantAccess, getFleetCBOM);
 
 // ==========================================

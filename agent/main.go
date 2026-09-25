@@ -353,6 +353,7 @@ func main() {
 	uninstallFlag := flag.Bool("uninstall", false, "Uninstall Post-Quantum Guard from this workstation")
 	probeFlag := flag.String("probe", "", "Active outbound TCP/TLS socket probe against target (e.g. microsoft.com:443)")
 	adcsFlag := flag.Bool("adcs", false, "Discover Active Directory Certificate Services (Windows) and report the CA inventory to the server")
+	pollFlag := flag.Bool("poll", false, "Check the server for pending on-demand commands (e.g. scan-now) and act on them")
 
 	flag.StringVar(pathFlag, "p", ".", "Target directory path (shorthand)")
 	flag.StringVar(serverFlag, "s", "https://quarkshield.ai", "Server URL (shorthand)")
@@ -393,6 +394,47 @@ func main() {
 		if _, err := ActivateLicense(tokenVal); err == nil {
 			fmt.Println("✓ Local license successfully activated from license key.")
 		}
+	}
+
+	// Handle on-demand command polling (DEF-38): pick up a queued "scan now" and
+	// run a scan + telemetry sync in response.
+	if *pollFlag {
+		token := *tokenFlag
+		if token == "" {
+			token = *licenseFlag
+		}
+		if token == "" {
+			fmt.Println("❌ --poll requires a fleet enrollment token (--token).")
+			os.Exit(1)
+		}
+		cmds, err := FetchAgentCommands(*serverFlag, token)
+		if err != nil {
+			fmt.Printf("❌ Failed to check for commands: %v\n", err)
+			os.Exit(1)
+		}
+		wantScan := false
+		for _, c := range cmds {
+			if c == "scan_and_sync" {
+				wantScan = true
+			}
+		}
+		if !wantScan {
+			fmt.Println("✓ No pending commands.")
+			os.Exit(0)
+		}
+		fmt.Println("📡 On-demand scan requested by the server — scanning and syncing...")
+		findings, _, scanErr := RunScan(true, "")
+		if scanErr != nil {
+			fmt.Printf("❌ Scan failed: %v\n", scanErr)
+			os.Exit(1)
+		}
+		hn, _ := os.Hostname()
+		if err := SendFleetTelemetry(*serverFlag, token, hn, runtime.GOOS, runtime.GOARCH, "", findings, "", ""); err != nil {
+			fmt.Printf("❌ Telemetry failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✅ On-demand scan complete; %d assets synced.\n", len(findings))
+		os.Exit(0)
 	}
 
 	// Handle AD CS discovery (Windows, domain-joined host) and report to server.
