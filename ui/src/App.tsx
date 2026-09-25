@@ -1822,48 +1822,15 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '0.45rem' }}>
                     <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', padding: '0.2rem 0.65rem', borderRadius: '20px', background: 'rgba(0, 242, 254, 0.12)', border: '1px solid rgba(0, 242, 254, 0.3)', color: 'var(--accent-cyan)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      <Sparkles size={12} /> Endpoint Security Console
+                      <Sparkles size={12} /> Super Admin Central Control Plane
                     </div>
                   </div>
                   <h1 style={{ fontSize: '1.65rem', fontWeight: 800, margin: '0 0 0.25rem 0', display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#ffffff' }}>
-                    <Laptop size={24} color="var(--accent-cyan)" /> Desktop & Host PQC Vulnerability Scanner
+                    <Shield size={24} color="var(--accent-cyan)" /> Super Admin
                   </h1>
                   <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.88rem', maxWidth: '850px', lineHeight: 1.4 }}>
-                    Dedicated Host Cryptographic Observability. Real-time endpoint discovery, standardized CycloneDX 1.6+ CBOM generation, and fleet-wide post-quantum migration management.
+                    Central Cryptographic Observability &amp; Tenant Governance. Real-time endpoint discovery, standardized CycloneDX 1.6+ CBOM generation, and global post-quantum migration orchestration.
                   </p>
-                </div>
-
-                <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
-                  <button 
-                    onClick={() => { fetchMachines(); fetchCBOM(); fetchTokens(); }} 
-                    className="btn-secondary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', padding: '0.45rem 0.8rem' }}
-                  >
-                    <RefreshCw size={13} className={loading ? 'spin' : ''} /> Refresh Telemetry
-                  </button>
-                  <button 
-                    onClick={() => downloadCBOMJson(false)}
-                    className="btn-secondary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', padding: '0.45rem 0.8rem', borderColor: 'rgba(0, 242, 254, 0.4)' }}
-                    title="Export Standard CycloneDX 1.6 CBOM"
-                  >
-                    <Download size={13} color="var(--accent-cyan)" /> Export CBOM
-                  </button>
-                  <button 
-                    onClick={() => downloadCBOMJson(true)}
-                    className="btn-secondary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', padding: '0.45rem 0.8rem', borderColor: 'rgba(168, 85, 247, 0.6)', color: '#c084fc', background: 'rgba(168, 85, 247, 0.15)' }}
-                    title="Export CycloneDX 1.6 with CDXA Attestation Declarations and ML-DSA-65 Signature"
-                  >
-                    <ShieldCheck size={14} color="#c084fc" /> Export CDXA Attested
-                  </button>
-                  <button 
-                    onClick={() => { setActiveTab('tokens'); setShowCreateTokenModal(true); }}
-                    className="btn-primary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', padding: '0.45rem 0.95rem' }}
-                  >
-                    <Terminal size={13} /> Deploy Agent
-                  </button>
                 </div>
               </div>
             </header>
