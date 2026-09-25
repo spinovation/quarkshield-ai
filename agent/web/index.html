@@ -1869,6 +1869,11 @@
     let currentPage = 1;
     let pageSize = 25;
     let displayFindings = [];
+    let currentScanMode = 'cbom';
+    let currentFilterTab = 'all';
+    let sbomSubFilter = 'all';
+    let sortColumn = null;
+    let sortDirection = 'asc';
 
     async function cancelScan() {
       try {
@@ -1992,10 +1997,19 @@
                 ? `SBOM audit complete! Discovered ${(data.findings || []).length} software components.`
                 : `Audit complete! Discovered ${(data.findings || []).length} cryptographic items.`;
               currentFindings = data.findings || [];
-              renderScanResults(data, mode);
-              fetchScanHistory();
+              try {
+                renderScanResults(data, mode);
+              } catch (renderErr) {
+                console.error('Error rendering scan results:', renderErr);
+              }
+              try {
+                fetchScanHistory();
+              } catch (histErr) {
+                console.warn('Error fetching history:', histErr);
+              }
               setTimeout(() => {
-                document.getElementById('scan-progress-box').style.display = 'none';
+                const pBox = document.getElementById('scan-progress-box');
+                if (pBox) pBox.style.display = 'none';
               }, 1200);
               resetScanUI();
               return;
@@ -2033,6 +2047,7 @@
     // 3. Render Results with Post-Quantum Threat & Configuration Assessment
     function renderScanResults(data, mode) {
       const findings = data.findings || [];
+      currentFindings = findings;
       const vulnerableCount = findings.filter(f => f.isVulnerable).length;
       const secureCount = findings.filter(f => !f.isVulnerable && f.type !== 'config').length;
 
@@ -2043,6 +2058,11 @@
       let configCount = 0;
       let certsCount = 0;
       let sbomCount = 0;
+      let cveCount = 0;
+      let critHighCount = 0;
+      let sbomHndlCount = 0;
+      let pqcAgileCount = 0;
+      let remediationCount = 0;
 
       findings.forEach(f => {
         const threat = (f.quantumThreat || '').toLowerCase();
@@ -2051,6 +2071,7 @@
         const expl = (f.explainer || '').toLowerCase();
         const name = (f.name || '').toLowerCase();
         const type = (f.type || '').toLowerCase();
+        const risk = (f.riskLevel || '').toLowerCase();
 
         // 0. Certs & Keys count
         if (type === 'certificate' || type === 'key' || type === 'ssh_key' || /rsa|ecdsa|dsa|ed25519/i.test(algo)) {
@@ -2080,6 +2101,22 @@
         // 5. Software BOM / Package components
         if (type === 'package' || type === 'sbom' || type === 'library' || type === 'dependency') {
           sbomCount++;
+          const hasCve = f.cveId && f.cveId !== 'None' && f.cveId !== 'none';
+          if (hasCve) {
+            cveCount++;
+            if (risk === 'critical' || risk === 'high') {
+              critHighCount++;
+            }
+          }
+          if (threat.includes('hndl') || threat.includes('harvest') || threat.includes('shor')) {
+            sbomHndlCount++;
+          }
+          if (!f.isVulnerable) {
+            pqcAgileCount++;
+          }
+          if (f.codeSnippet || (f.remediationSteps && f.remediationSteps.length > 0)) {
+            remediationCount++;
+          }
         }
       });
 
@@ -2089,7 +2126,8 @@
       const heading = document.getElementById('scan-heading');
       const desc = document.getElementById('scan-desc');
 
-      const isSbomMode = mode === 'sbom' || data.scanType === 'sbom';
+      const isSbomMode = mode === 'sbom' || (data && data.scanType === 'sbom') || (findings.length > 0 && findings.every(f => f.type === 'package' || f.type === 'sbom'));
+      currentScanMode = isSbomMode ? 'sbom' : 'cbom';
 
       if (isSbomMode) {
         if (vulnerableCount > 0) {
@@ -2290,7 +2328,7 @@
       currentFilterTab = isSbomMode ? 'sbom' : 'all';
       sbomSubFilter = 'all';
 
-      const tabBtns = document.querySelectorAll('.filter-tab');
+      const tabBtns = document.querySelectorAll('#cbom-filter-tabs .filter-tab');
       tabBtns.forEach(btn => {
         if (btn.getAttribute('data-tab') === currentFilterTab) btn.classList.add('active');
         else btn.classList.remove('active');
@@ -2300,9 +2338,6 @@
       filterFindings();
     }
 
-    let currentScanMode = 'cbom';
-    let sbomSubFilter = 'all';
-
     function copySnippet(encodedCmd, btn) {
       const cmd = decodeURIComponent(encodedCmd);
       copySbomFixCmd(btn, cmd);
@@ -2311,23 +2346,17 @@
     function handleMetricCardClick(cardKey) {
       if (currentScanMode === 'sbom') {
         if (cardKey === 'all') {
-          sbomSubFilter = 'all';
-          setFilterTab('sbom');
+          setFilterTab('sbom', 'all');
         } else if (cardKey === 'shor') {
-          sbomSubFilter = 'cve';
-          setFilterTab('sbom');
+          setFilterTab('sbom', 'cve');
         } else if (cardKey === 'config') {
-          sbomSubFilter = 'crithigh';
-          setFilterTab('sbom');
+          setFilterTab('sbom', 'crithigh');
         } else if (cardKey === 'hndl') {
-          sbomSubFilter = 'hndl';
-          setFilterTab('sbom');
+          setFilterTab('sbom', 'hndl');
         } else if (cardKey === 'grover') {
-          sbomSubFilter = 'secure';
-          setFilterTab('sbom');
+          setFilterTab('sbom', 'secure');
         } else if (cardKey === 'secure') {
-          sbomSubFilter = 'remediation';
-          setFilterTab('sbom');
+          setFilterTab('sbom', 'remediation');
         }
       } else {
         setFilterTab(cardKey);
@@ -2342,11 +2371,14 @@
       const threatExportBtn = document.getElementById('btn-threat-export-bom');
       const exportCycloneDxBtn = document.getElementById('btn-export-cyclonedx');
 
+      const searchInput = document.getElementById('cbom-search');
+
       if (isSbomView) {
         if (titleEl) titleEl.textContent = '📦 Software Bill of Materials (SBOM) & CVE Correlation';
         if (exportBomBtn) exportBomBtn.textContent = '📥 Export SBOM JSON';
         if (threatExportBtn) threatExportBtn.textContent = '📥 Export SBOM JSON';
         if (exportCycloneDxBtn) exportCycloneDxBtn.textContent = 'Export CycloneDX 1.6 SBOM';
+        if (searchInput) searchInput.placeholder = 'Search packages, versions, CVEs, ecosystems, paths...';
 
         if (colgroupEl) {
           colgroupEl.innerHTML = `
@@ -2383,6 +2415,7 @@
         if (exportBomBtn) exportBomBtn.textContent = '📥 Export CBOM JSON';
         if (threatExportBtn) threatExportBtn.textContent = '📥 Export CBOM JSON';
         if (exportCycloneDxBtn) exportCycloneDxBtn.textContent = 'Export CycloneDX 1.6 CBOM';
+        if (searchInput) searchInput.placeholder = 'Search keys, algorithms, paths...';
 
         if (colgroupEl) {
           colgroupEl.innerHTML = `
@@ -2722,14 +2755,12 @@
       document.getElementById('remediation-modal').style.display = 'none';
     }
 
-    let currentFilterTab = 'all';
-
-    function setFilterTab(tab) {
+    function setFilterTab(tab, subFilter) {
       currentFilterTab = tab;
-      sbomSubFilter = 'all';
+      sbomSubFilter = (subFilter !== undefined) ? subFilter : 'all';
 
       // Update active state on tab buttons
-      const tabBtns = document.querySelectorAll('.filter-tab');
+      const tabBtns = document.querySelectorAll('#cbom-filter-tabs .filter-tab');
       tabBtns.forEach(btn => {
         if (btn.getAttribute('data-tab') === tab) {
           btn.classList.add('active');
@@ -2815,9 +2846,6 @@
     }
 
     // Column Sorting
-    let sortColumn = null;
-    let sortDirection = 'asc';
-
     function sortFindingsTable(col) {
       if (sortColumn === col) {
         sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
