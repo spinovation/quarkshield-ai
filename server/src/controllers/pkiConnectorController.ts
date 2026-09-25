@@ -2,14 +2,21 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { discoverKmsKeys, pingKms, DiscoveredAsset, KmsConfig } from '../lib/awsKms';
+import { discoverVaultKeys, pingVault, VaultConfig } from '../lib/hashiVault';
+import { discoverAzureKeys, pingAzure, AzureConfig } from '../lib/azureKeyVault';
+import { seal, open as unseal } from '../utils/secretbox';
 
 // Providers with a real backend implemented. Others return clearly-labeled
 // preview (simulated) data until their integrations land (DEF-51).
-const REAL_PROVIDERS = new Set(['aws_kms']);
+const REAL_PROVIDERS = new Set(['aws_kms', 'hashicorp_vault', 'azure_keyvault']);
+
+const rawConfig = (row: any): any => {
+  try { return typeof row.config_summary === 'string' ? JSON.parse(row.config_summary) : (row.config_summary || {}); }
+  catch { return {}; }
+};
 
 const parseKmsConfig = (row: any): KmsConfig => {
-  let cfg: any = {};
-  try { cfg = typeof row.config_summary === 'string' ? JSON.parse(row.config_summary) : (row.config_summary || {}); } catch { cfg = {}; }
+  const cfg = rawConfig(row);
   return {
     roleArn: cfg.roleArn || cfg.role_arn,
     externalId: cfg.externalId || cfg.external_id,
@@ -18,6 +25,30 @@ const parseKmsConfig = (row: any): KmsConfig => {
     endpointUrl: row.endpoint_url || cfg.endpointUrl || undefined,
     accessKeyId: cfg.accessKeyId,
     secretAccessKey: cfg.secretAccessKey,
+  };
+};
+
+const parseVaultConfig = (row: any): VaultConfig => {
+  const cfg = rawConfig(row);
+  return {
+    address: row.endpoint_url || cfg.address,
+    token: unseal(cfg.token) || undefined,
+    roleId: cfg.roleId,
+    secretId: unseal(cfg.secretId) || undefined,
+    namespace: cfg.namespace,
+    transitMount: cfg.transitMount,
+    pkiMount: cfg.pkiMount,
+  };
+};
+
+const parseAzureConfig = (row: any): AzureConfig => {
+  const cfg = rawConfig(row);
+  return {
+    vaultUrl: row.endpoint_url || cfg.vaultUrl,
+    tenantId: cfg.tenantId,
+    clientId: cfg.clientId,
+    clientSecret: unseal(cfg.clientSecret) || undefined,
+    authorityHost: cfg.authorityHost,
   };
 };
 
@@ -70,11 +101,15 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     const id = 'conn-' + crypto.randomUUID().substring(0, 10);
     const cleanTenant = tenantName.toUpperCase().trim();
 
-    // Sanitize credentials for storage in summary
+    // Credentials that real discovery needs (Vault token / AppRole secret_id,
+    // Azure client secret) are encrypted at rest; other secret-ish fields are
+    // masked. Prefer keyless auth (AWS role, Azure managed identity) and omit
+    // secrets entirely where possible.
     const sanitizedConfig = { ...config };
-    if (sanitizedConfig.secretKey) sanitizedConfig.secretKey = '••••••••' + sanitizedConfig.secretKey.slice(-4);
-    if (sanitizedConfig.clientSecret) sanitizedConfig.clientSecret = '••••••••' + sanitizedConfig.clientSecret.slice(-4);
-    if (sanitizedConfig.token) sanitizedConfig.token = '••••••••' + sanitizedConfig.token.slice(-4);
+    if (sanitizedConfig.token) sanitizedConfig.token = seal(String(sanitizedConfig.token));
+    if (sanitizedConfig.secretId) sanitizedConfig.secretId = seal(String(sanitizedConfig.secretId));
+    if (sanitizedConfig.clientSecret) sanitizedConfig.clientSecret = seal(String(sanitizedConfig.clientSecret));
+    if (sanitizedConfig.secretKey) sanitizedConfig.secretKey = '••••••••' + String(sanitizedConfig.secretKey).slice(-4);
 
     await pool.query(`
       INSERT INTO pki_connectors (
@@ -117,18 +152,21 @@ export const testPkiConnector = async (req: Request, res: Response) => {
     const c = lookup.rows[0];
 
     // Real reachability + auth check for implemented providers.
-    if (c.provider === 'aws_kms') {
+    if (REAL_PROVIDERS.has(c.provider)) {
       const started = Date.now();
       try {
-        const r = await pingKms(parseKmsConfig(c));
+        let r: { message: string; region?: string };
+        if (c.provider === 'aws_kms') r = await pingKms(parseKmsConfig(c));
+        else if (c.provider === 'hashicorp_vault') r = await pingVault(parseVaultConfig(c));
+        else r = await pingAzure(parseAzureConfig(c));
         return res.json({
           success: true, connectorId: id, provider: c.provider, endpoint: c.endpoint_url,
-          status: 'HEALTHY', latencyMs: Date.now() - started, region: r.region, message: r.message,
+          status: 'HEALTHY', latencyMs: Date.now() - started, region: (r as any).region, message: r.message,
         });
       } catch (e: any) {
         return res.status(502).json({
           success: false, connectorId: id, provider: c.provider, status: 'UNREACHABLE',
-          error: `AWS KMS check failed: ${e.name || 'Error'}: ${e.message}`,
+          error: `${c.provider} check failed: ${e.name || 'Error'}: ${e.message}`,
         });
       }
     }
@@ -233,6 +271,8 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
     try {
       let assets: DiscoveredAsset[] = [];
       if (provider === 'aws_kms') assets = await discoverKmsKeys(parseKmsConfig(row));
+      else if (provider === 'hashicorp_vault') assets = await discoverVaultKeys(parseVaultConfig(row));
+      else if (provider === 'azure_keyvault') assets = await discoverAzureKeys(parseAzureConfig(row));
       return await persistAssets(connectorId, tenantName, provider, connectorName, assets);
     } catch (e: any) {
       await pool.query(
