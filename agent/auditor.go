@@ -32,6 +32,12 @@ type AuditResult struct {
 	CodeSnippet          string   `json:"codeSnippet,omitempty"`
 	Explainer            string   `json:"explainer"`
 	ComplianceViolations []string `json:"complianceViolations"`
+	Version              string   `json:"version,omitempty"`
+	Ecosystem            string   `json:"ecosystem,omitempty"`
+	CveID                string   `json:"cveId,omitempty"`
+	Cvss                 float64  `json:"cvss,omitempty"`
+	CveDetails           string   `json:"cveDetails,omitempty"`
+	Purl                 string   `json:"purl,omitempty"`
 }
 
 type LineViolation struct {

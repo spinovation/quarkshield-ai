@@ -865,7 +865,7 @@
         <button class="btn btn-secondary" onclick="openHistoryModal()" style="font-size: 0.82rem; padding: 0.5rem 0.9rem; border-color: rgba(168, 85, 247, 0.45); color: #c084fc; background: rgba(168, 85, 247, 0.08); font-weight: 600;" title="View all locally archived scans">
           📜 Prior Scans (<span class="history-count-tag">0</span>)
         </button>
-        <button class="btn btn-secondary" onclick="exportCycloneDX()" style="font-size: 0.82rem; padding: 0.5rem 0.9rem;">
+        <button class="btn btn-secondary" id="btn-threat-export-bom" onclick="exportCycloneDX()" style="font-size: 0.82rem; padding: 0.5rem 0.9rem;">
           📥 Export CBOM JSON
         </button>
         <button class="btn btn-primary" onclick="openSyncModal()" style="font-size: 0.82rem; padding: 0.5rem 0.9rem;">
@@ -876,58 +876,58 @@
 
     <!-- Metrics Summary Cards (Threat & Asset Breakdown) -->
     <div class="metrics-grid" id="metrics-grid" style="display: none; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));">
-      <div class="glass metric-card clickable-card" onclick="setFilterTab('all')" title="Click to show All findings in CBOM table">
+      <div class="glass metric-card clickable-card" id="card-metric-1" onclick="handleMetricCardClick('all')" title="Click to show All findings">
         <div class="metric-header">
-          <span>Total Assets</span>
-          <span>📁</span>
+          <span id="m-label-total">Total Assets</span>
+          <span id="m-icon-total">📁</span>
         </div>
         <div class="metric-value" id="m-total-assets">0</div>
-        <div class="metric-sub">Discovered across target dirs</div>
+        <div class="metric-sub" id="m-sub-total">Discovered across target dirs</div>
       </div>
 
-      <div class="glass metric-card clickable-card" onclick="setFilterTab('shor')" title="Click to filter CBOM to Shor's Risk asymmetric keys" style="border-left: 3px solid var(--accent-red);">
+      <div class="glass metric-card clickable-card" id="card-metric-2" onclick="handleMetricCardClick('shor')" title="Click to filter" style="border-left: 3px solid var(--accent-red);">
         <div class="metric-header">
-          <span style="color: #f87171;">Shor's Risk</span>
-          <span>🚨</span>
+          <span style="color: #f87171;" id="m-label-shor">Shor's Risk</span>
+          <span id="m-icon-shor">🚨</span>
         </div>
         <div class="metric-value" style="color: #f87171;" id="m-shor-assets">0</div>
-        <div class="metric-sub">RSA, ECDSA, Ed25519</div>
+        <div class="metric-sub" id="m-sub-shor">RSA, ECDSA, Ed25519</div>
       </div>
 
-      <div class="glass metric-card clickable-card" onclick="setFilterTab('config')" title="Click to filter CBOM to Configuration Violations" style="border-left: 3px solid #f97316;">
+      <div class="glass metric-card clickable-card" id="card-metric-3" onclick="handleMetricCardClick('config')" title="Click to filter" style="border-left: 3px solid #f97316;">
         <div class="metric-header">
-          <span style="color: #fb923c;">Config Violations</span>
-          <span>⚠️</span>
+          <span style="color: #fb923c;" id="m-label-config">Config Violations</span>
+          <span id="m-icon-config">⚠️</span>
         </div>
         <div class="metric-value" style="color: #fb923c;" id="m-config-violations">0</div>
-        <div class="metric-sub">Schannel, SSH & TLS Policy</div>
+        <div class="metric-sub" id="m-sub-config">Schannel, SSH & TLS Policy</div>
       </div>
 
-      <div class="glass metric-card clickable-card" onclick="setFilterTab('hndl')" title="Click to filter CBOM to Active HNDL session exposures" style="border-left: 3px solid #c084fc;">
+      <div class="glass metric-card clickable-card" id="card-metric-4" onclick="handleMetricCardClick('hndl')" title="Click to filter" style="border-left: 3px solid #c084fc;">
         <div class="metric-header">
-          <span style="color: #c084fc;">Active HNDL</span>
-          <span>📡</span>
+          <span style="color: #c084fc;" id="m-label-hndl">Active HNDL</span>
+          <span id="m-icon-hndl">📡</span>
         </div>
         <div class="metric-value" style="color: #c084fc;" id="m-hndl-assets">0</div>
-        <div class="metric-sub">Recorded TLS/SSH/VPN traffic</div>
+        <div class="metric-sub" id="m-sub-hndl">Recorded TLS/SSH/VPN traffic</div>
       </div>
 
-      <div class="glass metric-card clickable-card" onclick="setFilterTab('grover')" title="Click to filter CBOM to Grover's 64-bit weakened ciphers" style="border-left: 3px solid var(--accent-amber);">
+      <div class="glass metric-card clickable-card" id="card-metric-5" onclick="handleMetricCardClick('grover')" title="Click to filter" style="border-left: 3px solid var(--accent-amber);">
         <div class="metric-header">
-          <span style="color: #fbbf24;">Grover's 64-bit</span>
-          <span>⚡</span>
+          <span style="color: #fbbf24;" id="m-label-grover">Grover's 64-bit</span>
+          <span id="m-icon-grover">⚡</span>
         </div>
         <div class="metric-value" style="color: #fbbf24;" id="m-grover-assets">0</div>
-        <div class="metric-sub">AES-128 halved / 3DES / SHA-1</div>
+        <div class="metric-sub" id="m-sub-grover">AES-128 halved / 3DES / SHA-1</div>
       </div>
 
-      <div class="glass metric-card clickable-card" onclick="setFilterTab('secure')" title="Click to filter CBOM to Quantum Safe assets" style="border-left: 3px solid var(--accent-emerald);">
+      <div class="glass metric-card clickable-card" id="card-metric-6" onclick="handleMetricCardClick('secure')" title="Click to filter" style="border-left: 3px solid var(--accent-emerald);">
         <div class="metric-header">
-          <span style="color: #34d399;">Post-Quantum Safe</span>
-          <span>🛡️</span>
+          <span style="color: #34d399;" id="m-label-secure">Post-Quantum Safe</span>
+          <span id="m-icon-secure">🛡️</span>
         </div>
         <div class="metric-value" style="color: #34d399;" id="m-secure-assets">0</div>
-        <div class="metric-sub">ML-KEM / ML-DSA / Hybrid</div>
+        <div class="metric-sub" id="m-sub-secure">ML-KEM / ML-DSA / Hybrid</div>
       </div>
     </div>
 
@@ -935,7 +935,7 @@
     <section class="glass cbom-section" id="cbom-section" style="display: none;">
       <div class="cbom-toolbar">
         <div class="cbom-title">
-          <span>📋 Cryptographic Bill of Materials (CBOM)</span>
+          <span id="cbom-title-text">📋 Cryptographic Bill of Materials (CBOM)</span>
           <span class="badge badge-type" id="cbom-badge-count">0 Items</span>
         </div>
         <div style="display: flex; gap: 0.75rem; align-items: center;">
@@ -943,7 +943,7 @@
           <button class="btn btn-secondary" onclick="openHistoryModal()" style="padding: 0.5rem 0.85rem; font-size: 0.8rem; border-color: rgba(168, 85, 247, 0.45); color: #c084fc; background: rgba(168, 85, 247, 0.08); font-weight: 600;" title="View all locally archived scans">
             📜 Prior Scans (<span class="history-count-tag">0</span>)
           </button>
-          <button class="btn btn-secondary" onclick="exportCycloneDX()" style="padding: 0.5rem 0.85rem; font-size: 0.8rem;">
+          <button class="btn btn-secondary" id="btn-export-cyclonedx" onclick="exportCycloneDX()" style="padding: 0.5rem 0.85rem; font-size: 0.8rem;">
             Export CycloneDX 1.6
           </button>
         </div>
@@ -979,14 +979,14 @@
 
       <div class="table-container">
         <table style="table-layout: fixed; width: 100%;">
-          <colgroup>
+          <colgroup id="findings-table-colgroup">
             <col style="width: 32%;">
             <col style="width: 10%;">
             <col style="width: 13%;">
             <col style="width: 13%;">
             <col style="width: 32%;">
           </colgroup>
-          <thead>
+          <thead id="findings-table-head">
             <tr>
               <th onclick="sortFindingsTable('name')" style="cursor: pointer; user-select: none;" title="Click to sort by Asset & Path">
                 Cryptographic Asset & Path <span id="sort-icon-name" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
@@ -2148,12 +2148,123 @@
 
       // Metrics Grid (Threat & Compliance Cards)
       document.getElementById('metrics-grid').style.display = 'grid';
-      document.getElementById('m-total-assets').textContent = findings.length;
-      document.getElementById('m-shor-assets').textContent = shorCount;
-      document.getElementById('m-config-violations').textContent = configCount;
-      document.getElementById('m-hndl-assets').textContent = hndlCount;
-      document.getElementById('m-grover-assets').textContent = groverCount;
-      document.getElementById('m-secure-assets').textContent = secureCount;
+
+      if (isSbomMode) {
+        // Card 1: Total Packages
+        const elL1 = document.getElementById('m-label-total');
+        if (elL1) { elL1.textContent = 'Total Packages'; elL1.style.color = '#fff'; }
+        const elI1 = document.getElementById('m-icon-total');
+        if (elI1) elI1.textContent = '📦';
+        const elV1 = document.getElementById('m-total-assets');
+        if (elV1) elV1.textContent = findings.length;
+        const elS1 = document.getElementById('m-sub-total');
+        if (elS1) elS1.textContent = 'Audited libraries & dependencies';
+
+        // Card 2: Known CVEs
+        const elL2 = document.getElementById('m-label-shor');
+        if (elL2) { elL2.textContent = 'Known CVEs'; elL2.style.color = '#f87171'; }
+        const elI2 = document.getElementById('m-icon-shor');
+        if (elI2) elI2.textContent = '🚨';
+        const elV2 = document.getElementById('m-shor-assets');
+        if (elV2) { elV2.textContent = cveCount; elV2.style.color = '#f87171'; }
+        const elS2 = document.getElementById('m-sub-shor');
+        if (elS2) elS2.textContent = 'NIST NVD & CISA KEV detected';
+
+        // Card 3: Critical / High
+        const elL3 = document.getElementById('m-label-config');
+        if (elL3) { elL3.textContent = 'Critical / High'; elL3.style.color = '#fb923c'; }
+        const elI3 = document.getElementById('m-icon-config');
+        if (elI3) elI3.textContent = '⚠️';
+        const elV3 = document.getElementById('m-config-violations');
+        if (elV3) { elV3.textContent = critHighCount; elV3.style.color = '#fb923c'; }
+        const elS3 = document.getElementById('m-sub-config');
+        if (elS3) elS3.textContent = 'Remote code & spoofing threats';
+
+        // Card 4: Session HNDL
+        const elL4 = document.getElementById('m-label-hndl');
+        if (elL4) { elL4.textContent = 'Session HNDL'; elL4.style.color = '#c084fc'; }
+        const elI4 = document.getElementById('m-icon-hndl');
+        if (elI4) elI4.textContent = '📡';
+        const elV4 = document.getElementById('m-hndl-assets');
+        if (elV4) { elV4.textContent = sbomHndlCount; elV4.style.color = '#c084fc'; }
+        const elS4 = document.getElementById('m-sub-hndl');
+        if (elS4) elS4.textContent = 'Legacy SSH/TLS cipher suites';
+
+        // Card 5: Post-Quantum Agile
+        const elL5 = document.getElementById('m-label-grover');
+        if (elL5) { elL5.textContent = 'Post-Quantum Agile'; elL5.style.color = '#34d399'; }
+        const elI5 = document.getElementById('m-icon-grover');
+        if (elI5) elI5.textContent = '🛡️';
+        const elV5 = document.getElementById('m-grover-assets');
+        if (elV5) { elV5.textContent = pqcAgileCount; elV5.style.color = '#34d399'; }
+        const elS5 = document.getElementById('m-sub-grover');
+        if (elS5) elS5.textContent = 'ML-KEM / ML-DSA capable';
+
+        // Card 6: 1-Click Fixes
+        const elL6 = document.getElementById('m-label-secure');
+        if (elL6) { elL6.textContent = '1-Click Fixes'; elL6.style.color = 'var(--accent-cyan)'; }
+        const elI6 = document.getElementById('m-icon-secure');
+        if (elI6) elI6.textContent = '🛠️';
+        const elV6 = document.getElementById('m-secure-assets');
+        if (elV6) { elV6.textContent = remediationCount; elV6.style.color = 'var(--accent-cyan)'; }
+        const elS6 = document.getElementById('m-sub-secure');
+        if (elS6) elS6.textContent = 'Upgrade commands ready';
+      } else {
+        // CBOM Mode
+        const elL1 = document.getElementById('m-label-total');
+        if (elL1) { elL1.textContent = 'Total Assets'; elL1.style.color = '#fff'; }
+        const elI1 = document.getElementById('m-icon-total');
+        if (elI1) elI1.textContent = '📁';
+        const elV1 = document.getElementById('m-total-assets');
+        if (elV1) elV1.textContent = findings.length;
+        const elS1 = document.getElementById('m-sub-total');
+        if (elS1) elS1.textContent = 'Discovered across target dirs';
+
+        const elL2 = document.getElementById('m-label-shor');
+        if (elL2) { elL2.textContent = "Shor's Risk"; elL2.style.color = '#f87171'; }
+        const elI2 = document.getElementById('m-icon-shor');
+        if (elI2) elI2.textContent = '🚨';
+        const elV2 = document.getElementById('m-shor-assets');
+        if (elV2) { elV2.textContent = shorCount; elV2.style.color = '#f87171'; }
+        const elS2 = document.getElementById('m-sub-shor');
+        if (elS2) elS2.textContent = 'RSA, ECDSA, Ed25519';
+
+        const elL3 = document.getElementById('m-label-config');
+        if (elL3) { elL3.textContent = 'Config Violations'; elL3.style.color = '#fb923c'; }
+        const elI3 = document.getElementById('m-icon-config');
+        if (elI3) elI3.textContent = '⚠️';
+        const elV3 = document.getElementById('m-config-violations');
+        if (elV3) { elV3.textContent = configCount; elV3.style.color = '#fb923c'; }
+        const elS3 = document.getElementById('m-sub-config');
+        if (elS3) elS3.textContent = 'Schannel, SSH & TLS Policy';
+
+        const elL4 = document.getElementById('m-label-hndl');
+        if (elL4) { elL4.textContent = 'Active HNDL'; elL4.style.color = '#c084fc'; }
+        const elI4 = document.getElementById('m-icon-hndl');
+        if (elI4) elI4.textContent = '📡';
+        const elV4 = document.getElementById('m-hndl-assets');
+        if (elV4) { elV4.textContent = hndlCount; elV4.style.color = '#c084fc'; }
+        const elS4 = document.getElementById('m-sub-hndl');
+        if (elS4) elS4.textContent = 'Recorded TLS/SSH/VPN traffic';
+
+        const elL5 = document.getElementById('m-label-grover');
+        if (elL5) { elL5.textContent = "Grover's 64-bit"; elL5.style.color = '#fbbf24'; }
+        const elI5 = document.getElementById('m-icon-grover');
+        if (elI5) elI5.textContent = '⚡';
+        const elV5 = document.getElementById('m-grover-assets');
+        if (elV5) { elV5.textContent = groverCount; elV5.style.color = '#fbbf24'; }
+        const elS5 = document.getElementById('m-sub-grover');
+        if (elS5) elS5.textContent = 'AES-128 halved / 3DES / SHA-1';
+
+        const elL6 = document.getElementById('m-label-secure');
+        if (elL6) { elL6.textContent = 'Post-Quantum Safe'; elL6.style.color = '#34d399'; }
+        const elI6 = document.getElementById('m-icon-secure');
+        if (elI6) elI6.textContent = '🛡️';
+        const elV6 = document.getElementById('m-secure-assets');
+        if (elV6) { elV6.textContent = secureCount; elV6.style.color = '#34d399'; }
+        const elS6 = document.getElementById('m-sub-secure');
+        if (elS6) elS6.textContent = 'ML-KEM / ML-DSA / Hybrid';
+      }
 
       // Update One-Click Filter Tab Counts
       const elTabAll = document.getElementById('tab-count-all');
@@ -2173,21 +2284,141 @@
       if (elTabSecure) elTabSecure.textContent = secureCount;
       if (elTabSbom) elTabSbom.textContent = sbomCount;
 
-      // CBOM Section & Pagination
+      // CBOM / SBOM Section & Pagination
       document.getElementById('cbom-section').style.display = 'block';
-      document.getElementById('cbom-badge-count').textContent = `${findings.length} Items`;
       
       currentFilterTab = isSbomMode ? 'sbom' : 'all';
+      sbomSubFilter = 'all';
+
       const tabBtns = document.querySelectorAll('.filter-tab');
       tabBtns.forEach(btn => {
         if (btn.getAttribute('data-tab') === currentFilterTab) btn.classList.add('active');
         else btn.classList.remove('active');
       });
 
+      updateTableStructure(isSbomMode);
       filterFindings();
     }
 
-    // 4. Pagination & Responsive CBOM Table Rendering
+    let currentScanMode = 'cbom';
+    let sbomSubFilter = 'all';
+
+    function copySnippet(encodedCmd, btn) {
+      const cmd = decodeURIComponent(encodedCmd);
+      copySbomFixCmd(btn, cmd);
+    }
+
+    function handleMetricCardClick(cardKey) {
+      if (currentScanMode === 'sbom') {
+        if (cardKey === 'all') {
+          sbomSubFilter = 'all';
+          setFilterTab('sbom');
+        } else if (cardKey === 'shor') {
+          sbomSubFilter = 'cve';
+          setFilterTab('sbom');
+        } else if (cardKey === 'config') {
+          sbomSubFilter = 'crithigh';
+          setFilterTab('sbom');
+        } else if (cardKey === 'hndl') {
+          sbomSubFilter = 'hndl';
+          setFilterTab('sbom');
+        } else if (cardKey === 'grover') {
+          sbomSubFilter = 'secure';
+          setFilterTab('sbom');
+        } else if (cardKey === 'secure') {
+          sbomSubFilter = 'remediation';
+          setFilterTab('sbom');
+        }
+      } else {
+        setFilterTab(cardKey);
+      }
+    }
+
+    function updateTableStructure(isSbomView) {
+      const titleEl = document.getElementById('cbom-title-text');
+      const colgroupEl = document.getElementById('findings-table-colgroup');
+      const headEl = document.getElementById('findings-table-head');
+      const exportBomBtn = document.getElementById('btn-export-bom');
+      const threatExportBtn = document.getElementById('btn-threat-export-bom');
+      const exportCycloneDxBtn = document.getElementById('btn-export-cyclonedx');
+
+      if (isSbomView) {
+        if (titleEl) titleEl.textContent = '📦 Software Bill of Materials (SBOM) & CVE Correlation';
+        if (exportBomBtn) exportBomBtn.textContent = '📥 Export SBOM JSON';
+        if (threatExportBtn) threatExportBtn.textContent = '📥 Export SBOM JSON';
+        if (exportCycloneDxBtn) exportCycloneDxBtn.textContent = 'Export CycloneDX 1.6 SBOM';
+
+        if (colgroupEl) {
+          colgroupEl.innerHTML = `
+            <col style="width: 26%;">
+            <col style="width: 14%;">
+            <col style="width: 22%;">
+            <col style="width: 16%;">
+            <col style="width: 22%;">
+          `;
+        }
+        if (headEl) {
+          headEl.innerHTML = `
+            <tr>
+              <th onclick="sortFindingsTable('name')" style="cursor: pointer; user-select: none;" title="Click to sort by Component Name">
+                Component / Package & Location <span id="sort-icon-name" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('version')" style="cursor: pointer; user-select: none;" title="Click to sort by Version">
+                Version & Ecosystem <span id="sort-icon-version" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('cve')" style="cursor: pointer; user-select: none;" title="Click to sort by CVE & CVSS">
+                CVE Correlation & Severity <span id="sort-icon-cve" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('agility')" style="cursor: pointer; user-select: none;" title="Click to sort by Quantum Agility">
+                Quantum Agility Status <span id="sort-icon-agility" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('recommendation')" style="cursor: pointer; user-select: none;" title="Click to sort by Remediation">
+                1-Click Remediation & Action <span id="sort-icon-recommendation" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+            </tr>
+          `;
+        }
+      } else {
+        if (titleEl) titleEl.textContent = '📋 Cryptographic Bill of Materials (CBOM)';
+        if (exportBomBtn) exportBomBtn.textContent = '📥 Export CBOM JSON';
+        if (threatExportBtn) threatExportBtn.textContent = '📥 Export CBOM JSON';
+        if (exportCycloneDxBtn) exportCycloneDxBtn.textContent = 'Export CycloneDX 1.6 CBOM';
+
+        if (colgroupEl) {
+          colgroupEl.innerHTML = `
+            <col style="width: 32%;">
+            <col style="width: 10%;">
+            <col style="width: 13%;">
+            <col style="width: 13%;">
+            <col style="width: 32%;">
+          `;
+        }
+        if (headEl) {
+          headEl.innerHTML = `
+            <tr>
+              <th onclick="sortFindingsTable('name')" style="cursor: pointer; user-select: none;" title="Click to sort by Asset & Path">
+                Cryptographic Asset & Path <span id="sort-icon-name" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('type')" style="cursor: pointer; user-select: none;" title="Click to sort by Type">
+                Type <span id="sort-icon-type" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('algorithm')" style="cursor: pointer; user-select: none;" title="Click to sort by Algorithm">
+                Algorithm <span id="sort-icon-algorithm" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('threat')" style="cursor: pointer; user-select: none;" title="Click to sort by Threat Vector">
+                Threat Vector <span id="sort-icon-threat" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+              <th onclick="sortFindingsTable('recommendation')" style="cursor: pointer; user-select: none;" title="Click to sort by Recommendation">
+                NIST FIPS 203/204 Recommendation <span id="sort-icon-recommendation" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              </th>
+            </tr>
+          `;
+        }
+      }
+      updateSortIcons();
+    }
+
+    // 4. Pagination & Responsive CBOM / SBOM Table Rendering
     function changePageSize(val) {
       pageSize = val === 'all' ? 'all' : parseInt(val, 10);
       currentPage = 1;
@@ -2213,10 +2444,28 @@
       const tbody = document.getElementById('findings-table-body');
       tbody.innerHTML = '';
 
+      const isSbomView = (currentFilterTab === 'sbom') || (currentScanMode === 'sbom' && currentFilterTab === 'all');
       const total = displayFindings.length;
+
+      const badgeCountEl = document.getElementById('cbom-badge-count');
+      if (badgeCountEl) {
+        badgeCountEl.textContent = isSbomView ? `${total} Components` : `${total} Items`;
+      }
+
       if (total === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 2rem;">No matching cryptographic assets found.</td></tr>`;
-        document.getElementById('pagination-info').textContent = 'Showing 0 items';
+        if (isSbomView) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 2.5rem 1rem;">
+            <div style="font-size: 1.8rem; margin-bottom: 0.5rem;">📦</div>
+            <div style="font-weight: 600; color: #fff; font-size: 0.95rem; margin-bottom: 0.35rem;">No Software Components in Current View</div>
+            <div style="font-size: 0.82rem; margin-bottom: 1.1rem; color: var(--text-dim);">Run a dedicated SBOM scan to audit OpenSSL, OpenSSH, cURL, Git, Python, Go, and package dependencies.</div>
+            <button class="btn btn-secondary" onclick="triggerScan('sbom')" style="padding: 0.45rem 1.1rem; color: #38bdf8; border-color: rgba(56, 189, 248, 0.45); background: rgba(56, 189, 248, 0.08); font-weight: 600; cursor: pointer;">
+              ⚡ Run Software BOM (SBOM) Scan Now
+            </button>
+          </td></tr>`;
+        } else {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-dim); padding: 2rem;">No matching cryptographic assets found.</td></tr>`;
+        }
+        document.getElementById('pagination-info').textContent = isSbomView ? 'Showing 0 components' : 'Showing 0 items';
         document.getElementById('page-indicator').textContent = '1 / 1';
         document.getElementById('btn-prev-page').disabled = true;
         document.getElementById('btn-next-page').disabled = true;
@@ -2236,78 +2485,185 @@
         items = displayFindings.slice(start, end);
       }
 
-      document.getElementById('pagination-info').textContent = 
-        `Showing ${start + 1}-${end} of ${total} cryptographic assets`;
+      document.getElementById('pagination-info').textContent = isSbomView
+        ? `Showing ${start + 1}-${end} of ${total} software components`
+        : `Showing ${start + 1}-${end} of ${total} cryptographic assets`;
       document.getElementById('page-indicator').textContent = `${currentPage} / ${totalPages}`;
       document.getElementById('btn-prev-page').disabled = currentPage <= 1;
       document.getElementById('btn-next-page').disabled = currentPage >= totalPages;
 
-      items.forEach((item, relativeIdx) => {
-        const globalIdx = currentFindings.indexOf(item);
-        const tr = document.createElement('tr');
-        
-        // Threat Vector Badging
-        let threatBadge = '';
-        const threatLower = (item.quantumThreat || '').toLowerCase();
-        const algoLower = (item.algorithm || '').toLowerCase();
-        const typeLower = (item.type || '').toLowerCase();
+      if (isSbomView) {
+        // Dedicated SBOM & CVE Correlation Table Row Rendering
+        items.forEach((item, relativeIdx) => {
+          const globalIdx = currentFindings.indexOf(item);
+          const tr = document.createElement('tr');
 
-        if (!item.isVulnerable) {
-          threatBadge = `<span class="badge badge-secure" style="display: block; text-align: center;">🛡️ Quantum Safe</span>`;
-        } else if (typeLower === 'package' || typeLower === 'sbom' || typeLower === 'library' || typeLower === 'dependency') {
-          threatBadge = `<span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); display: block; text-align: center;" title="${escapeHtml(item.quantumThreat || 'SBOM Vulnerability')}">📦 SBOM / CVE</span>`;
-        } else if (threatLower.includes('grover') || algoLower.includes('aes-128') || algoLower.includes('aes128') || algoLower.includes('3des')) {
-          threatBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); display: block; text-align: center;" title="Halved symmetric security to 64-bit under Grover search">⚡ Grover's 64-bit</span>`;
-        } else if (threatLower.includes('hndl') || threatLower.includes('harvest') || (item.name || '').includes('Schannel')) {
-          threatBadge = `<span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); display: block; text-align: center;" title="Data intercepted today can be decrypted retrospectively">📡 Active HNDL</span>`;
-        } else if (item.type === 'config') {
-          threatBadge = `<span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.4); display: block; text-align: center;" title="Configuration policy violation">⚠️ Config Policy</span>`;
-        } else {
-          threatBadge = `<span class="badge badge-critical" style="display: block; text-align: center;" title="Vulnerable to polynomial-time factorization via Shor's Algorithm">🚨 Shor's Risk</span>`;
-        }
+          // Version & Ecosystem
+          const verText = item.version ? `v${item.version}` : 'installed';
+          const ecoText = (item.ecosystem || item.type || 'system').toLowerCase();
 
-        let complianceTags = (item.complianceViolations || []).map(c => 
-          `<span class="badge badge-high" style="font-size: 0.65rem;">${escapeHtml(c)}</span>`
-        ).join(' ');
+          // PURL badge
+          const purlHtml = item.purl ? `<span class="badge" style="font-size: 0.65rem; background: rgba(255,255,255,0.06); color: #94a3b8; font-family: monospace; font-weight: 400; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(item.purl)}">${escapeHtml(item.purl)}</span>` : '';
 
-        let remediationBtn = (item.remediationSteps && item.remediationSteps.length > 0) || item.codeSnippet
-          ? `<button class="btn btn-secondary" onclick="openRemediationModal(${globalIdx})" style="padding: 0.25rem 0.6rem; font-size: 0.72rem; color: var(--accent-cyan); border-color: rgba(0, 242, 254, 0.35); display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap;">
-              🛠️ View Remediation Plan
-            </button>`
-          : '';
+          // CVE Correlation & Severity
+          let cveHtml = '';
+          const hasCve = item.cveId && item.cveId !== 'None' && item.cveId !== 'none';
+          if (hasCve) {
+            const isCrit = (item.riskLevel || '').toLowerCase() === 'critical' || (item.cvss && item.cvss >= 9.0);
+            cveHtml = `
+              <div style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
+                <span class="badge ${isCrit ? 'badge-critical' : 'badge-high'}" style="font-weight: 700; font-size: 0.76rem;">🚨 ${escapeHtml(item.cveId)}</span>
+                ${item.cvss ? `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-weight: 700; font-size: 0.72rem;">CVSS ${item.cvss}</span>` : ''}
+              </div>
+              <div style="font-size: 0.73rem; color: #cbd5e1; margin-top: 0.3rem; line-height: 1.4;">
+                ${escapeHtml(item.cveDetails || item.explainer || 'Known CVE vulnerability detected.')}
+              </div>
+            `;
+          } else {
+            cveHtml = `
+              <div style="display: flex; align-items: center; gap: 0.35rem;">
+                <span class="badge badge-secure" style="display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.74rem; font-weight: 600;">✓ NIST NVD / CISA Cleared</span>
+              </div>
+              <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 0.3rem;">No active CVEs or known exploits</div>
+            `;
+          }
 
-        tr.innerHTML = `
-          <td style="word-break: break-word;">
-            <div style="font-weight: 600; font-size: 0.86rem; color: #fff;">${escapeHtml(item.name)}</div>
-            <div style="font-family: monospace; font-size: 0.72rem; color: var(--accent-cyan); word-break: break-all; margin-top: 0.3rem;">
-              📂 ${escapeHtml(item.path || item.name)}
-            </div>
-            ${item.type === 'certificate' && item.description && item.description.includes('Subject:') ? 
-              `<div style="font-size: 0.70rem; color: var(--text-dim); margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.description)}</div>` : ''}
-          </td>
-          <td><span class="badge badge-type">${escapeHtml(item.type)}</span></td>
-          <td>
-            <div style="font-family: monospace; font-weight: 600; font-size: 0.82rem;">${escapeHtml(item.algorithm)}</div>
-            ${item.keySize ? `<div style="font-size: 0.7rem; color: var(--text-dim);">(${item.keySize}-bit)</div>` : ''}
-          </td>
-          <td>${threatBadge}</td>
-          <td style="word-break: break-word; color: #cbd5e1; font-size: 0.8rem; line-height: 1.45;">
-            <div>${escapeHtml(item.recommendation || 'Standard maintenance.')}</div>
-            <div style="margin-top: 0.45rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;">
-              ${remediationBtn}
-              ${complianceTags}
-            </div>
-          </td>
-        `;
-        tbody.appendChild(tr);
-      });
+          // Quantum Agility Status
+          let agilityHtml = '';
+          if (!item.isVulnerable) {
+            agilityHtml = `
+              <span class="badge badge-secure" style="display: block; text-align: center; margin-bottom: 0.3rem; font-size: 0.74rem;">🛡️ Post-Quantum Ready</span>
+              <div style="font-size: 0.7rem; color: #94a3b8; font-family: monospace; text-align: center; word-break: break-word;">${escapeHtml(item.algorithm || 'ML-KEM / Hybrid')}</div>
+            `;
+          } else {
+            agilityHtml = `
+              <span class="badge badge-critical" style="display: block; text-align: center; margin-bottom: 0.3rem; font-size: 0.74rem;">⚡ Classical Non-Agile</span>
+              <div style="font-size: 0.7rem; color: #fca5a5; font-family: monospace; text-align: center; word-break: break-word;">${escapeHtml(item.algorithm || 'Classical Legacy')}</div>
+            `;
+          }
+
+          // 1-Click Remediation & Action
+          let codeSnippetHtml = '';
+          if (item.codeSnippet) {
+            const escapedCode = encodeURIComponent(item.codeSnippet);
+            codeSnippetHtml = `
+              <div style="margin-top: 0.45rem; display: flex; align-items: center; gap: 0.35rem;">
+                <code style="background: rgba(0,0,0,0.6); padding: 0.22rem 0.5rem; border-radius: 4px; font-size: 0.72rem; color: var(--accent-cyan); font-family: monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 1px solid rgba(255,255,255,0.08);" title="${escapeHtml(item.codeSnippet)}">${escapeHtml(item.codeSnippet)}</code>
+                <button class="btn btn-secondary" onclick="copySnippet('${escapedCode}', this)" style="padding: 0.22rem 0.5rem; font-size: 0.72rem; white-space: nowrap;" title="Copy upgrade command">📋 Copy</button>
+              </div>
+            `;
+          }
+
+          let planBtnHtml = '';
+          if (item.remediationSteps && item.remediationSteps.length > 0) {
+            planBtnHtml = `
+              <div style="margin-top: 0.4rem;">
+                <button class="btn btn-secondary" onclick="openRemediationModal(${globalIdx})" style="padding: 0.22rem 0.6rem; font-size: 0.72rem; color: var(--accent-cyan); border-color: rgba(0, 242, 254, 0.35); display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap;">
+                  🛠️ View Fix Plan
+                </button>
+              </div>
+            `;
+          }
+
+          tr.innerHTML = `
+            <td style="word-break: break-word;">
+              <div style="display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap;">
+                <span style="font-weight: 700; font-size: 0.9rem; color: #fff;">${escapeHtml(item.name)}</span>
+                ${purlHtml}
+              </div>
+              <div style="font-family: monospace; font-size: 0.72rem; color: var(--accent-cyan); word-break: break-all; margin-top: 0.3rem;">
+                📂 ${escapeHtml(item.path || item.name)}
+              </div>
+              <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 0.25rem; line-height: 1.35;">
+                ${escapeHtml(item.description || '')}
+              </div>
+            </td>
+            <td>
+              <span class="badge" style="font-family: monospace; font-size: 0.8rem; font-weight: 700; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35);">${escapeHtml(verText)}</span>
+              <div style="margin-top: 0.35rem;">
+                <span class="badge badge-type" style="font-size: 0.68rem; text-transform: uppercase;">${escapeHtml(ecoText)}</span>
+              </div>
+            </td>
+            <td>${cveHtml}</td>
+            <td>${agilityHtml}</td>
+            <td style="word-break: break-word; color: #cbd5e1; font-size: 0.8rem; line-height: 1.45;">
+              <div>${escapeHtml(item.recommendation || 'Component is up to date.')}</div>
+              ${codeSnippetHtml}
+              ${planBtnHtml}
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } else {
+        // Standard CBOM Row Rendering
+        items.forEach((item, relativeIdx) => {
+          const globalIdx = currentFindings.indexOf(item);
+          const tr = document.createElement('tr');
+          
+          // Threat Vector Badging
+          let threatBadge = '';
+          const threatLower = (item.quantumThreat || '').toLowerCase();
+          const algoLower = (item.algorithm || '').toLowerCase();
+          const typeLower = (item.type || '').toLowerCase();
+
+          if (!item.isVulnerable) {
+            threatBadge = `<span class="badge badge-secure" style="display: block; text-align: center;">🛡️ Quantum Safe</span>`;
+          } else if (typeLower === 'package' || typeLower === 'sbom' || typeLower === 'library' || typeLower === 'dependency') {
+            threatBadge = `<span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); display: block; text-align: center;" title="${escapeHtml(item.quantumThreat || 'SBOM Vulnerability')}">📦 SBOM / CVE</span>`;
+          } else if (threatLower.includes('grover') || algoLower.includes('aes-128') || algoLower.includes('aes128') || algoLower.includes('3des')) {
+            threatBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); display: block; text-align: center;" title="Halved symmetric security to 64-bit under Grover search">⚡ Grover's 64-bit</span>`;
+          } else if (threatLower.includes('hndl') || threatLower.includes('harvest') || (item.name || '').includes('Schannel')) {
+            threatBadge = `<span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); display: block; text-align: center;" title="Data intercepted today can be decrypted retrospectively">📡 Active HNDL</span>`;
+          } else if (item.type === 'config') {
+            threatBadge = `<span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.4); display: block; text-align: center;" title="Configuration policy violation">⚠️ Config Policy</span>`;
+          } else {
+            threatBadge = `<span class="badge badge-critical" style="display: block; text-align: center;" title="Vulnerable to polynomial-time factorization via Shor's Algorithm">🚨 Shor's Risk</span>`;
+          }
+
+          let complianceTags = (item.complianceViolations || []).map(c => 
+            `<span class="badge badge-high" style="font-size: 0.65rem;">${escapeHtml(c)}</span>`
+          ).join(' ');
+
+          let remediationBtn = (item.remediationSteps && item.remediationSteps.length > 0) || item.codeSnippet
+            ? `<button class="btn btn-secondary" onclick="openRemediationModal(${globalIdx})" style="padding: 0.25rem 0.6rem; font-size: 0.72rem; color: var(--accent-cyan); border-color: rgba(0, 242, 254, 0.35); display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap;">
+                🛠️ View Remediation Plan
+              </button>`
+            : '';
+
+          tr.innerHTML = `
+            <td style="word-break: break-word;">
+              <div style="font-weight: 600; font-size: 0.86rem; color: #fff;">${escapeHtml(item.name)}</div>
+              <div style="font-family: monospace; font-size: 0.72rem; color: var(--accent-cyan); word-break: break-all; margin-top: 0.3rem;">
+                📂 ${escapeHtml(item.path || item.name)}
+              </div>
+              ${item.type === 'certificate' && item.description && item.description.includes('Subject:') ? 
+                `<div style="font-size: 0.70rem; color: var(--text-dim); margin-top: 0.25rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(item.description)}</div>` : ''}
+            </td>
+            <td><span class="badge badge-type">${escapeHtml(item.type)}</span></td>
+            <td>
+              <div style="font-family: monospace; font-weight: 600; font-size: 0.82rem;">${escapeHtml(item.algorithm)}</div>
+              ${item.keySize ? `<div style="font-size: 0.7rem; color: var(--text-dim);">(${item.keySize}-bit)</div>` : ''}
+            </td>
+            <td>${threatBadge}</td>
+            <td style="word-break: break-word; color: #cbd5e1; font-size: 0.8rem; line-height: 1.45;">
+              <div>${escapeHtml(item.recommendation || 'Standard maintenance.')}</div>
+              <div style="margin-top: 0.45rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center;">
+                ${remediationBtn}
+                ${complianceTags}
+              </div>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
     }
 
     function openRemediationModal(idx) {
       const item = currentFindings[idx];
       if (!item) return;
 
-      document.getElementById('rem-modal-title').textContent = `🛠️ Remediation: ${item.name}`;
+      const verTag = item.version ? ` v${item.version}` : '';
+      document.getElementById('rem-modal-title').textContent = `🛠️ Remediation: ${item.name}${verTag}`;
 
       let stepsHtml = '';
       if (item.remediationSteps && item.remediationSteps.length > 0) {
@@ -2323,28 +2679,35 @@
 
       let codeHtml = '';
       if (item.codeSnippet) {
+        const escapedCode = encodeURIComponent(item.codeSnippet);
         codeHtml = `
           <div style="margin-top: 1.1rem;">
-            <div style="font-weight: 600; color: #fff; margin-bottom: 0.4rem; font-size: 0.88rem;">Remediation & Verification Command:</div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+              <span style="font-weight: 600; color: #fff; font-size: 0.88rem;">Remediation & Verification Command:</span>
+              <button class="btn btn-secondary" onclick="copySnippet('${escapedCode}', this)" style="padding: 0.2rem 0.6rem; font-size: 0.74rem;">📋 Copy Command</button>
+            </div>
             <pre style="background: rgba(0,0,0,0.6); padding: 0.85rem; border-radius: 6px; font-size: 0.78rem; color: var(--accent-cyan); overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); font-family: monospace; white-space: pre-wrap;"><code>${escapeHtml(item.codeSnippet)}</code></pre>
           </div>
         `;
       }
 
-      const threatHeading = item.quantumThreat ? item.quantumThreat : "Quantum Vulnerability Assessment";
+      const threatHeading = item.cveId && item.cveId !== 'None'
+        ? `${item.cveId} (${item.riskLevel ? item.riskLevel.toUpperCase() : 'HIGH'}${item.cvss ? ' · CVSS ' + item.cvss : ''})`
+        : (item.quantumThreat ? item.quantumThreat : "Quantum Vulnerability Assessment");
 
       document.getElementById('rem-modal-body').innerHTML = `
         <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 0.9rem; margin-bottom: 1rem;">
           <div style="font-weight: 600; color: #f87171; font-size: 0.92rem; margin-bottom: 0.3rem;">
             Threat Assessment: ${escapeHtml(threatHeading)}
           </div>
+          ${item.cveDetails ? `<div style="font-size: 0.84rem; color: #fca5a5; margin-bottom: 0.4rem; font-weight: 600;">CVE Advisory: ${escapeHtml(item.cveDetails)}</div>` : ''}
           <div style="font-size: 0.82rem; color: #94a3b8; line-height: 1.45;">${escapeHtml(item.description || '')}</div>
           <div style="margin-top: 0.4rem; font-family: monospace; font-size: 0.75rem; color: var(--accent-cyan);">Location: ${escapeHtml(item.path || item.name)}</div>
           <div style="margin-top: 0.5rem; font-size: 0.8rem; color: #fca5a5;"><strong>Quantum Impact:</strong> ${escapeHtml(item.explainer || 'Breakable via cryptanalytically relevant quantum computers.')}</div>
         </div>
 
         <div style="background: rgba(0, 242, 254, 0.06); border: 1px solid rgba(0, 242, 254, 0.2); border-radius: 8px; padding: 0.9rem;">
-          <div style="font-weight: 600; color: var(--accent-cyan); font-size: 0.92rem; margin-bottom: 0.3rem;">NIST FIPS 203/204 Architectural Recommendation</div>
+          <div style="font-weight: 600; color: var(--accent-cyan); font-size: 0.92rem; margin-bottom: 0.3rem;">${item.type === 'package' ? 'Software Remediation & Post-Quantum Guidance' : 'NIST FIPS 203/204 Architectural Recommendation'}</div>
           <div style="font-size: 0.84rem; color: #e2e8f0; line-height: 1.5;">${escapeHtml(item.recommendation || '')}</div>
         </div>
 
@@ -2363,6 +2726,7 @@
 
     function setFilterTab(tab) {
       currentFilterTab = tab;
+      sbomSubFilter = 'all';
 
       // Update active state on tab buttons
       const tabBtns = document.querySelectorAll('.filter-tab');
@@ -2374,6 +2738,8 @@
         }
       });
 
+      const isSbomView = (currentFilterTab === 'sbom') || (currentScanMode === 'sbom' && currentFilterTab === 'all');
+      updateTableStructure(isSbomView);
       filterFindings();
     }
 
@@ -2387,6 +2753,9 @@
         const name = (f.name || '').toLowerCase();
         const desc = (f.description || '').toLowerCase();
         const expl = (f.explainer || '').toLowerCase();
+        const cve = (f.cveId || '').toLowerCase();
+        const version = (f.version || '').toLowerCase();
+        const eco = (f.ecosystem || '').toLowerCase();
 
         // 1. Filter Tab Match
         let tabMatch = true;
@@ -2408,15 +2777,35 @@
 
         if (!tabMatch) return false;
 
+        // 1b. SBOM Sub-filter from metric cards
+        if (currentScanMode === 'sbom' && sbomSubFilter !== 'all') {
+          if (sbomSubFilter === 'cve') {
+            if (!f.cveId || f.cveId === 'None' || f.cveId === 'none') return false;
+          } else if (sbomSubFilter === 'crithigh') {
+            const isCritHigh = (f.riskLevel === 'critical' || f.riskLevel === 'high') && f.cveId && f.cveId !== 'None';
+            if (!isCritHigh) return false;
+          } else if (sbomSubFilter === 'hndl') {
+            if (!(threat.includes('hndl') || threat.includes('harvest') || threat.includes('shor'))) return false;
+          } else if (sbomSubFilter === 'secure') {
+            if (f.isVulnerable) return false;
+          } else if (sbomSubFilter === 'remediation') {
+            if (!f.codeSnippet && (!f.remediationSteps || f.remediationSteps.length === 0)) return false;
+          }
+        }
+
         // 2. Search Query Match
         if (!q) return true;
         return (
           (f.name && f.name.toLowerCase().includes(q)) ||
           (f.path && f.path.toLowerCase().includes(q)) ||
+          (f.version && f.version.toLowerCase().includes(q)) ||
+          (f.cveId && f.cveId.toLowerCase().includes(q)) ||
+          (f.ecosystem && f.ecosystem.toLowerCase().includes(q)) ||
           (f.algorithm && f.algorithm.toLowerCase().includes(q)) ||
           (f.type && f.type.toLowerCase().includes(q)) ||
           (f.quantumThreat && f.quantumThreat.toLowerCase().includes(q)) ||
-          (f.recommendation && f.recommendation.toLowerCase().includes(q))
+          (f.recommendation && f.recommendation.toLowerCase().includes(q)) ||
+          (f.cveDetails && f.cveDetails.toLowerCase().includes(q))
         );
       });
 
@@ -2443,7 +2832,7 @@
     }
 
     function updateSortIcons() {
-      const cols = ['name', 'type', 'algorithm', 'threat', 'recommendation'];
+      const cols = ['name', 'type', 'algorithm', 'threat', 'recommendation', 'version', 'cve', 'agility'];
       cols.forEach(c => {
         const el = document.getElementById(`sort-icon-${c}`);
         if (!el) return;
@@ -2465,6 +2854,21 @@
         if (sortColumn === 'name') {
           valA = (a.name || a.path || '').toLowerCase();
           valB = (b.name || b.path || '').toLowerCase();
+        } else if (sortColumn === 'version') {
+          valA = (a.version || '').toLowerCase();
+          valB = (b.version || '').toLowerCase();
+        } else if (sortColumn === 'cve') {
+          valA = (a.cvss || (a.cveId && a.cveId !== 'None' ? 1 : 0));
+          valB = (b.cvss || (b.cveId && b.cveId !== 'None' ? 1 : 0));
+          if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+          if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+          return 0;
+        } else if (sortColumn === 'agility') {
+          valA = a.isVulnerable ? 1 : 0;
+          valB = b.isVulnerable ? 1 : 0;
+          if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+          if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+          return 0;
         } else if (sortColumn === 'type') {
           valA = (a.type || '').toLowerCase();
           valB = (b.type || '').toLowerCase();
@@ -2480,20 +2884,20 @@
         }
         if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
         if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
-        return 0;
       });
     }
 
-    // 4. CycloneDX CBOM Export
+    // 4. CycloneDX CBOM / SBOM Export
     async function exportCycloneDX() {
       try {
         const res = await fetch('/api/cbom');
-        if (!res.ok) throw new Error('Failed to generate CBOM');
+        if (!res.ok) throw new Error('Failed to generate CycloneDX BOM');
         const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `cyclonedx-cbom-${hostInfo.hostname || 'workstation'}.json`;
+        const isSbom = (currentFilterTab === 'sbom') || (currentScanMode === 'sbom');
+        a.download = isSbom ? `cyclonedx-sbom-${hostInfo.hostname || 'workstation'}.json` : `cyclonedx-cbom-${hostInfo.hostname || 'workstation'}.json`;
         document.body.appendChild(a);
         a.click();
         a.remove();
