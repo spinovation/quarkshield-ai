@@ -24,6 +24,7 @@ pqc-scanner
 pqc-scanner-*
 *.exe
 *.zip
+*.tar.gz
 *.dmg
 *.app/
 agent/scratch/

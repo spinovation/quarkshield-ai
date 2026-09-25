@@ -1,0 +1,15 @@
+[Unit]
+Description=QuarkShield Post-Quantum Guard Cryptographic Auditor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/quarkshield-scanner --server https://quarkshield.ai --poll --register --quick
+Restart=always
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

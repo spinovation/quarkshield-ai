@@ -160,6 +160,23 @@ echo "🐧 [3/4] Building Linux Agents (amd64, arm64)..."
 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-linux-amd64 .
 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o quarkshield-scanner-linux-arm64 .
 
+# Package Linux Release Tarball & Zip with 1-Click Installer
+echo "📦 Packaging quarkshield-scanner-linux.tar.gz and .zip..."
+LINUX_STAGE="/tmp/linux_stage_$$"
+rm -rf "$LINUX_STAGE" quarkshield-scanner-linux.tar.gz quarkshield-scanner-linux.zip
+mkdir -p "$LINUX_STAGE"
+cp -f quarkshield-scanner-linux-amd64 "$LINUX_STAGE/"
+cp -f quarkshield-scanner-linux-arm64 "$LINUX_STAGE/"
+cp -f install-linux.sh "$LINUX_STAGE/install.sh"
+cp -f uninstall-linux.sh "$LINUX_STAGE/uninstall.sh"
+cp -f quarkshield.service "$LINUX_STAGE/"
+cp -f web/app_icon.png "$LINUX_STAGE/app_icon.png" 2>/dev/null || true
+cp -f README-linux.txt "$LINUX_STAGE/README.txt"
+chmod +x "$LINUX_STAGE/install.sh" "$LINUX_STAGE/uninstall.sh" "$LINUX_STAGE/quarkshield-scanner-linux-amd64" "$LINUX_STAGE/quarkshield-scanner-linux-arm64"
+tar -czf "$AGENT_DIR/quarkshield-scanner-linux.tar.gz" -C "$LINUX_STAGE" .
+(cd "$LINUX_STAGE" && zip -9 -r "$AGENT_DIR/quarkshield-scanner-linux.zip" .)
+rm -rf "$LINUX_STAGE"
+
 # ------------------------------------------------------------------------------
 # 4. SYNCHRONIZE ALL ARTIFACTS ACROSS DOWNLOAD DIRECTORIES
 # ------------------------------------------------------------------------------
@@ -180,6 +197,12 @@ cp -f FedMitigate-Root-CA.cer binaries/
 cp -f FedMitigate-LLC-CodeSigning.cer binaries/
 cp -f quarkshield-scanner-linux-amd64 binaries/
 cp -f quarkshield-scanner-linux-arm64 binaries/
+cp -f quarkshield-scanner-linux.tar.gz binaries/
+cp -f quarkshield-scanner-linux.zip binaries/
+cp -f install-linux.sh binaries/
+cp -f uninstall-linux.sh binaries/
+cp -f quarkshield.service binaries/
+cp -f README-linux.txt binaries/
 
 # Aliases for backwards compatibility
 cp -f quarkshield-scanner-darwin-arm64 binaries/pqc-scanner-darwin-arm64
@@ -189,6 +212,8 @@ cp -f quarkshield-scanner-windows-amd64.exe binaries/pqc-scanner-windows-amd64.e
 cp -f quarkshield-scanner-windows.zip binaries/pqc-scanner-windows.zip
 cp -f quarkshield-scanner-linux-amd64 binaries/pqc-scanner-linux-amd64
 cp -f quarkshield-scanner-linux-arm64 binaries/pqc-scanner-linux-arm64
+cp -f quarkshield-scanner-linux.tar.gz binaries/pqc-scanner-linux.tar.gz
+cp -f quarkshield-scanner-linux.zip binaries/pqc-scanner-linux.zip
 cp -f quarkshield-scanner-linux-amd64 binaries/pqc-scanner
 
 for DL_DIR in "$SCRIPT_DIR/ui/public/downloads" "$SCRIPT_DIR/ui/dist/downloads" "$SCRIPT_DIR/public/downloads"; do
@@ -208,6 +233,12 @@ for DL_DIR in "$SCRIPT_DIR/ui/public/downloads" "$SCRIPT_DIR/ui/dist/downloads" 
     cp -f FedMitigate-LLC-CodeSigning.cer "$DL_DIR/"
     cp -f quarkshield-scanner-linux-amd64 "$DL_DIR/"
     cp -f quarkshield-scanner-linux-arm64 "$DL_DIR/"
+    cp -f quarkshield-scanner-linux.tar.gz "$DL_DIR/"
+    cp -f quarkshield-scanner-linux.zip "$DL_DIR/"
+    cp -f install-linux.sh "$DL_DIR/"
+    cp -f uninstall-linux.sh "$DL_DIR/"
+    cp -f quarkshield.service "$DL_DIR/"
+    cp -f README-linux.txt "$DL_DIR/"
     cp -f quarkshield-scanner-darwin-arm64 "$DL_DIR/pqc-scanner-darwin-arm64"
     cp -f quarkshield-scanner-darwin-amd64 "$DL_DIR/pqc-scanner-darwin-amd64"
     cp -f quarkshield-scanner-macos.zip "$DL_DIR/pqc-scanner-macos.zip"
@@ -215,6 +246,8 @@ for DL_DIR in "$SCRIPT_DIR/ui/public/downloads" "$SCRIPT_DIR/ui/dist/downloads" 
     cp -f quarkshield-scanner-windows.zip "$DL_DIR/pqc-scanner-windows.zip"
     cp -f quarkshield-scanner-linux-amd64 "$DL_DIR/pqc-scanner-linux-amd64"
     cp -f quarkshield-scanner-linux-arm64 "$DL_DIR/pqc-scanner-linux-arm64"
+    cp -f quarkshield-scanner-linux.tar.gz "$DL_DIR/pqc-scanner-linux.tar.gz"
+    cp -f quarkshield-scanner-linux.zip "$DL_DIR/pqc-scanner-linux.zip"
   fi
 done
 

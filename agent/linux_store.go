@@ -39,12 +39,21 @@ func AuditLinuxCertStore() []AuditResult {
 	certDirs := []string{
 		"/etc/ssl/certs",
 		"/etc/pki/tls/certs",
+		"/etc/pki/ca-trust/source/anchors",
 		"/usr/local/share/ca-certificates",
+		"/etc/letsencrypt/live",
+		"/etc/nginx/ssl",
+		"/etc/nginx/certs",
+		"/etc/apache2/ssl",
+		"/etc/httpd/conf.d",
+		"/etc/kubernetes/pki",
+		"/var/lib/kubelet/pki",
+		"/etc/docker/certs.d",
 	}
 
 	// 1. Process CA Bundle files
 	for _, bundlePath := range bundlePaths {
-		if len(results) >= 60 {
+		if len(results) >= 120 {
 			break
 		}
 
@@ -55,7 +64,7 @@ func AuditLinuxCertStore() []AuditResult {
 
 		rest := data
 		for len(rest) > 0 {
-			if len(results) >= 60 {
+			if len(results) >= 120 {
 				break
 			}
 
@@ -78,7 +87,7 @@ func AuditLinuxCertStore() []AuditResult {
 
 	// 2. Process individual certificate files in cert directories
 	for _, dir := range certDirs {
-		if len(results) >= 60 {
+		if len(results) >= 120 {
 			break
 		}
 
@@ -88,7 +97,7 @@ func AuditLinuxCertStore() []AuditResult {
 		}
 
 		for _, entry := range entries {
-			if len(results) >= 60 {
+			if len(results) >= 120 {
 				break
 			}
 
@@ -311,6 +320,135 @@ func AuditLinuxTLSConfig() []AuditResult {
 						CodeSnippet:          "KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256@libssh.org\nCiphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com",
 						Explainer:            "Classical Diffie-Hellman and legacy ciphers enable immediate Harvest-Now-Decrypt-Later decryption when quantum computing emerges.",
 						ComplianceViolations: []string{"CNSA 2.0", "NIST SP 800-52r2", "PCI-DSS 4.0"},
+					})
+				}
+			}
+		}
+	}
+
+	// 3. Audit OpenSSL system configuration (/etc/ssl/openssl.cnf, /etc/pki/tls/openssl.cnf)
+	opensslCnfPaths := []string{"/etc/ssl/openssl.cnf", "/etc/pki/tls/openssl.cnf"}
+	for _, cnfPath := range opensslCnfPaths {
+		if cnfData, err := os.ReadFile(cnfPath); err == nil {
+			lines := strings.Split(string(cnfData), "\n")
+			for lineNum, line := range lines {
+				trimmed := strings.TrimSpace(line)
+				if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+					continue
+				}
+				lower := strings.ToLower(trimmed)
+				if strings.Contains(lower, "seclevel=1") || strings.Contains(lower, "seclevel=0") {
+					results = append(results, AuditResult{
+						ID:                   fmt.Sprintf("lin-openssl-seclevel-%d", lineNum+1),
+						Type:                 "config",
+						Name:                 "Linux OpenSSL Config: Weak SECLEVEL",
+						Path:                 cnfPath,
+						Algorithm:            "OpenSSL Security Level",
+						QuantumThreat:        "Harvest Now, Decrypt Later (HNDL) & Weak Cryptography",
+						IsVulnerable:         true,
+						RiskLevel:            "high",
+						Status:               "Quantum Vulnerable",
+						Description:          fmt.Sprintf("System OpenSSL configuration (%s:%d) configures weak security level: '%s'", cnfPath, lineNum+1, trimmed),
+						Recommendation:       "Set CipherString to 'DEFAULT@SECLEVEL=2' or higher (preferably SECLEVEL=3) and enforce TLS 1.3.",
+						RemediationSteps: []string{
+							fmt.Sprintf("Edit %s: update CipherString to use SECLEVEL=2 or SECLEVEL=3", cnfPath),
+							"Enforce TLS 1.3 minimum protocol: MinProtocol = TLSv1.3",
+						},
+						CodeSnippet:          "CipherString = DEFAULT@SECLEVEL=2\nMinProtocol = TLSv1.3",
+						Explainer:            "OpenSSL SECLEVEL 0 and 1 allow 80-bit and 112-bit security levels (1024-bit RSA and weak SHA-1/3DES).",
+						ComplianceViolations: []string{"CNSA 2.0", "NIST SP 800-52r2"},
+					})
+				}
+				if strings.Contains(lower, "minprotocol = tlsv1.0") || strings.Contains(lower, "minprotocol = tlsv1.1") {
+					results = append(results, AuditResult{
+						ID:                   fmt.Sprintf("lin-openssl-minproto-%d", lineNum+1),
+						Type:                 "config",
+						Name:                 "Linux OpenSSL Config: Deprecated TLS Protocol",
+						Path:                 cnfPath,
+						Algorithm:            "Legacy TLS Protocol (TLS 1.0/1.1)",
+						QuantumThreat:        "Harvest Now, Decrypt Later (HNDL)",
+						IsVulnerable:         true,
+						RiskLevel:            "critical",
+						Status:               "Quantum Vulnerable",
+						Description:          fmt.Sprintf("System OpenSSL configuration (%s:%d) permits deprecated TLS version: '%s'", cnfPath, lineNum+1, trimmed),
+						Recommendation:       "Update MinProtocol to TLSv1.3 in system OpenSSL configuration.",
+						RemediationSteps: []string{
+							fmt.Sprintf("Edit %s: set MinProtocol = TLSv1.3", cnfPath),
+						},
+						CodeSnippet:          "MinProtocol = TLSv1.3",
+						Explainer:            "Protocols below TLS 1.2 lack post-quantum forward secrecy and are vulnerable to retrospective decryption.",
+						ComplianceViolations: []string{"CNSA 2.0", "NIST SP 800-52r2", "PCI-DSS 4.0"},
+					})
+				}
+			}
+			break
+		}
+	}
+
+	// 4. Audit /etc/ssh/ssh_config (Outbound Client SSH Connections)
+	sshClientPath := "/etc/ssh/ssh_config"
+	if sshClientData, err := os.ReadFile(sshClientPath); err == nil {
+		lines := strings.Split(string(sshClientData), "\n")
+		for lineNum, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "KexAlgorithms") || strings.HasPrefix(trimmed, "Ciphers") {
+				lower := strings.ToLower(trimmed)
+				if strings.Contains(lower, "diffie-hellman-group1") || strings.Contains(lower, "3des") || strings.Contains(lower, "arcfour") {
+					results = append(results, AuditResult{
+						ID:                   fmt.Sprintf("lin-ssh-client-cfg-%d", lineNum+1),
+						Type:                 "config",
+						Name:                 "Linux SSH Client Config: Legacy Outbound Ciphers",
+						Path:                 sshClientPath,
+						Algorithm:            "Legacy SSH Cipher/KEX",
+						QuantumThreat:        "Harvest Now, Decrypt Later (HNDL)",
+						IsVulnerable:         true,
+						RiskLevel:            "high",
+						Status:               "Quantum Vulnerable",
+						Description:          fmt.Sprintf("Linux SSH client config (%s:%d) permits outbound connection via deprecated cipher/KEX: '%s'", sshClientPath, lineNum+1, trimmed),
+						Recommendation:       "Update client SSH configuration to prefer hybrid post-quantum key exchange (sntrup761x25519-sha512@openssh.com or mlkem768x25519-sha512).",
+						RemediationSteps: []string{
+							fmt.Sprintf("Edit %s: remove legacy algorithms from '%s'", sshClientPath, strings.Fields(trimmed)[0]),
+							"Add post-quantum hybrid KEX: KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256",
+						},
+						CodeSnippet:          "KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256@libssh.org",
+						Explainer:            "Outbound SSH connections using classical Diffie-Hellman can be intercepted and recorded for retrospective decryption.",
+						ComplianceViolations: []string{"CNSA 2.0", "NIST SP 800-52r2"},
+					})
+				}
+			}
+		}
+	}
+
+	// 5. Audit Kernel Crypto Modules (/proc/crypto) for active legacy algorithms
+	if procCryptoData, err := os.ReadFile("/proc/crypto"); err == nil {
+		text := string(procCryptoData)
+		legacyDrivers := []string{"des3_ede", "des", "arc4", "blowfish", "cast5"}
+		seenDrivers := make(map[string]bool)
+		for _, driver := range legacyDrivers {
+			if strings.Contains(text, "driver       : "+driver) || strings.Contains(text, "name         : "+driver) {
+				if !seenDrivers[driver] {
+					seenDrivers[driver] = true
+					results = append(results, AuditResult{
+						ID:                   fmt.Sprintf("lin-kernel-crypto-%s", driver),
+						Type:                 "config",
+						Name:                 fmt.Sprintf("Linux Kernel Registered Crypto Driver: %s", driver),
+						Path:                 "/proc/crypto",
+						Algorithm:            fmt.Sprintf("Legacy Kernel Cipher (%s)", driver),
+						QuantumThreat:        "Grover's Algorithm (Key Halving)",
+						IsVulnerable:         true,
+						RiskLevel:            "medium",
+						Status:               "Quantum Vulnerable",
+						Description:          fmt.Sprintf("Linux kernel has registered deprecated cryptographic driver '%s', vulnerable to symmetric key search and halving.", driver),
+						Recommendation:       fmt.Sprintf("Blacklist kernel module for %s if not required by legacy hardware.", driver),
+						RemediationSteps: []string{
+							fmt.Sprintf("Create blacklist file: echo 'blacklist %s' | sudo tee /etc/modprobe.d/blacklist-legacy-crypto.conf", driver),
+						},
+						CodeSnippet:          fmt.Sprintf("echo 'blacklist %s' | sudo tee -a /etc/modprobe.d/blacklist-legacy-crypto.conf", driver),
+						Explainer:            fmt.Sprintf("Kernel cipher %s provides short block or key sizes that are easily broken by classical attacks or Grover's algorithm.", driver),
+						ComplianceViolations: []string{"CNSA 2.0", "FIPS 140-3"},
 					})
 				}
 			}

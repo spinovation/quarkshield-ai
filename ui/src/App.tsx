@@ -3378,14 +3378,38 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                   </a>
 
                   <a
+                    href="/downloads/quarkshield-scanner-linux.tar.gz"
+                    className="glass-panel"
+                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(0, 242, 254, 0.35)', background: 'rgba(0, 242, 254, 0.06)' }}
+                  >
+                    <Server size={22} color="var(--accent-cyan)" />
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--accent-cyan)' }}>Linux Bundle (.tar.gz)</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Installer + Systemd Service + Binaries</div>
+                    </div>
+                  </a>
+
+                  <a
                     href="/downloads/quarkshield-scanner-linux-amd64"
                     className="glass-panel"
                     style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(255,255,255,0.06)' }}
                   >
                     <Server size={22} color="var(--accent-cyan)" />
                     <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Linux (Ubuntu/RHEL)</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>linux-amd64 binary</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Linux x86_64</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Ubuntu/Debian/RHEL (amd64)</div>
+                    </div>
+                  </a>
+
+                  <a
+                    href="/downloads/quarkshield-scanner-linux-arm64"
+                    className="glass-panel"
+                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(255,255,255,0.06)' }}
+                  >
+                    <Server size={22} color="var(--text-secondary)" />
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Linux ARM64</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>AWS Graviton / Ampere (aarch64)</div>
                     </div>
                   </a>
                 </div>

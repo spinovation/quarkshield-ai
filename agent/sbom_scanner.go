@@ -547,7 +547,10 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 			}
 		}
 	} else if runtime.GOOS == "linux" {
-		// Audit dpkg or rpm packages
+		reportProgress("Auditing Linux system package manager manifests...")
+		seenPkgs := make(map[string]bool)
+
+		// 1. Audit dpkg (Debian / Ubuntu / Mint)
 		dpkgBin, err := exec.LookPath("dpkg-query")
 		if err == nil && dpkgBin != "" {
 			reportProgress("Auditing Debian/Ubuntu packages (dpkg-query)...")
@@ -559,10 +562,102 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 					if len(parts) >= 2 {
 						pkgName := parts[0]
 						pkgVer := parts[1]
-						if isRelevantCryptoPkg(pkgName) {
-							results = append(results, createPkgAuditResult(pkgName, pkgVer, "dpkg (Linux)", "/var/lib/dpkg/info/"+pkgName))
+						if isRelevantCryptoPkg(pkgName) && !seenPkgs[pkgName] {
+							seenPkgs[pkgName] = true
+							results = append(results, createPkgAuditResult(pkgName, pkgVer, "dpkg (Debian/Ubuntu)", "/var/lib/dpkg/info/"+pkgName))
 						}
 					}
+				}
+			}
+		}
+
+		// 2. Audit rpm (RHEL / CentOS / Fedora / Rocky / Alma / Amazon Linux / SUSE)
+		rpmBin, err := exec.LookPath("rpm")
+		if err == nil && rpmBin != "" {
+			reportProgress("Auditing RedHat/CentOS/Fedora RPM packages (rpm -qa)...")
+			out, err := exec.Command(rpmBin, "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n").CombinedOutput()
+			if err == nil {
+				scanner := bufio.NewScanner(strings.NewReader(string(out)))
+				for scanner.Scan() {
+					parts := strings.Fields(scanner.Text())
+					if len(parts) >= 2 {
+						pkgName := parts[0]
+						pkgVer := parts[1]
+						if isRelevantCryptoPkg(pkgName) && !seenPkgs[pkgName] {
+							seenPkgs[pkgName] = true
+							results = append(results, createPkgAuditResult(pkgName, pkgVer, "RPM (RHEL/Fedora)", "/var/lib/rpm"))
+						}
+					}
+				}
+			}
+		}
+
+		// 3. Audit apk (Alpine Linux)
+		apkBin, err := exec.LookPath("apk")
+		if err == nil && apkBin != "" {
+			reportProgress("Auditing Alpine Linux packages (apk info -v)...")
+			out, err := exec.Command(apkBin, "info", "-v").CombinedOutput()
+			if err == nil {
+				scanner := bufio.NewScanner(strings.NewReader(string(out)))
+				for scanner.Scan() {
+					line := strings.TrimSpace(scanner.Text())
+					lastDash := strings.LastIndex(line, "-")
+					if lastDash > 0 {
+						secondLastDash := strings.LastIndex(line[:lastDash], "-")
+						if secondLastDash > 0 {
+							pkgName := line[:secondLastDash]
+							pkgVer := line[secondLastDash+1:]
+							if isRelevantCryptoPkg(pkgName) && !seenPkgs[pkgName] {
+								seenPkgs[pkgName] = true
+								results = append(results, createPkgAuditResult(pkgName, pkgVer, "apk (Alpine)", "/etc/apk"))
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// 4. Audit pacman (Arch Linux / Manjaro)
+		pacmanBin, err := exec.LookPath("pacman")
+		if err == nil && pacmanBin != "" {
+			reportProgress("Auditing Arch Linux packages (pacman -Q)...")
+			out, err := exec.Command(pacmanBin, "-Q").CombinedOutput()
+			if err == nil {
+				scanner := bufio.NewScanner(strings.NewReader(string(out)))
+				for scanner.Scan() {
+					parts := strings.Fields(scanner.Text())
+					if len(parts) >= 2 {
+						pkgName := parts[0]
+						pkgVer := parts[1]
+						if isRelevantCryptoPkg(pkgName) && !seenPkgs[pkgName] {
+							seenPkgs[pkgName] = true
+							results = append(results, createPkgAuditResult(pkgName, pkgVer, "pacman (Arch)", "/var/lib/pacman"))
+						}
+					}
+				}
+			}
+		}
+
+		// 5. Audit Common Linux Security Software Binaries
+		linuxSecurityBins := []string{
+			"/usr/bin/gpg",
+			"/usr/bin/gpg2",
+			"/usr/sbin/openvpn",
+			"/usr/bin/openvpn",
+			"/usr/bin/wg",
+			"/usr/sbin/swanctl",
+			"/usr/sbin/ipsec",
+			"/usr/bin/certbot",
+			"/usr/bin/node",
+			"/usr/bin/go",
+			"/usr/bin/docker",
+		}
+		for _, binPath := range linuxSecurityBins {
+			if fi, err := os.Stat(binPath); err == nil && !fi.IsDir() {
+				name := filepath.Base(binPath)
+				if !seenPkgs[name] {
+					seenPkgs[name] = true
+					results = append(results, createPkgAuditResult(name, "Installed", "Linux Binary", binPath))
 				}
 			}
 		}

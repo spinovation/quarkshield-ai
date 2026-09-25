@@ -120,6 +120,23 @@ func RunScanWithProgress(ctx context.Context, quick bool, customPath string, onP
 			targetPaths = append(targetPaths, "/etc/ssh")
 			targetPaths = append(targetPaths, "/etc/wireguard")
 		}
+		if osName == "linux" {
+			targetPaths = append(targetPaths, "/etc/pki/tls/certs")
+			targetPaths = append(targetPaths, "/etc/pki/ca-trust/extracted/pem")
+			targetPaths = append(targetPaths, "/etc/pki/ca-trust/source/anchors")
+			targetPaths = append(targetPaths, "/etc/openvpn")
+			targetPaths = append(targetPaths, "/etc/ipsec.d")
+			targetPaths = append(targetPaths, "/etc/strongswan")
+			targetPaths = append(targetPaths, "/etc/nginx/ssl")
+			targetPaths = append(targetPaths, "/etc/nginx/certs")
+			targetPaths = append(targetPaths, "/etc/apache2/ssl")
+			targetPaths = append(targetPaths, "/etc/httpd/conf.d")
+			targetPaths = append(targetPaths, "/etc/letsencrypt/live")
+			targetPaths = append(targetPaths, "/etc/kubernetes/pki")
+			targetPaths = append(targetPaths, "/var/lib/kubelet/pki")
+			targetPaths = append(targetPaths, "/etc/docker/certs.d")
+			targetPaths = append(targetPaths, "/etc/crypto-policies")
+		}
 		if osName == "windows" {
 			if homeDir != "" {
 				oneDrive := filepath.Join(homeDir, "OneDrive")
