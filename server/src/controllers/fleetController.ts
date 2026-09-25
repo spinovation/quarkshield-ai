@@ -6,9 +6,26 @@ import crypto from 'crypto';
 // 1. FLEET TOKENS
 // ==========================================
 
+export const getEffectiveTenant = (req: Request): string | null => {
+  if (req.query.tenant && typeof req.query.tenant === 'string' && req.query.tenant !== 'all') {
+    return req.query.tenant.toLowerCase().trim();
+  }
+  const headerTenant = req.headers['x-tenant-id'] || req.headers['x-tenant-slug'];
+  if (headerTenant && typeof headerTenant === 'string' && headerTenant !== 'all') {
+    return headerTenant.toLowerCase().trim();
+  }
+  const host = (req.headers.host || '').toLowerCase().split(':')[0];
+  if (host.includes('.quarkshield.ai') && !host.startsWith('www.') && !host.startsWith('scanner.') && host !== 'quarkshield.ai') {
+    const sub = host.split('.')[0];
+    if (sub && sub !== 'api') return sub;
+  }
+  return null;
+};
+
 export const getFleetTokens = async (req: Request, res: Response) => {
   try {
-    const query = `
+    const tenant = getEffectiveTenant(req);
+    let query = `
       SELECT 
         t.id, 
         t.name, 
@@ -19,10 +36,17 @@ export const getFleetTokens = async (req: Request, res: Response) => {
         COUNT(m.id)::int as "machineCount"
       FROM fleet_tokens t
       LEFT JOIN fleet_machines m ON m.token_id = t.id
+    `;
+    const params: any[] = [];
+    if (tenant) {
+      params.push(`%${tenant}%`);
+      query += ` WHERE (LOWER(COALESCE(t.tenant_name, '')) LIKE LOWER($1) OR LOWER(t.name) LIKE LOWER($1))`;
+    }
+    query += `
       GROUP BY t.id, t.name, t.token, t.status, t.last_sync, t.created_at
       ORDER BY t.created_at DESC;
     `;
-    const result = await pool.query(query);
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err: any) {
     console.error('Error fetching fleet tokens:', err);
@@ -44,16 +68,32 @@ export const createFleetToken = async (req: Request, res: Response) => {
     let assignedLicense = (licenseKey || '').trim();
 
     if (!assignedTenant) {
-      if (name.toLowerCase().includes('spinovation') || name.toLowerCase() === 'engg') {
+      const effective = getEffectiveTenant(req);
+      if (effective) {
+        assignedTenant = effective.toUpperCase();
+      } else if (name.toLowerCase().includes('spinovation') || name.toLowerCase() === 'engg') {
         assignedTenant = 'SPINOVATIONCORP';
       } else {
-        assignedTenant = 'SPINOVATIONCORP';
+        assignedTenant = name.trim().toUpperCase();
       }
     }
 
     if (!assignedLicense) {
-      if (assignedTenant === 'SPINOVATIONCORP') {
-        assignedLicense = 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8';
+      try {
+        const licRes = await pool.query(
+          "SELECT license_key FROM admin_licenses WHERE LOWER(tenant_name) = LOWER($1) AND status = 'active' ORDER BY created_at DESC LIMIT 1",
+          [assignedTenant]
+        );
+        if (licRes.rowCount && licRes.rows[0].license_key) {
+          assignedLicense = licRes.rows[0].license_key;
+        }
+      } catch (e) {
+        // ignore
+      }
+      if (!assignedLicense) {
+        assignedLicense = assignedTenant === 'SPINOVATIONCORP'
+          ? 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'
+          : `QS-TENANT-${assignedTenant.toUpperCase()}-ACTIVE`;
       }
     }
 
@@ -93,7 +133,8 @@ export const revokeFleetToken = async (req: Request, res: Response) => {
 
 export const getFleetMachines = async (req: Request, res: Response) => {
   try {
-    const query = `
+    const tenant = getEffectiveTenant(req);
+    let query = `
       SELECT 
         m.id,
         m.hostname,
@@ -114,9 +155,14 @@ export const getFleetMachines = async (req: Request, res: Response) => {
         COALESCE(NULLIF(m.license_key, ''), NULLIF(t.license_key, ''), 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8') as "licenseKey"
       FROM fleet_machines m
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
-      ORDER BY m.last_seen DESC;
     `;
-    const result = await pool.query(query);
+    const params: any[] = [];
+    if (tenant) {
+      params.push(`%${tenant}%`);
+      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) LIKE LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) LIKE LOWER($1) OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))`;
+    }
+    query += ` ORDER BY m.last_seen DESC;`;
+    const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err: any) {
     console.error('Error fetching fleet machines:', err);
@@ -145,7 +191,8 @@ export const deleteFleetMachine = async (req: Request, res: Response) => {
 
 export const getFleetCBOM = async (req: Request, res: Response) => {
   try {
-    const { machine_id, tenant, attestation, cdxa, source } = req.query;
+    const effectiveTenant = (req.query.tenant && req.query.tenant !== 'all') ? String(req.query.tenant) : getEffectiveTenant(req);
+    const { machine_id, attestation, cdxa, source } = req.query;
     const isAttested = attestation === 'true' || cdxa === 'true';
     let query = `
       SELECT 
@@ -169,8 +216,8 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
       conditions.push(`(a.machine_id = $${values.length} OR m.hostname = $${values.length})`);
     }
 
-    if (tenant && tenant !== 'all') {
-      values.push(`%${tenant}%`);
+    if (effectiveTenant) {
+      values.push(`%${effectiveTenant}%`);
       conditions.push(`(COALESCE(a.tenant_name, m.tenant_name, '') ILIKE $${values.length} OR t.name ILIKE $${values.length})`);
     }
 
@@ -192,7 +239,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
     const vulnerableAssets = rows.filter(r => r.is_vulnerable).length;
     const pqcReadyAssets = totalAssets - vulnerableAssets;
     const conformanceScore = totalAssets > 0 ? parseFloat((pqcReadyAssets / totalAssets).toFixed(2)) : 1.0;
-    const requestedTenant = tenant && tenant !== 'all' ? String(tenant).toUpperCase() : null;
+    const requestedTenant = effectiveTenant && effectiveTenant !== 'all' ? String(effectiveTenant).toUpperCase() : null;
     const tenantName = requestedTenant || (rows.length > 0 && rows[0].tenantName ? rows[0].tenantName : 'Enterprise Fleet');
     const timestamp = new Date().toISOString();
     const serialNumber = `urn:uuid:${crypto.randomUUID()}`;
@@ -617,8 +664,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     }
     const safeAssets = Array.isArray(assets) ? assets : [];
 
-    const assignedTenant = tokenRow.tenant_name || req.body.tenant_name || (tokenRow.name?.toLowerCase().includes('spinovation') || tokenRow.name?.toLowerCase() === 'engg' ? 'SPINOVATIONCORP' : 'SPINOVATIONCORP');
-    const assignedLicense = tokenRow.license_key || req.body.license_key || 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8';
+    const assignedTenant = tokenRow.tenant_name || req.body.tenant_name || (tokenRow.name?.toLowerCase().includes('spinovation') || tokenRow.name?.toLowerCase() === 'engg' ? 'SPINOVATIONCORP' : (tokenRow.name || 'DEFAULT_FLEET'));
+    const assignedLicense = tokenRow.license_key || req.body.license_key || 'QS-STANDARD-ACTIVE';
 
     const cleanHwUUID = (hardware_uuid || '').trim();
     const cleanHost = (hostname || '').trim();

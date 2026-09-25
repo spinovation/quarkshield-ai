@@ -336,32 +336,6 @@ export const deleteClient = async (req: Request, res: Response) => {
 
 export const getUsers = async (req: Request, res: Response) => {
   try {
-    // Automatically synchronize client administrators from admin_clients into admin_users
-    try {
-      await pool.query(`
-        INSERT INTO admin_users (id, email, role, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, row_locked, company, last_login, created_at)
-        SELECT 
-          'usr-' || SUBSTRING(MD5(c.admin_email), 1, 16), 
-          c.admin_email, 
-          'admin', 
-          true, 
-          true, 
-          true, 
-          false, 
-          false, 
-          COALESCE(c.display_name, c.name), 
-          NOW(), 
-          c.created_at
-        FROM admin_clients c
-        WHERE c.admin_email IS NOT NULL AND c.admin_email != ''
-        ON CONFLICT (email) DO UPDATE SET 
-          company = EXCLUDED.company,
-          cmdb_enabled = true;
-      `);
-    } catch (syncErr: any) {
-      console.warn('Syncing admin_clients to admin_users notice:', syncErr.message);
-    }
-
     const result = await pool.query(`
       SELECT 
         id, 
@@ -1802,17 +1776,6 @@ export const createTenantUser = async (req: Request, res: Response) => {
       ON CONFLICT (tenant_name, email) DO UPDATE SET role = $6, first_name = $4, last_name = $5, password_hash = $7, salt = $8, must_change_password = true
     `, [id, cleanTenant, cleanEmail, firstName || '', lastName || '', role, passwordHash, salt]);
 
-    // Ensure synchronized record exists in admin_users so unifiedLogin finds them
-    try {
-      await pool.query(`
-        INSERT INTO admin_users (id, email, password_hash, salt, role, email_verified, must_change_password, company)
-        VALUES ($1, $2, $3, $4, 'user', true, true, $5)
-        ON CONFLICT (email) DO UPDATE SET password_hash = $3, salt = $4, must_change_password = true
-      `, [id, cleanEmail, passwordHash, salt, cleanTenant.toUpperCase()]);
-    } catch (auErr) {
-      console.warn('Syncing tenant user to admin_users notice:', auErr);
-    }
-
     const loginUrl = `https://${cleanTenant}.quarkshield.ai`;
     const emailSubject = `Your QuarkShield Workspace Access Credentials (${cleanTenant})`;
     const htmlBody = `
@@ -2218,17 +2181,6 @@ export const onboardUser = async (req: Request, res: Response) => {
         salt = COALESCE(tenant_users.salt, $8)
     `, [userId, cleanTenant, adminEmail.toLowerCase().trim(), (contactName || 'Admin').split(' ')[0], (contactName || 'User').split(' ').slice(1).join(' ') || 'User', customerId, passwordHash, salt]);
 
-    // Ensure user exists in admin_users so they appear across both Tenant & User registries
-    await pool.query(`
-      INSERT INTO admin_users (id, email, role, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, row_locked, company, last_login, password_hash, salt)
-      VALUES ($1, $2, 'admin', true, true, true, false, false, $3, NOW(), $4, $5)
-      ON CONFLICT (email) DO UPDATE SET 
-        company = $3, 
-        role = 'admin',
-        password_hash = COALESCE(admin_users.password_hash, $4),
-        salt = COALESCE(admin_users.salt, $5)
-    `, ['usr-' + crypto.randomUUID().substring(0, 8), adminEmail.toLowerCase().trim(), orgName, passwordHash, salt]);
-
     // Automated Onboarding Confirmation Email Dispatch via License@Quarkshield.ai
     const emailSubject = `Welcome to QuarkShield PQC [${orgName}] - Customer ID: ${customerId}`;
     const plainTextBody = `Hello ${contactName || 'Valued Partner'},
@@ -2616,7 +2568,8 @@ export const unifiedLogin = async (req: Request, res: Response) => {
           }
         }
 
-        const isSuperOrOperator = ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor', 'admin'].includes(u.role) || cleanId.includes('@quarkshield.ai') || cleanId === 'sridhargs@gmail.com';
+        const isSuperOrOperator = (cleanId.includes('@quarkshield.ai') || cleanId === 'sridhargs@gmail.com' || cleanId === 'superadmin') && 
+          ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor'].includes(u.role);
 
         if (isSuperOrOperator) {
           const adminId = u.id ? ('QS-' + u.id.replace(/^usr-/, '').replace(/^op-/, '').toUpperCase()) : 'QS-ADMIN-001';
@@ -2665,19 +2618,33 @@ export const unifiedLogin = async (req: Request, res: Response) => {
         }
 
         const isPartner = tu.account_type === 'partner' || tu.subscription_tier === 'partner';
-        const customerId = tu.customer_id || (isPartner ? 'PART-9148' : 'CORP-4821');
+        const customerId = tu.customer_id || (isPartner ? 'PART-4421' : 'CORP-4821');
         const customerName = (tu.display_name || tu.tenant_name || (isPartner ? 'MSP PARTNER' : 'CORPORATE CLIENT')).toUpperCase();
         const licenseTier = isPartner ? 'MSP PARTNER PRO' : 'CORPORATE ENTERPRISE';
 
+        // Accurately map tenant user role (e.g. secops -> SOC Analyst, admin -> Partner/Corporate Admin)
+        let mappedRole = 'SOC Analyst';
+        if (tu.role === 'admin') {
+          mappedRole = isPartner ? 'Partner Admin' : 'Corporate Admin';
+        } else if (tu.role === 'secops') {
+          mappedRole = 'SOC Analyst';
+        } else if (tu.role === 'auditor') {
+          mappedRole = 'Compliance Auditor';
+        } else {
+          mappedRole = 'Security Operator';
+        }
+
         return res.json({
           success: true,
-          accountType: isPartner ? 'partner' : 'corporate',
-          role: isPartner ? 'Partner Admin' : (tu.role === 'admin' ? 'Corporate Admin' : 'SecOps Member'),
+          accountType: 'tenant',
+          tenantType: isPartner ? 'partner' : 'corporate',
+          role: mappedRole,
           customerId,
           customerName,
           licenseTier,
           userEmail: cleanId,
           workspace: tu.tenant_name,
+          target: 'tenant',
           redirectUrl: `https://${tu.tenant_name}.quarkshield.ai`,
           mustChangePassword: !!tu.must_change_password,
           message: `Redirecting to Tenant Workspace (${tu.tenant_name}).`
@@ -2692,15 +2659,17 @@ export const unifiedLogin = async (req: Request, res: Response) => {
     if (cleanId === 'sridhargs@algomeld.ai' || cleanId.includes('partner') || cleanId.includes('@partner.') || cleanId.includes('algomeld')) {
       return res.json({
         success: true,
-        accountType: 'partner',
-        target: 'console',
-        initialTab: 'dashboard',
-        role: 'Partner Admin',
-        customerId: 'PART-9148',
+        accountType: 'tenant',
+        tenantType: 'partner',
+        target: 'tenant',
+        role: cleanId === 'sridhargs@algomeld.ai' ? 'Partner Admin' : 'SOC Analyst',
+        customerId: 'PART-4421',
         customerName: 'ALGO MELD MSP',
         licenseTier: 'MSP PARTNER PRO',
         userEmail: cleanId,
-        message: 'Authenticated as Partner Workspace Administrator.'
+        workspace: 'algomeld',
+        redirectUrl: 'https://algomeld.quarkshield.ai',
+        message: 'Authenticated as Algomeld Workspace User.'
       });
     }
 
@@ -2990,7 +2959,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         m.created_at as "createdAt",
         t.name as "groupName",
         COALESCE(NULLIF(m.tenant_name, ''), $2::text) as "tenantName",
-        COALESCE(NULLIF(m.license_key, ''), 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8') as "licenseKey"
+        COALESCE(NULLIF(m.license_key, ''), NULLIF(t.license_key, ''), 'QS-TENANT-STANDARD') as "licenseKey"
       FROM fleet_machines m
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE LOWER(m.tenant_name) = LOWER($1)

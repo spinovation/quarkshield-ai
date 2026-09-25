@@ -533,6 +533,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const [activeLicKeyCopied, setActiveLicKeyCopied] = useState<boolean>(false);
 
   // Identity & Role Computations
+  const [currentUserRole, setCurrentUserRole] = useState<string>(() => {
+    return localStorage.getItem('quarkshield_role') || sessionStorage.getItem('quarkshield_role') || '';
+  });
+
   const isPartner = client.accountType === 'partner' ||
     (client.customerId && client.customerId.startsWith('PART-')) ||
     cleanSlug.includes('algomeld') ||
@@ -540,9 +544,9 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     emailInput.toLowerCase().includes('algomeld') ||
     emailInput.toLowerCase().includes('partner');
 
-  const displayRole = isPartner ? 'Partner Admin' : 'Corporate Admin';
-  const displayCustomerId = client.customerId || (cleanSlug.includes('partner') || isPartner ? 'PART-7000' : `CORP-${cleanSlug.slice(0, 4).toUpperCase()}`);
-  const displayCustomerName = client.displayName || (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1) + ' Workspace');
+  const displayCustomerId = client.customerId || (cleanSlug.includes('algomeld') ? 'PART-4421' : (cleanSlug.includes('partner') || isPartner ? 'PART-7000' : `CORP-${cleanSlug.slice(0, 4).toUpperCase()}`));
+  const displayCustomerName = client.displayName || (cleanSlug.includes('algomeld') ? 'Algomeld' : (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)));
+  const displayRole = currentUserRole || (isPartner ? 'Partner Admin' : 'Corporate Admin');
   const activeLicKey = (licenses && licenses.length > 0 && licenses[0].licenseKey)
     ? licenses[0].licenseKey
     : (licenses.find(l => l.status === 'active')?.licenseKey || `QS-${(client.customerId || cleanSlug).toUpperCase()}-ACTIVE`);
@@ -1147,18 +1151,26 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     fetchTenantData();
   }, [cleanSlug]);
 
-  const completeTenantLogin = () => {
+  const completeTenantLogin = (data?: any) => {
     setIsAuthenticated(true);
     sessionStorage.setItem(`tenant_auth_${cleanSlug}`, 'true');
     localStorage.setItem(`tenant_auth_${cleanSlug}`, 'true');
-    sessionStorage.setItem('quarkshield_user', emailInput.trim());
-    localStorage.setItem('quarkshield_user', emailInput.trim());
-    sessionStorage.setItem('quarkshield_account_type', 'corporate');
-    localStorage.setItem('quarkshield_account_type', 'corporate');
-    sessionStorage.setItem('quarkshield_customer_id', client.customerId || 'CORP-9812');
-    localStorage.setItem('quarkshield_customer_id', client.customerId || 'CORP-9812');
-    sessionStorage.setItem('quarkshield_customer_name', client.displayName || 'Spinovation Corp');
-    localStorage.setItem('quarkshield_customer_name', client.displayName || 'Spinovation Corp');
+    const userEmail = emailInput.trim();
+    sessionStorage.setItem('quarkshield_user', userEmail);
+    localStorage.setItem('quarkshield_user', userEmail);
+    const role = data?.role || localStorage.getItem('quarkshield_role') || sessionStorage.getItem('quarkshield_role') || (isPartner ? 'Partner Admin' : 'Corporate Admin');
+    sessionStorage.setItem('quarkshield_role', role);
+    localStorage.setItem('quarkshield_role', role);
+    setCurrentUserRole(role);
+    const actype = data?.accountType || (isPartner ? 'partner' : 'corporate');
+    sessionStorage.setItem('quarkshield_account_type', actype);
+    localStorage.setItem('quarkshield_account_type', actype);
+    const custId = data?.customerId || client.customerId || displayCustomerId;
+    sessionStorage.setItem('quarkshield_customer_id', custId);
+    localStorage.setItem('quarkshield_customer_id', custId);
+    const custName = data?.customerName || client.displayName || displayCustomerName;
+    sessionStorage.setItem('quarkshield_customer_name', custName);
+    localStorage.setItem('quarkshield_customer_name', custName);
   };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -1192,7 +1204,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           setShowTenantForceChangeModal(true);
           return;
         }
-        completeTenantLogin();
+        completeTenantLogin(data);
       } else {
         // Fallback login
         completeTenantLogin();
@@ -1582,7 +1594,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           branch: gitBranch.trim() || 'main',
           token: gitAuthToken.trim() || undefined,
           username: gitUsername.trim() || undefined,
-          tenant: client.name || cleanSlug || 'SPINOVATIONCORP'
+          tenant: client.name || cleanSlug
         })
       });
 
@@ -1957,7 +1969,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             textAlign: 'center',
             letterSpacing: '-0.025em'
           }}>
-            {client.displayName || 'Spinovation Corp'} Portal
+            {client.displayName || displayCustomerName} Portal
           </h1>
 
           {/* Subtitle */}
@@ -2763,8 +2775,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           gap: '0.2rem'
         }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={client.displayName || 'Spinovation Corp'}>
-              {client.displayName || 'Spinovation Corp'}
+            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={client.displayName || displayCustomerName}>
+              {client.displayName || displayCustomerName}
             </span>
             <span style={{
               fontSize: '0.65rem',
@@ -3104,8 +3116,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis'
-            }} title={`${client.customerId || 'CORP-9812'}/${client.displayName || 'SPINOVATION CORP'}`}>
-              {client.customerId || 'CORP-9812'}/{client.displayName || 'SPINOVATION CORP'}
+            }} title={`${client.customerId || displayCustomerId}/${client.displayName || displayCustomerName}`}>
+              {client.customerId || displayCustomerId}/{client.displayName || displayCustomerName}
             </div>
 
             <div style={{
@@ -3240,7 +3252,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
                   <h1 style={{ fontSize: '1.45rem', fontWeight: 800, margin: 0, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Shield size={22} color="#38bdf8" />
-                    <span>{client.displayName || 'Spinovation Corp'}</span>
+                    <span>{client.displayName || displayCustomerName}</span>
                   </h1>
                   <span style={{
                     fontSize: '0.72rem',
@@ -7029,7 +7041,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         Enroll New Workstation / Generate Fleet Token
                       </h2>
                       <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.82rem', color: '#94a3b8' }}>
-                        Generate an enrollment secret or copy 1-line rollout scripts for {client.displayName || 'Spinovation Corp'}.
+                        Generate an enrollment secret or copy 1-line rollout scripts for {client.displayName || displayCustomerName}.
                       </p>
                     </div>
                   </div>

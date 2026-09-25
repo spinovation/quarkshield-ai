@@ -417,7 +417,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
 
   // Helper to complete console redirection / state persistence upon verified authentication
   const finalizeLogin = (data: any, email: string) => {
-    if (data.accountType === 'superadmin') {
+    const cleanEmail = email.toLowerCase().trim();
+    const isInternal = cleanEmail.includes('@quarkshield.ai') ||
+      cleanEmail === 'superadmin' ||
+      cleanEmail === 'sridhargs@gmail.com';
+
+    if (data.accountType === 'superadmin' && isInternal) {
       localStorage.setItem('quarkshield_user', email);
       sessionStorage.setItem('quarkshield_user', email);
       localStorage.setItem('quarkshield_role', data.role || 'Super Admin');
@@ -440,48 +445,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
         setShowForceChangeModal(false);
         onLaunchConsole('admin', email);
       }, 400);
-    } else if (data.accountType === 'partner') {
-      localStorage.setItem('quarkshield_user', email);
-      sessionStorage.setItem('quarkshield_user', email);
-      localStorage.setItem('quarkshield_role', data.role || 'Partner Admin');
-      sessionStorage.setItem('quarkshield_role', data.role || 'Partner Admin');
-      localStorage.setItem('quarkshield_account_type', 'partner');
-      sessionStorage.setItem('quarkshield_account_type', 'partner');
-      localStorage.setItem('quarkshield_customer_id', data.customerId || 'PART-9148');
-      sessionStorage.setItem('quarkshield_customer_id', data.customerId || 'PART-9148');
-      localStorage.setItem('quarkshield_customer_name', data.customerName || 'MSP PARTNER PRO');
-      sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'MSP PARTNER PRO');
-      localStorage.setItem('quarkshield_license_tier', data.licenseTier || 'MSP PARTNER PRO');
-      sessionStorage.setItem('quarkshield_license_tier', data.licenseTier || 'MSP PARTNER PRO');
-      if (data.token) {
-        localStorage.setItem('quarkshield_token', data.token);
-        sessionStorage.setItem('quarkshield_token', data.token);
-      }
-      setSignInSuccessMsg('Verified Partner Account. Launching Partner Console...');
-      setTimeout(() => {
-        setShowSignInModal(false);
-        setShowForceChangeModal(false);
-        onLaunchConsole('dashboard', email);
-      }, 400);
     } else {
-      // Tenant Workspace / Corporate
+      // Dedicated Tenant & Partner Accounts (SecOps, Admin, SOC Analyst, Auditor)
       localStorage.setItem('quarkshield_user', email);
       sessionStorage.setItem('quarkshield_user', email);
-      localStorage.setItem('quarkshield_role', data.role || 'Corporate Admin');
-      sessionStorage.setItem('quarkshield_role', data.role || 'Corporate Admin');
-      localStorage.setItem('quarkshield_account_type', 'corporate');
-      sessionStorage.setItem('quarkshield_account_type', 'corporate');
-      localStorage.setItem('quarkshield_customer_id', data.customerId || 'CORP-4821');
-      sessionStorage.setItem('quarkshield_customer_id', data.customerId || 'CORP-4821');
-      localStorage.setItem('quarkshield_customer_name', data.customerName || 'CORPORATE CLIENT');
-      sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'CORPORATE CLIENT');
+      localStorage.setItem('quarkshield_role', data.role || (data.accountType === 'partner' ? 'Partner Admin' : 'Corporate Admin'));
+      sessionStorage.setItem('quarkshield_role', data.role || (data.accountType === 'partner' ? 'Partner Admin' : 'Corporate Admin'));
+      localStorage.setItem('quarkshield_account_type', data.accountType || 'tenant');
+      sessionStorage.setItem('quarkshield_account_type', data.accountType || 'tenant');
+      localStorage.setItem('quarkshield_customer_id', data.customerId || '');
+      sessionStorage.setItem('quarkshield_customer_id', data.customerId || '');
+      localStorage.setItem('quarkshield_customer_name', data.customerName || '');
+      sessionStorage.setItem('quarkshield_customer_name', data.customerName || '');
       localStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
       sessionStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
+      const ws = data.workspace || (cleanEmail.includes('algomeld') ? 'algomeld' : (cleanEmail.includes('spinovation') ? 'spinovationcorp' : ''));
+      if (ws) {
+        localStorage.setItem('quarkshield_workspace', ws);
+        sessionStorage.setItem('quarkshield_workspace', ws);
+        localStorage.setItem('quarkshield_tenant_slug', ws);
+        sessionStorage.setItem('quarkshield_tenant_slug', ws);
+      }
       if (data.token) {
         localStorage.setItem('quarkshield_token', data.token);
         sessionStorage.setItem('quarkshield_token', data.token);
       }
-      setSignInSuccessMsg(`Verified Tenant Account. Connecting to ${data.workspace || 'Workspace'}...`);
+      setSignInSuccessMsg(`Verified ${data.role || 'User'} (${data.customerName || data.workspace || 'Workspace'}). Connecting...`);
       setTimeout(() => {
         if (data.redirectUrl && window.location.hostname !== 'localhost' && !window.location.hostname.includes('127.0.0.1')) {
           window.location.href = data.redirectUrl;
@@ -490,7 +479,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
           setShowForceChangeModal(false);
           onLaunchConsole('dashboard', email);
         }
-      }, 550);
+      }, 500);
     }
   };
 

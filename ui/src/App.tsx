@@ -197,11 +197,23 @@ export default function App() {
     return localStorage.getItem('quarkshield_tenant_slug') || sessionStorage.getItem('quarkshield_tenant_slug') || '';
   });
 
+  const host = window.location.hostname.toLowerCase();
+  const isTenantHost = (host.includes('.quarkshield.ai') || host.includes('.fedmitigate.com')) &&
+    !host.startsWith('www.') &&
+    !host.startsWith('scanner.') &&
+    host !== 'quarkshield.ai' &&
+    host !== 'fedmitigate.com';
+
   const [isSupportMirror, setIsSupportMirror] = useState<boolean>(false);
 
   const [viewMode, setViewMode] = useState<'landing' | 'console' | 'tenant'>(() => {
+    // HARD SECURITY BARRIER: On dedicated tenant subdomains (e.g. algomeld.quarkshield.ai, spinovationcorp.quarkshield.ai),
+    // viewMode is permanently locked to 'tenant'. Global console view is strictly forbidden.
+    if (isTenantHost) {
+      return 'tenant';
+    }
+
     const urlParams = new URLSearchParams(window.location.search);
-    const host = window.location.hostname.toLowerCase();
     const port = window.location.port;
     const path = window.location.pathname.toLowerCase();
 
@@ -220,14 +232,6 @@ export default function App() {
       return 'tenant';
     }
 
-    // Dedicated isolated tenant pod subdomains (e.g. spinovation.quarkshield.ai, spinovationcorp.quarkshield.ai, democlient.quarkshield.ai)
-    if (host.includes('.quarkshield.ai') && !host.startsWith('www.') && !host.startsWith('quarkshield.ai') && !host.startsWith('scanner.')) {
-      return 'tenant';
-    }
-    if (host.includes('.fedmitigate.com') && !host.startsWith('www.') && !host.startsWith('fedmitigate.com')) {
-      return 'tenant';
-    }
-
     // Explicit view in URL query or hash: ?view=console or #console
     if (urlParams.get('view') === 'console' || window.location.hash === '#console') {
       return 'console';
@@ -242,6 +246,19 @@ export default function App() {
     // Default to Landing Page on root domain https://quarkshield.ai/
     return 'landing';
   });
+
+  // Hard security barrier: Keep tenant subdomains locked and strip any ?view=console queries
+  useEffect(() => {
+    if (isTenantHost) {
+      if (viewMode !== 'tenant') {
+        setViewMode('tenant');
+      }
+      if (window.location.search.includes('view=console')) {
+        const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname;
+        window.history.replaceState({}, '', cleanUrl);
+      }
+    }
+  }, [isTenantHost, viewMode]);
 
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -265,49 +282,44 @@ export default function App() {
   });
   
   const [currentUserEmail, setCurrentUserEmail] = useState<string>(() => {
-    return localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || 'superadmin@quarkshield.ai';
+    return localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '';
   });
 
   const [currentAccountType, setCurrentAccountType] = useState<string>(() => {
     const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
     if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'superadmin';
-    if (email.includes('algomeld') || email.includes('partner') || email.includes('@partner.')) return 'partner';
-    return localStorage.getItem('quarkshield_account_type') || sessionStorage.getItem('quarkshield_account_type') || 'superadmin';
+    return localStorage.getItem('quarkshield_account_type') || sessionStorage.getItem('quarkshield_account_type') || 'user';
   });
 
   const [currentUserRole, setCurrentUserRole] = useState<string>(() => {
     const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
     if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'Super Admin';
-    if (email.includes('algomeld') || email.includes('partner') || email.includes('@partner.')) return 'Partner Admin';
-    return localStorage.getItem('quarkshield_role') || sessionStorage.getItem('quarkshield_role') || 'Super Admin';
+    return localStorage.getItem('quarkshield_role') || sessionStorage.getItem('quarkshield_role') || 'Security Operator';
   });
 
   const [currentCustomerId, setCurrentCustomerId] = useState<string>(() => {
     const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
     if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'QS-ADMIN-001';
-    if (email.includes('algomeld') || email.includes('partner') || email.includes('@partner.')) return 'PART-9148';
-    return localStorage.getItem('quarkshield_customer_id') || sessionStorage.getItem('quarkshield_customer_id') || 'QS-ADMIN-001';
+    return localStorage.getItem('quarkshield_customer_id') || sessionStorage.getItem('quarkshield_customer_id') || '';
   });
 
   const [currentCustomerName, setCurrentCustomerName] = useState<string>(() => {
     const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
     if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'INTERNAL USER';
-    if (email.includes('algomeld') || email.includes('partner') || email.includes('@partner.')) return 'ALGO MELD MSP';
-    return localStorage.getItem('quarkshield_customer_name') || sessionStorage.getItem('quarkshield_customer_name') || 'INTERNAL USER';
+    return localStorage.getItem('quarkshield_customer_name') || sessionStorage.getItem('quarkshield_customer_name') || '';
   });
 
   const [currentLicenseTier, setCurrentLicenseTier] = useState<string>(() => {
     const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
     if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'INTERNAL ROOT';
-    if (email.includes('algomeld') || email.includes('partner') || email.includes('@partner.')) return 'MSP PARTNER PRO';
-    return localStorage.getItem('quarkshield_license_tier') || sessionStorage.getItem('quarkshield_license_tier') || 'INTERNAL ROOT';
+    return localStorage.getItem('quarkshield_license_tier') || sessionStorage.getItem('quarkshield_license_tier') || 'CORPORATE PRO';
   });
 
-  // Dynamically synchronize account identity when user email changes
+  // Dynamically synchronize account identity only for verified internal superadmins
   useEffect(() => {
+    if (!currentUserEmail) return;
     const email = currentUserEmail.toLowerCase();
     const isSuper = email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com';
-    const isPartner = email.includes('algomeld') || email.includes('partner') || email.includes('@partner.');
     
     if (isSuper) {
       setCurrentUserRole('Super Admin');
@@ -315,22 +327,6 @@ export default function App() {
       setCurrentCustomerId('QS-ADMIN-001');
       setCurrentCustomerName('INTERNAL USER');
       setCurrentLicenseTier('INTERNAL ROOT');
-    } else if (isPartner) {
-      setCurrentUserRole('Partner Admin');
-      setCurrentAccountType('partner');
-      const savedId = localStorage.getItem('quarkshield_customer_id') || sessionStorage.getItem('quarkshield_customer_id');
-      setCurrentCustomerId(savedId && !savedId.startsWith('QS-') ? savedId : 'PART-9148');
-      const savedName = localStorage.getItem('quarkshield_customer_name') || sessionStorage.getItem('quarkshield_customer_name');
-      setCurrentCustomerName(savedName && savedName !== 'INTERNAL USER' ? savedName : 'ALGO MELD MSP');
-      setCurrentLicenseTier('MSP PARTNER PRO');
-    } else {
-      const savedRole = localStorage.getItem('quarkshield_role') || sessionStorage.getItem('quarkshield_role') || 'Corporate Admin';
-      setCurrentUserRole(savedRole);
-      setCurrentAccountType('corporate');
-      const savedId = localStorage.getItem('quarkshield_customer_id') || sessionStorage.getItem('quarkshield_customer_id');
-      const savedName = localStorage.getItem('quarkshield_customer_name') || sessionStorage.getItem('quarkshield_customer_name');
-      setCurrentCustomerId(savedId || 'CORP-4821');
-      setCurrentCustomerName(savedName || 'CORPORATE CLIENT');
     }
   }, [currentUserEmail]);
 
@@ -1094,21 +1090,33 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           if (actype) setCurrentAccountType(actype);
 
           const workspace = localStorage.getItem('quarkshield_workspace') || sessionStorage.getItem('quarkshield_workspace');
-          if ((actype === 'corporate' || actype === 'partner') && (workspace || (userEmail && userEmail.includes('spinovation')))) {
-            setTenantSlug(workspace || (userEmail && userEmail.includes('spinovation') ? 'spinovationcorp' : ''));
-            localStorage.setItem('quarkshield_view_mode', 'tenant');
-            sessionStorage.setItem('quarkshield_view_mode', 'tenant');
-            setViewMode('tenant');
-            return;
+          const isTenantUser = actype === 'corporate' || actype === 'partner' || actype === 'tenant' || !!workspace;
+          
+          if (isTenantUser) {
+            const targetSlug = workspace || (userEmail && userEmail.includes('spinovation') ? 'spinovationcorp' : (userEmail && userEmail.includes('algomeld') ? 'algomeld' : ''));
+            if (targetSlug) {
+              setTenantSlug(targetSlug);
+              localStorage.setItem('quarkshield_view_mode', 'tenant');
+              sessionStorage.setItem('quarkshield_view_mode', 'tenant');
+              setViewMode('tenant');
+              return;
+            }
           }
 
-          if (window.history.pushState) {
-            const consoleUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + '?view=console';
-            window.history.pushState({ path: consoleUrl }, '', consoleUrl);
+          // Strict boundary: Only verified internal superadmin accounts may launch the central management console
+          const isInternalAdmin = userEmail && (userEmail.includes('@quarkshield.ai') || userEmail === 'superadmin@quarkshield.ai' || userEmail === 'sridhargs@gmail.com');
+          if (isInternalAdmin) {
+            if (window.history.pushState) {
+              const consoleUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + '?view=console';
+              window.history.pushState({ path: consoleUrl }, '', consoleUrl);
+            }
+            localStorage.setItem('quarkshield_view_mode', 'console');
+            sessionStorage.setItem('quarkshield_view_mode', 'console');
+            setViewMode('console');
+          } else {
+            // Non-internal user can never enter central console
+            setViewMode('tenant');
           }
-          localStorage.setItem('quarkshield_view_mode', 'console');
-          sessionStorage.setItem('quarkshield_view_mode', 'console');
-          setViewMode('console');
         }}
       />
     );
@@ -1127,6 +1135,10 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
             setAdminInitialSubTab('registry');
           }}
           onNavigateHome={() => {
+            if (isTenantHost) {
+              window.location.reload();
+              return;
+            }
             setIsSupportMirror(false);
             if (window.history.pushState) {
               const homeUrl = window.location.protocol + '//' + window.location.host + '/';
@@ -1138,12 +1150,23 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           }}
           onLogout={() => {
             setIsSupportMirror(false);
+            sessionStorage.removeItem(`tenant_auth_${tenantSlug || 'spinovationcorp'}`);
+            localStorage.removeItem(`tenant_auth_${tenantSlug || 'spinovationcorp'}`);
+            localStorage.removeItem('quarkshield_user');
+            sessionStorage.removeItem('quarkshield_user');
+            localStorage.removeItem('quarkshield_role');
+            sessionStorage.removeItem('quarkshield_role');
+            localStorage.removeItem('quarkshield_account_type');
+            sessionStorage.removeItem('quarkshield_account_type');
+
+            if (isTenantHost) {
+              window.location.reload();
+              return;
+            }
             if (window.history.pushState) {
               const homeUrl = window.location.protocol + '//' + window.location.host + '/';
               window.history.pushState({ path: homeUrl }, '', homeUrl);
             }
-            localStorage.removeItem('quarkshield_user');
-            sessionStorage.removeItem('quarkshield_user');
             localStorage.setItem('quarkshield_view_mode', 'landing');
             sessionStorage.setItem('quarkshield_view_mode', 'landing');
             setViewMode('landing');
@@ -1153,15 +1176,14 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
     );
   }
 
-  const isSuperAdmin = currentUserRole === 'Super Admin' ||
-    currentAccountType === 'superadmin' ||
-    currentUserEmail.toLowerCase().includes('@quarkshield.ai') ||
+  const isSuperAdmin = (currentUserEmail.toLowerCase().includes('@quarkshield.ai') ||
     currentUserEmail.toLowerCase() === 'superadmin' ||
-    currentUserEmail.toLowerCase() === 'sridhargs@gmail.com';
+    currentUserEmail.toLowerCase() === 'sridhargs@gmail.com') &&
+    currentUserRole === 'Super Admin';
 
-  const displayCustomerId = isSuperAdmin ? 'QS-ADMIN-001' : (currentCustomerId || 'PART-9148');
+  const displayCustomerId = isSuperAdmin ? 'QS-ADMIN-001' : (currentCustomerId || 'PART-4421');
   const displayCustomerName = isSuperAdmin ? 'INTERNAL USER' : (currentCustomerName || (currentAccountType === 'partner' ? 'MSP PARTNER PRO' : 'CORPORATE CLIENT'));
-  const displayRole = isSuperAdmin ? 'Super Admin' : currentUserRole;
+  const displayRole = isSuperAdmin ? 'Super Admin' : (currentUserRole || 'Security Operator');
 
   return (
     <div style={{ display: 'flex', width: '100vw', height: '100vh', overflow: 'hidden', background: 'var(--bg-dark, #07090E)', color: 'var(--text-primary, #E2E8F0)' }}>
@@ -1505,56 +1527,60 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
 
         {/* Footer Area with Admin Panel & Profile matching quarkshield.service */}
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.65rem', paddingTop: '1rem' }}>
-          {/* User Onboarding button */}
-          <button
-            onClick={() => { setActiveTab('admin'); setAdminInitialSubTab('onboarding'); }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.65rem',
-              padding: '0.6rem 0.85rem',
-              borderRadius: '6px',
-              background: (activeTab === 'admin' && adminInitialSubTab === 'onboarding') ? 'rgba(0, 242, 254, 0.15)' : 'rgba(255, 255, 255, 0.03)',
-              border: (activeTab === 'admin' && adminInitialSubTab === 'onboarding') ? '1px solid var(--accent-cyan)' : '1px solid rgba(255, 255, 255, 0.1)',
-              color: (activeTab === 'admin' && adminInitialSubTab === 'onboarding') ? '#ffffff' : 'var(--text-primary)',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              boxShadow: (activeTab === 'admin' && adminInitialSubTab === 'onboarding') ? '0 0 12px rgba(0, 242, 254, 0.25)' : 'none',
-              transition: 'all 0.15s ease',
-              width: '100%',
-              textAlign: 'left'
-            }}
-            title="Onboard & Provision Partner or Corporate User"
-          >
-            <UserPlus size={17} color="var(--accent-cyan)" />
-            <span>User Onboarding</span>
-          </button>
+          {isSuperAdmin && (
+            <>
+              {/* User Onboarding button */}
+              <button
+                onClick={() => { setActiveTab('admin'); setAdminInitialSubTab('onboarding'); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.65rem',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: '6px',
+                  background: (activeTab === 'admin' && adminInitialSubTab === 'onboarding') ? 'rgba(0, 242, 254, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                  border: (activeTab === 'admin' && adminInitialSubTab === 'onboarding') ? '1px solid var(--accent-cyan)' : '1px solid rgba(255, 255, 255, 0.1)',
+                  color: (activeTab === 'admin' && adminInitialSubTab === 'onboarding') ? '#ffffff' : 'var(--text-primary)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: (activeTab === 'admin' && adminInitialSubTab === 'onboarding') ? '0 0 12px rgba(0, 242, 254, 0.25)' : 'none',
+                  transition: 'all 0.15s ease',
+                  width: '100%',
+                  textAlign: 'left'
+                }}
+                title="Onboard & Provision Partner or Corporate User"
+              >
+                <UserPlus size={17} color="var(--accent-cyan)" />
+                <span>User Onboarding</span>
+              </button>
 
-          {/* Admin & License Panel button (Super Admin tag removed) */}
-          <button
-            onClick={() => { setActiveTab('admin'); setAdminInitialSubTab('licenses'); }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.65rem',
-              padding: '0.6rem 0.85rem',
-              borderRadius: '6px',
-              background: (activeTab === 'admin' && adminInitialSubTab !== 'onboarding') ? 'rgba(0, 242, 254, 0.15)' : 'rgba(0, 242, 254, 0.04)',
-              border: (activeTab === 'admin' && adminInitialSubTab !== 'onboarding') ? '1px solid var(--accent-cyan)' : '1px solid rgba(0, 242, 254, 0.35)',
-              color: (activeTab === 'admin' && adminInitialSubTab !== 'onboarding') ? '#ffffff' : 'var(--accent-cyan)',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              boxShadow: (activeTab === 'admin' && adminInitialSubTab !== 'onboarding') ? '0 0 15px rgba(0, 242, 254, 0.25)' : 'none',
-              transition: 'all 0.15s ease',
-              width: '100%'
-            }}
-            title="Open Administrative & License Orchestration Panel"
-          >
-            <ShieldAlert size={17} color="var(--accent-cyan)" />
-            <span>Admin & License Panel</span>
-          </button>
+              {/* Admin & License Panel button */}
+              <button
+                onClick={() => { setActiveTab('admin'); setAdminInitialSubTab('licenses'); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.65rem',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: '6px',
+                  background: (activeTab === 'admin' && adminInitialSubTab !== 'onboarding') ? 'rgba(0, 242, 254, 0.15)' : 'rgba(0, 242, 254, 0.04)',
+                  border: (activeTab === 'admin' && adminInitialSubTab !== 'onboarding') ? '1px solid var(--accent-cyan)' : '1px solid rgba(0, 242, 254, 0.35)',
+                  color: (activeTab === 'admin' && adminInitialSubTab !== 'onboarding') ? '#ffffff' : 'var(--accent-cyan)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  boxShadow: (activeTab === 'admin' && adminInitialSubTab !== 'onboarding') ? '0 0 15px rgba(0, 242, 254, 0.25)' : 'none',
+                  transition: 'all 0.15s ease',
+                  width: '100%'
+                }}
+                title="Open Administrative & License Orchestration Panel"
+              >
+                <ShieldAlert size={17} color="var(--accent-cyan)" />
+                <span>Admin & License Panel</span>
+              </button>
+            </>
+          )}
 
           {/* Subscription Scale Card (For Customers & Partners) vs Internal Authority Card (For Internal Super Admin) */}
           {isSuperAdmin ? (
