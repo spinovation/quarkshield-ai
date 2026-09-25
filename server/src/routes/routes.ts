@@ -212,7 +212,9 @@ router.post('/ai/chat', requireAuth, requireTenantAccess, getAIChatResponse);
 // ==========================================
 // Templates + runner script are public config text. evaluate/history/policies
 // are authenticated + tenant-scoped.
-router.post('/git/ci-gate/evaluate', requireAuth, requireTenantAccess, evaluateCIGate);
+// Public: CI runners authenticate with a fleet/CI token (resolved inside the
+// handler), not a browser session.
+router.post('/git/ci-gate/evaluate', evaluateCIGate);
 router.get('/git/ci-gate/history', requireAuth, requireTenantAccess, getCIGateHistory);
 router.get('/git/ci-gate/policies', requireAuth, requireTenantAccess, getCIGatePolicies);
 router.get('/git/ci-gate/templates/:provider', getCITemplate);

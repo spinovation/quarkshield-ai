@@ -76,8 +76,57 @@ export const evaluateCIGate = async (req: Request, res: Response) => {
       maxAllowedRisk = 40
     } = req.body;
 
+    // Resolve the tenant from the CI token (Bearer / X-Connector-Token), not the
+    // request body. A valid fleet token scopes to its tenant; the community token
+    // or none maps to 'COMMUNITY'. The client cannot pick another tenant's policy.
+    let ciToken = (req.headers['x-connector-token'] as string) || '';
+    const authHeader = req.headers['authorization'];
+    if (!ciToken && authHeader && authHeader.startsWith('Bearer ')) ciToken = authHeader.slice(7).trim();
+    let resolvedTenant = 'COMMUNITY';
+    if (ciToken && ciToken !== 'QS-COMMUNITY-TOKEN') {
+      try {
+        const ft = await pool.query('SELECT tenant_name FROM fleet_tokens WHERE token = $1', [ciToken]);
+        if (ft.rows[0]?.tenant_name) resolvedTenant = ft.rows[0].tenant_name;
+        else {
+          const lic = await pool.query("SELECT tenant_name FROM admin_licenses WHERE UPPER(TRIM(license_key)) = UPPER(TRIM($1)) AND status != 'revoked'", [ciToken]);
+          if (lic.rows[0]?.tenant_name) resolvedTenant = lic.rows[0].tenant_name;
+        }
+      } catch { /* fall back to COMMUNITY */ }
+    }
+    const effectiveTenant = resolvedTenant;
+
     const initialFindings = Array.isArray(findings) && findings.length > 0 ? findings : (Array.isArray(rawFindings) ? rawFindings : []);
     const detectedFindings: any[] = [...initialFindings];
+
+    // Fail closed (DEF-50): if the runner sent nothing to evaluate, do NOT report
+    // a clean PASS — that let a broken/empty runner silently green-light merges.
+    const hasScanInput = (Array.isArray(filesChanged) && filesChanged.length > 0) || initialFindings.length > 0;
+    if (!hasScanInput) {
+      const gateId = 'gate-' + crypto.randomUUID().substring(0, 10);
+      const md = `## 🛡️ QuarkShield CI/CD Security Gate: **ERROR**\n\n> [!CAUTION]\n> The gate received no changed files or findings to evaluate. Failing closed to avoid a false pass — ensure the runner sends changed files (\`filesChanged\`) or scan findings.`;
+      await pool.query(
+        `INSERT INTO ci_security_gates (id, tenant_name, provider, repo_name, repo_url, branch, pr_number, commit_hash, commit_author, commit_message, status, violations_count, critical_count, high_count, quantum_risk_score, policy_name, markdown_report)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'ERROR',0,0,0,0,$11,$12)`,
+        [gateId, String(effectiveTenant).toUpperCase(), provider, repoName, repoUrl, branch, prNumber, commitHash, commitAuthor, commitMessage, policyName, md]
+      ).catch(() => {});
+      return res.status(200).json({
+        success: true, gateId, status: 'ERROR', exitCode: 1, blocked: true,
+        quantumRiskScore: 0, violationsCount: 0,
+        message: 'No scan input received; failing closed.', markdownReport: md,
+      });
+    }
+
+    // Threshold comes from the tenant's policy, not a client-supplied value
+    // (a client could otherwise raise its own bar to pass).
+    let threshold = 40;
+    try {
+      const pol = await pool.query(
+        "SELECT max_quantum_risk_score FROM ci_gate_policies WHERE LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global' OR is_default = TRUE ORDER BY (LOWER(tenant_name) = LOWER($1)) DESC, is_default DESC LIMIT 1",
+        [effectiveTenant]
+      );
+      if (pol.rows[0] && pol.rows[0].max_quantum_risk_score != null) threshold = Number(pol.rows[0].max_quantum_risk_score);
+      else if (Number.isFinite(Number(maxAllowedRisk))) threshold = Number(maxAllowedRisk);
+    } catch { /* keep default */ }
 
     // If filesChanged provided, scan them
     if (Array.isArray(filesChanged) && filesChanged.length > 0) {
@@ -117,7 +166,7 @@ export const evaluateCIGate = async (req: Request, res: Response) => {
     if (violationsCount === 0) quantumRiskScore = 0;
 
     // Gate decision
-    const isBlocked = criticalCount > 0 || highCount > 2 || quantumRiskScore > maxAllowedRisk;
+    const isBlocked = criticalCount > 0 || highCount > 2 || quantumRiskScore > threshold;
     const gateStatus = isBlocked ? 'BLOCKED' : (violationsCount > 0 ? 'WARNING' : 'PASSED');
     const exitCode = isBlocked ? 1 : 0;
 
@@ -155,7 +204,7 @@ export const evaluateCIGate = async (req: Request, res: Response) => {
         findings, markdown_report
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
     `, [
-      gateId, tenantName.toUpperCase(), provider, repoName, repoUrl, branch, prNumber,
+      gateId, effectiveTenant.toUpperCase(), provider, repoName, repoUrl, branch, prNumber,
       commitHash, commitAuthor, commitMessage, gateStatus, violationsCount,
       criticalCount, highCount, mediumCount, quantumRiskScore, policyName,
       JSON.stringify(detectedFindings), markdownReport
@@ -264,7 +313,7 @@ quarkshield-pqc-gate:
   stage: security-gate
   image: alpine:latest
   before_script:
-    - apk add --no-cache curl bash git
+    - apk add --no-cache curl bash git python3
   script:
     - echo "🛡️ Evaluating Merge Request against QuarkShield PQC Security Policies..."
     - curl -sSL "${serverUrl}/api/git/ci-gate/runner.sh" | bash -s -- --provider gitlab --repo "$CI_PROJECT_PATH" --pr "$CI_MERGE_REQUEST_IID" --commit "$CI_COMMIT_SHA" --author "$GITLAB_USER_EMAIL"
@@ -283,25 +332,27 @@ quarkshield-pqc-gate:
           name: QuarkShield PQC Security Gate
           image: alpine:latest
           script:
-            - apk add --no-cache curl bash git
+            - apk add --no-cache curl bash git python3
             - curl -sSL "${serverUrl}/api/git/ci-gate/runner.sh" | bash -s -- --provider bitbucket --repo "$BITBUCKET_REPO_FULL_NAME" --pr "$BITBUCKET_PR_ID" --commit "$BITBUCKET_COMMIT"
 `;
       return res.type('text/yaml').send(bitbucketYaml);
     }
 
-    // Default universal runner bash script
+    // Default universal runner bash script. It collects the files changed in the
+    // commit/PR (falling back to the tracked source tree), sends their contents to
+    // the gate, and FAILS CLOSED on any error (missing tools, network failure,
+    // BLOCKED/ERROR verdict). Requires bash, git, curl and python3 (all present in
+    // the CI images the templates provision).
     const runnerScript = `#!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 QUARKSHIELD_URL="\${QUARKSHIELD_URL:-${serverUrl}}"
 QUARKSHIELD_TOKEN="\${QUARKSHIELD_TOKEN:-QS-COMMUNITY-TOKEN}"
+BASE_REF="\${BASE_REF:-origin/main}"
 
-PROVIDER="cli"
-REPO="local-repo"
-PR="HEAD"
-COMMIT="\$(git rev-parse HEAD 2>/dev/null || echo 'unknown')"
-AUTHOR="\$(git log -1 --pretty=format:'%ae' 2>/dev/null || echo 'ci-user')"
-
+PROVIDER="cli"; REPO="local-repo"; PR="HEAD"
+COMMIT="\$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+AUTHOR="\$(git log -1 --pretty=format:'%ae' 2>/dev/null || echo ci-user)"
 while [[ \$# -gt 0 ]]; do
   case \$1 in
     --provider) PROVIDER="\$2"; shift 2 ;;
@@ -309,51 +360,75 @@ while [[ \$# -gt 0 ]]; do
     --pr) PR="\$2"; shift 2 ;;
     --commit) COMMIT="\$2"; shift 2 ;;
     --author) AUTHOR="\$2"; shift 2 ;;
+    --base) BASE_REF="\$2"; shift 2 ;;
     *) shift ;;
   esac
 done
 
 echo "================================================================="
-echo "🛡️  QUARKSHIELD ENTERPRISE CI/CD PQC SECURITY GATE"
-echo "================================================================="
-echo "Target Repo: \$REPO"
-echo "PR / Ref:    \$PR"
-echo "Commit:      \$COMMIT"
+echo "🛡️  QUARKSHIELD CI/CD PQC SECURITY GATE"
+echo "   Repo: \$REPO | Ref: \$PR | Commit: \$COMMIT"
 echo "================================================================="
 
-# Scan local diff or files for classical cryptography
-PAYLOAD=\$(cat << 'JSON_EOF'
-{
-  "provider": "\$PROVIDER",
-  "repoName": "\$REPO",
-  "prNumber": "\$PR",
-  "commitHash": "\$COMMIT",
-  "commitAuthor": "\$AUTHOR"
-}
-JSON_EOF
-)
+fail_closed() { echo "❌ GATE ERROR (failing closed): \$1"; exit 1; }
+command -v git >/dev/null 2>&1 || fail_closed "git not found"
+command -v curl >/dev/null 2>&1 || fail_closed "curl not found"
+command -v python3 >/dev/null 2>&1 || fail_closed "python3 not found"
 
-RESPONSE=\$(curl -s -X POST "\${QUARKSHIELD_URL}/api/git/ci-gate/evaluate" \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer \${QUARKSHIELD_TOKEN}" \\
-  -d "\$PAYLOAD")
-
-STATUS=\$(echo "\$RESPONSE" | grep -o '"status":"[^"]*' | cut -d'"' -f4 || echo 'PASSED')
-EXIT_CODE=\$(echo "\$RESPONSE" | grep -o '"exitCode":[0-9]*' | cut -d':' -f2 || echo '0')
-
-if [ "\$STATUS" = "BLOCKED" ]; then
-  echo ""
-  echo "❌ CI/CD GATE FAILED: Vulnerable classical cryptographic keys or algorithms detected!"
-  echo "   Blocking PR to protect against Harvest Now, Decrypt Later (HNDL) attacks."
-  echo "   Please upgrade to NIST FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA)."
-  echo ""
-  exit 1
+# Determine changed files: PR diff against the base if available, else last commit.
+if git rev-parse --verify "\$BASE_REF" >/dev/null 2>&1; then
+  CHANGED="\$(git diff --name-only "\$BASE_REF"...HEAD 2>/dev/null || true)"
 else
-  echo ""
-  echo "✅ CI/CD GATE PASSED: Codebase meets NIST Post-Quantum Cryptographic requirements."
-  echo ""
-  exit 0
+  CHANGED="\$(git diff --name-only HEAD~1..HEAD 2>/dev/null || true)"
 fi
+[ -z "\$CHANGED" ] && CHANGED="\$(git ls-files 2>/dev/null | head -300)"
+
+# Build the JSON payload (with file contents) safely via python3. The changed
+# file list is passed via an env var (stdin is taken by the heredoc program).
+PAYLOAD="\$(CHANGED_FILES="\$CHANGED" python3 - "\$PROVIDER" "\$REPO" "\$PR" "\$COMMIT" "\$AUTHOR" <<'PY'
+import json, sys, os
+provider, repo, pr, commit, author = sys.argv[1:6]
+exts = ('.js','.ts','.jsx','.tsx','.py','.go','.java','.rb','.php','.cs','.c','.cpp','.h','.rs','.kt','.scala','.swift','.sh','.tf','.yaml','.yml','.json','.pem','.key','.crt','.conf','.cnf','.env','.config')
+files = []
+for path in os.environ.get('CHANGED_FILES', '').split('\\n'):
+    path = path.strip()
+    if not path or not os.path.isfile(path):
+        continue
+    if not path.lower().endswith(exts):
+        continue
+    try:
+        if os.path.getsize(path) > 200_000:
+            continue
+        with open(path, 'r', errors='ignore') as f:
+            files.append({'path': path, 'content': f.read()})
+    except Exception:
+        continue
+    if len(files) >= 300:
+        break
+print(json.dumps({'provider': provider, 'repoName': repo, 'prNumber': pr,
+                  'commitHash': commit, 'commitAuthor': author, 'filesChanged': files}))
+PY
+)"
+[ -z "\$PAYLOAD" ] && fail_closed "failed to build scan payload"
+
+# Call the gate; capture body + HTTP status. Any transport failure fails closed.
+HTTP_BODY="\$(mktemp)"
+HTTP_CODE="\$(curl -s -o "\$HTTP_BODY" -w '%{http_code}' -X POST "\${QUARKSHIELD_URL}/api/git/ci-gate/evaluate" \\
+  -H 'Content-Type: application/json' -H "Authorization: Bearer \${QUARKSHIELD_TOKEN}" \\
+  --data-binary @<(printf '%s' "\$PAYLOAD") 2>/dev/null || echo 000)"
+RESPONSE="\$(cat "\$HTTP_BODY")"; rm -f "\$HTTP_BODY"
+[ "\$HTTP_CODE" -ge 200 ] 2>/dev/null && [ "\$HTTP_CODE" -lt 300 ] 2>/dev/null || fail_closed "gate request failed (HTTP \$HTTP_CODE)"
+
+STATUS="\$(printf '%s' "\$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status","ERROR"))' 2>/dev/null || echo ERROR)"
+SCORE="\$(printf '%s' "\$RESPONSE" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("quantumRiskScore",0))' 2>/dev/null || echo 0)"
+echo "Gate status: \$STATUS (quantum risk score: \$SCORE)"
+
+case "\$STATUS" in
+  PASSED)  echo "✅ GATE PASSED: no vulnerable classical cryptography introduced."; exit 0 ;;
+  WARNING) echo "⚠️  GATE WARNING: vulnerabilities found but under the blocking threshold."; exit 0 ;;
+  BLOCKED) echo "❌ GATE BLOCKED: quantum-vulnerable cryptography detected. Upgrade to FIPS 203/204."; exit 1 ;;
+  *)       fail_closed "unexpected gate status '\$STATUS'" ;;
+esac
 `;
     res.type('text/x-shellscript').send(runnerScript);
   } catch (err: any) {
