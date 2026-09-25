@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireAuth, requireSuperAdmin, requireTenantAccess } from '../middleware/auth';
 import {
   getFleetTokens,
   createFleetToken,
@@ -54,7 +55,9 @@ import {
   resetOperatorPassword,
   resetTenantUserPassword,
   forgotPassword,
-  changePassword
+  changePassword,
+  logout,
+  getMe
 } from '../controllers/adminController';
 import { getCnsaNews } from '../controllers/newsController';
 import { submitSupportTicket } from '../controllers/supportController';
@@ -96,110 +99,111 @@ import {
 
 const router = Router();
 
-// Fleet Tokens
-router.get('/fleet/tokens', getFleetTokens);
-router.post('/fleet/tokens', createFleetToken);
-router.delete('/fleet/tokens/:id', revokeFleetToken);
-
-// Fleet Endpoints
-router.get('/fleet/machines', getFleetMachines);
-router.delete('/fleet/machines/:id', deleteFleetMachine);
-router.post('/fleet/machines/:machineId/pull', enqueuePullCommand);
-router.get('/tenant/:tenant/daily-snapshots', getTenantDailySnapshots);
-
-// CycloneDX 1.6 CBOM
-router.get('/fleet/cbom', getFleetCBOM);
-
-// Agent Deployment Script & Ingestion
-router.get('/scan/agent/install.sh', getInstallerScript);
-router.get('/scan/agent/install.ps1', getPowerShellInstallerScript);
-router.post('/scan/agent/ingest', ingestTelemetry);
-
 // ==========================================
-// ADMIN PANEL ROUTES (QUARKSHIELD REPLICA)
+// AUTH (public) + session
 // ==========================================
-
-// Client Tenant Registry
-router.get('/admin/clients', getClients);
-router.get('/admin/clients/:name/stats', getClientStats);
-router.post('/admin/clients/deploy-inline', deployInlineClient);
-router.post('/admin/clients/:name/subscription', updateSubscription);
-router.post('/admin/clients', createClient);
-router.delete('/admin/clients/:id', deleteClient);
-router.delete('/admin/clients/:name', deleteClient);
-
-// User & Access Management
-router.get('/admin/users', getUsers);
-router.get('/admin/operators', getOperators);
-router.post('/admin/operators/invite', inviteOperator);
-router.post('/admin/operators/:id/reset-password', resetOperatorPassword);
-router.post('/admin/users/:id/role', toggleUserRole);
-router.post('/admin/users/:id/lock', toggleUserLock);
-router.post('/admin/users/:id/cmdb', toggleUserCMDB);
-router.post('/admin/users/:id/playbook', toggleUserPlaybook);
-router.post('/admin/users/:id/web3', toggleUserWeb3);
-router.post('/admin/users/:id/reset-password', resetUserPassword);
-router.delete('/admin/users/:id', deleteUser);
-
-// Analytics & SEO / Crawler Stats
-router.get('/admin/seo-geo-analytics', getSeoGeoAnalytics);
-
-// Database & Host Infrastructure Health
-router.get('/admin/system-health', getSystemHealth);
-
-// Corporate & Partner License Management
-router.post('/admin/licenses/generate', generateLicense);
-router.get('/admin/licenses', getLicenses);
-router.delete('/admin/licenses/:id', revokeLicense);
-router.post('/admin/licenses/send-email', sendLicenseEmail);
-router.post('/admin/clients/send-next-steps-email', sendNextStepsEmail);
-router.post('/scan/license/verify', verifyLicenseKey);
-router.get('/admin/settings/mail', getMailSettings);
-router.post('/admin/settings/mail', updateMailSettings);
-
-// Corporate & Partner Tenant Onboarding
-router.post('/admin/onboard-partner', onboardPartnerTenant);
-router.post('/admin/onboard-user', onboardUser);
-
-// In-Tenant User Management & 2FA Policy (RBAC)
-router.get('/tenants/:tenant/users', getTenantUsers);
-router.post('/tenants/:tenant/users', createTenantUser);
-router.patch('/tenants/:tenant/users/:id', updateTenantUser);
-router.delete('/tenants/:tenant/users/:id', deleteTenantUser);
-router.post('/tenants/:tenant/users/:id/reset-2fa', resetTenantUser2FA);
-router.post('/tenants/:tenant/users/:id/reset-password', resetTenantUserPassword);
-router.get('/tenants/:tenant/2fa-policy', getTenant2FAPolicy);
-router.put('/tenants/:tenant/2fa-policy', updateTenant2FAPolicy);
-router.get('/tenant/:tenant/portal-data', getTenantPortalData);
-
-// Active Outbound TLS Prober
-router.post('/probe', probeEndpoint);
-
-// Remote Git Repository Scanner (GitHub & Bitbucket)
-router.post('/scan/remote-git', scanRemoteGitRepo);
-router.get('/scan/remote-git/history', getGitScanHistory);
-router.post('/scan/remote-git/export-cbom', exportGitCBOM);
-
-// CNSA 2.0 & Post-Quantum Intelligence News Feed
-router.get('/news/cnsa', getCnsaNews);
-
-// Unified Authentication & Auto-Recognition (Tenant, Partner, Super Admin)
 router.post('/auth/login', unifiedLogin);
 router.post('/auth/forgot-password', forgotPassword);
 router.post('/auth/change-password', changePassword);
+router.post('/auth/logout', logout);
+router.get('/auth/me', getMe);
 
-// Help & Feedback / Support In-App Contact Submission
+// ==========================================
+// PUBLIC endpoints (no session required)
+// ==========================================
+// News feed (marketing), install scripts + ingest (agent authenticates with an
+// enrollment token / license key inside ingestTelemetry), desktop license
+// verify, landing-page TLS probe, support form, config templates.
+router.get('/news/cnsa', getCnsaNews);
+router.get('/scan/agent/install.sh', getInstallerScript);
+router.get('/scan/agent/install.ps1', getPowerShellInstallerScript);
+router.post('/scan/agent/ingest', ingestTelemetry);
+router.post('/scan/license/verify', verifyLicenseKey);
+router.post('/probe', probeEndpoint);
 router.post('/support/contact', submitSupportTicket);
 
-// PQC Copilot AI Assistant
-router.post('/ai/chat', getAIChatResponse);
+// ==========================================
+// FLEET (authenticated, tenant-scoped)
+// ==========================================
+router.get('/fleet/tokens', requireAuth, requireTenantAccess, getFleetTokens);
+router.post('/fleet/tokens', requireAuth, requireTenantAccess, createFleetToken);
+router.delete('/fleet/tokens/:id', requireAuth, revokeFleetToken);
+router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines);
+router.delete('/fleet/machines/:id', requireAuth, deleteFleetMachine);
+router.post('/fleet/machines/:machineId/pull', requireAuth, enqueuePullCommand);
+router.get('/tenant/:tenant/daily-snapshots', requireAuth, requireTenantAccess, getTenantDailySnapshots);
+router.get('/fleet/cbom', requireAuth, requireTenantAccess, getFleetCBOM);
 
 // ==========================================
-// 1. CI/CD PIPELINE CBOM SECURITY GATES
+// ADMIN PANEL ROUTES (super admin only)
 // ==========================================
-router.post('/git/ci-gate/evaluate', evaluateCIGate);
-router.get('/git/ci-gate/history', getCIGateHistory);
-router.get('/git/ci-gate/policies', getCIGatePolicies);
+router.get('/admin/clients', requireSuperAdmin, getClients);
+router.get('/admin/clients/:name/stats', requireSuperAdmin, getClientStats);
+router.post('/admin/clients/deploy-inline', requireSuperAdmin, deployInlineClient);
+router.post('/admin/clients/:name/subscription', requireSuperAdmin, updateSubscription);
+router.post('/admin/clients', requireSuperAdmin, createClient);
+router.delete('/admin/clients/:id', requireSuperAdmin, deleteClient);
+router.delete('/admin/clients/:name', requireSuperAdmin, deleteClient);
+
+router.get('/admin/users', requireSuperAdmin, getUsers);
+router.get('/admin/operators', requireSuperAdmin, getOperators);
+router.post('/admin/operators/invite', requireSuperAdmin, inviteOperator);
+router.post('/admin/operators/:id/reset-password', requireSuperAdmin, resetOperatorPassword);
+router.post('/admin/users/:id/role', requireSuperAdmin, toggleUserRole);
+router.post('/admin/users/:id/lock', requireSuperAdmin, toggleUserLock);
+router.post('/admin/users/:id/cmdb', requireSuperAdmin, toggleUserCMDB);
+router.post('/admin/users/:id/playbook', requireSuperAdmin, toggleUserPlaybook);
+router.post('/admin/users/:id/web3', requireSuperAdmin, toggleUserWeb3);
+router.post('/admin/users/:id/reset-password', requireSuperAdmin, resetUserPassword);
+router.delete('/admin/users/:id', requireSuperAdmin, deleteUser);
+
+router.get('/admin/seo-geo-analytics', requireSuperAdmin, getSeoGeoAnalytics);
+router.get('/admin/system-health', requireSuperAdmin, getSystemHealth);
+
+router.post('/admin/licenses/generate', requireSuperAdmin, generateLicense);
+router.get('/admin/licenses', requireSuperAdmin, getLicenses);
+router.delete('/admin/licenses/:id', requireSuperAdmin, revokeLicense);
+router.post('/admin/licenses/send-email', requireSuperAdmin, sendLicenseEmail);
+router.post('/admin/clients/send-next-steps-email', requireSuperAdmin, sendNextStepsEmail);
+router.get('/admin/settings/mail', requireSuperAdmin, getMailSettings);
+router.post('/admin/settings/mail', requireSuperAdmin, updateMailSettings);
+
+router.post('/admin/onboard-partner', requireSuperAdmin, onboardPartnerTenant);
+router.post('/admin/onboard-user', requireSuperAdmin, onboardUser);
+
+// ==========================================
+// IN-TENANT USER MGMT & 2FA POLICY (authenticated, tenant-scoped)
+// ==========================================
+router.get('/tenants/:tenant/users', requireAuth, requireTenantAccess, getTenantUsers);
+router.post('/tenants/:tenant/users', requireAuth, requireTenantAccess, createTenantUser);
+router.patch('/tenants/:tenant/users/:id', requireAuth, requireTenantAccess, updateTenantUser);
+router.delete('/tenants/:tenant/users/:id', requireAuth, requireTenantAccess, deleteTenantUser);
+router.post('/tenants/:tenant/users/:id/reset-2fa', requireAuth, requireTenantAccess, resetTenantUser2FA);
+router.post('/tenants/:tenant/users/:id/reset-password', requireAuth, requireTenantAccess, resetTenantUserPassword);
+router.get('/tenants/:tenant/2fa-policy', requireAuth, requireTenantAccess, getTenant2FAPolicy);
+router.put('/tenants/:tenant/2fa-policy', requireAuth, requireTenantAccess, updateTenant2FAPolicy);
+router.get('/tenant/:tenant/portal-data', requireAuth, requireTenantAccess, getTenantPortalData);
+
+// ==========================================
+// GIT SCANNER (authenticated, tenant-scoped)
+// ==========================================
+router.post('/scan/remote-git', requireAuth, requireTenantAccess, scanRemoteGitRepo);
+router.get('/scan/remote-git/history', requireAuth, requireTenantAccess, getGitScanHistory);
+router.post('/scan/remote-git/export-cbom', requireAuth, requireTenantAccess, exportGitCBOM);
+
+// ==========================================
+// PQC Copilot AI Assistant (authenticated, tenant-scoped)
+// ==========================================
+router.post('/ai/chat', requireAuth, requireTenantAccess, getAIChatResponse);
+
+// ==========================================
+// CI/CD PIPELINE CBOM SECURITY GATES
+// ==========================================
+// Templates + runner script are public config text. evaluate/history/policies
+// are authenticated + tenant-scoped.
+router.post('/git/ci-gate/evaluate', requireAuth, requireTenantAccess, evaluateCIGate);
+router.get('/git/ci-gate/history', requireAuth, requireTenantAccess, getCIGateHistory);
+router.get('/git/ci-gate/policies', requireAuth, requireTenantAccess, getCIGatePolicies);
 router.get('/git/ci-gate/templates/:provider', getCITemplate);
 router.get('/git/ci-gate/template', (req, res) => {
   const provider = (req.query.provider as string) || 'github';
@@ -208,23 +212,23 @@ router.get('/git/ci-gate/template', (req, res) => {
 router.get('/git/ci-gate/runner.sh', (req, res) => getCITemplate({ ...req, params: { provider: 'runner' } } as any, res));
 
 // ==========================================
-// 2. ENTERPRISE PKI & CLOUD VAULT CONNECTORS
+// ENTERPRISE PKI & CLOUD VAULT CONNECTORS (authenticated, tenant-scoped)
 // ==========================================
-router.get('/pki/connectors', getPkiConnectors);
-router.post('/pki/connectors', createPkiConnector);
-router.post('/pki/connectors/:id/test', testPkiConnector);
-router.post('/pki/connectors/:id/sync', syncPkiConnector);
-router.delete('/pki/connectors/:id', deletePkiConnector);
-router.get('/pki/assets', getPkiSyncedAssets);
+router.get('/pki/connectors', requireAuth, requireTenantAccess, getPkiConnectors);
+router.post('/pki/connectors', requireAuth, requireTenantAccess, createPkiConnector);
+router.post('/pki/connectors/:id/test', requireAuth, testPkiConnector);
+router.post('/pki/connectors/:id/sync', requireAuth, syncPkiConnector);
+router.delete('/pki/connectors/:id', requireAuth, deletePkiConnector);
+router.get('/pki/assets', requireAuth, requireTenantAccess, getPkiSyncedAssets);
 
 // ==========================================
-// 3. TRANSPARENT HYBRID QUANTUM TLS PROXY
+// TRANSPARENT HYBRID QUANTUM TLS PROXY (authenticated, tenant-scoped)
 // ==========================================
-router.get('/proxy/instances', getProxies);
-router.post('/proxy/instances', createProxy);
-router.patch('/proxy/instances/:id/state', toggleProxyState);
-router.delete('/proxy/instances/:id', deleteProxy);
-router.post('/proxy/instances/:id/test', testProxyHandshake);
+router.get('/proxy/instances', requireAuth, requireTenantAccess, getProxies);
+router.post('/proxy/instances', requireAuth, requireTenantAccess, createProxy);
+router.patch('/proxy/instances/:id/state', requireAuth, toggleProxyState);
+router.delete('/proxy/instances/:id', requireAuth, deleteProxy);
+router.post('/proxy/instances/:id/test', requireAuth, testProxyHandshake);
 router.get('/proxy/templates/:format', getProxyTemplate);
 router.get('/proxy/template', (req, res) => {
   const format = (req.query.format as string) || 'nginx';
@@ -232,13 +236,13 @@ router.get('/proxy/template', (req, res) => {
 });
 
 // =========================================================================
-// 4. SOFTWARE BILL OF MATERIALS (SBOM) & VULNERABILITY FIX ENGINE
+// PLATFORM SBOM & VULNERABILITY FIX ENGINE (super admin only)
 // =========================================================================
-router.get('/sbom/components', getSbomComponents);
-router.get('/sbom/stats', getSbomStats);
-router.get('/sbom/export', exportSbom);
-router.get('/sbom/fix-script', getFixScript);
-router.get('/sbom/superadmin-guide', getSuperAdminGuide);
+router.get('/sbom/components', requireSuperAdmin, getSbomComponents);
+router.get('/sbom/stats', requireSuperAdmin, getSbomStats);
+router.get('/sbom/export', requireSuperAdmin, exportSbom);
+router.get('/sbom/fix-script', requireSuperAdmin, getFixScript);
+router.get('/sbom/superadmin-guide', requireSuperAdmin, getSuperAdminGuide);
 
 export default router;
 

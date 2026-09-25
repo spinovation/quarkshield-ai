@@ -1,19 +1,38 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { initDb } from './config/db';
+import { bootstrapAdmin } from './config/bootstrap';
 import routes from './routes/routes';
+import { attachUser } from './middleware/auth';
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5050;
 
-app.use(cors());
+// Restrict CORS to configured origins when provided; credentials enabled so the
+// session cookie is sent cross-subdomain. ALLOWED_ORIGINS is comma-separated;
+// if unset, reflect the request origin (dev convenience).
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin) return cb(null, true); // same-origin / curl
+    if (allowedOrigins.length === 0) return cb(null, true);
+    return cb(null, allowedOrigins.includes(origin));
+  },
+  credentials: true,
+}));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+app.use(cookieParser());
+app.use(attachUser);
 
 // Determine and serve compiled agent downloads
 const possibleDownloadPaths = [
@@ -113,10 +132,13 @@ const startServers = () => {
 };
 
 // Initialize database & start server
-initDb().then(() => {
-  startServers();
-}).catch(err => {
-  console.error('Failed to initialize database:', err);
-  startServers();
-});
+initDb()
+  .then(() => bootstrapAdmin())
+  .then(() => {
+    startServers();
+  })
+  .catch(err => {
+    console.error('Failed to initialize database:', err);
+    startServers();
+  });
 

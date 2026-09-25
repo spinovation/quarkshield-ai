@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
+import { verifyPassword, hashPassword } from '../utils/password';
+import { signSession, setSessionCookie, clearSessionCookie, isSuperRole } from '../middleware/auth';
 import os from 'os';
 import tls from 'tls';
 import fs from 'fs';
@@ -2487,235 +2489,133 @@ export const probeEndpoint = async (req: Request, res: Response) => {
 // ==============================================================================
 export const unifiedLogin = async (req: Request, res: Response) => {
   try {
-    const { identifier, password, totpCode } = req.body;
+    const { identifier, password } = req.body;
     if (!identifier || !identifier.trim()) {
       return res.status(400).json({ error: 'Email or workspace identifier is required.' });
     }
+    if (!password) {
+      return res.status(401).json({ error: 'Password is required.' });
+    }
 
     const cleanId = identifier.trim().toLowerCase();
+    const INVALID = 'Invalid credentials.'; // uniform message: no account enumeration
 
-    // 1. Check if identifier matches a registered Tenant / Client workspace or admin email in admin_clients
-    try {
-      const clientResult = await pool.query(
-        `SELECT name, display_name, subscription_tier, account_type, customer_id, status 
-         FROM admin_clients 
-         WHERE LOWER(name) = $1 OR LOWER(display_name) = $1 OR LOWER(admin_email) = $1`,
-        [cleanId]
-      );
-
-      if (clientResult.rows.length > 0) {
-        const c = clientResult.rows[0];
-
-        // Enforce password verification against admin_users or tenant_users
-        const passCheck = await pool.query(
-          `SELECT password_hash, salt FROM admin_users WHERE LOWER(email) = $1
-           UNION
-           SELECT password_hash, salt FROM tenant_users WHERE LOWER(email) = $1 AND password_hash IS NOT NULL
-           LIMIT 1`,
-          [cleanId]
-        );
-
-        if (passCheck.rows.length > 0 && passCheck.rows[0].password_hash && passCheck.rows[0].salt) {
-          if (!password) {
-            return res.status(401).json({ error: 'Password is required to authenticate.' });
-          }
-          const testHash = crypto.createHash('sha256').update(password + passCheck.rows[0].salt).digest('hex');
-          if (testHash !== passCheck.rows[0].password_hash) {
-            return res.status(401).json({ error: 'Invalid password. Please check your credentials or reset your password.' });
-          }
-        }
-
-        const isPartner = c.account_type === 'partner' || c.subscription_tier === 'partner' || c.subscription_tier === 'corp';
-        const customerId = c.customer_id || (isPartner ? 'PART-9148' : 'CORP-4821');
-        const licenseTier = isPartner ? 'MSP PARTNER PRO' : (c.subscription_tier === 'enterprise' ? 'CORPORATE ENTERPRISE' : 'CORPORATE PRO');
-        const customerName = (c.display_name || c.name || (isPartner ? 'MSP PARTNER' : 'CORPORATE CLIENT')).toUpperCase();
-
-        return res.json({
-          success: true,
-          accountType: isPartner ? 'partner' : 'corporate',
-          role: isPartner ? 'Partner Admin' : 'Corporate Admin',
-          customerId,
-          customerName,
-          licenseTier,
-          userEmail: cleanId,
-          workspace: c.name,
-          redirectUrl: `https://${c.name}.quarkshield.ai`,
-          message: `Redirecting to ${isPartner ? 'Partner' : 'Corporate'} Workspace.`
-        });
+    // ---- 1. Platform operator (admin_users) by email or id ----
+    const adminUserResult = await pool.query(
+      'SELECT id, email, role, company, password_hash, salt, row_locked, must_change_password FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
+      [cleanId]
+    );
+    if (adminUserResult.rows.length > 0) {
+      const u = adminUserResult.rows[0];
+      if (!u.password_hash) {
+        return res.status(401).json({ error: 'This account has no password set. Ask an administrator to send a reset.' });
       }
-    } catch (dbErr) {
-      console.warn('DB check for admin_clients skipped/fallback:', dbErr);
-    }
-
-    // 2. Check if identifier is in admin_users (Central Control Plane / Internal Super Admin)
-    try {
-      const adminUserResult = await pool.query(
-        'SELECT id, email, role, company, password_hash, salt, must_change_password FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
-        [cleanId]
-      );
-
-      if (adminUserResult.rows.length > 0) {
-        const u = adminUserResult.rows[0];
-
-        // Enforce password verification if user has password_hash and salt configured
-        if (u.password_hash && u.salt) {
-          if (!password) {
-            return res.status(401).json({ error: 'Password is required to authenticate this administrator account.' });
-          }
-          const testHash = crypto.createHash('sha256').update(password + u.salt).digest('hex');
-          if (testHash !== u.password_hash) {
-            return res.status(401).json({ error: 'Invalid password. Please check your credentials or reset your password.' });
-          }
-        }
-
-        const isSuperOrOperator = (cleanId.includes('@quarkshield.ai') || cleanId === 'sridhargs@gmail.com' || cleanId === 'superadmin') && 
-          ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor'].includes(u.role);
-
-        if (isSuperOrOperator) {
-          const adminId = u.id ? ('QS-' + u.id.replace(/^usr-/, '').replace(/^op-/, '').toUpperCase()) : 'QS-ADMIN-001';
-          return res.json({
-            success: true,
-            accountType: 'superadmin',
-            target: 'console',
-            initialTab: 'admin',
-            role: u.role === 'secops_lead' ? 'SecOps Lead' : u.role === 'support_engineer' ? 'Support Engineer' : 'Super Admin',
-            customerId: adminId,
-            customerName: u.company || 'INTERNAL USER',
-            licenseTier: 'INTERNAL ROOT',
-            isInternal: true,
-            userEmail: cleanId,
-            mustChangePassword: !!u.must_change_password,
-            message: 'Authenticated to Central Orchestration Plane.'
-          });
-        }
+      const v = await verifyPassword(password, u.password_hash, u.salt);
+      if (!v.ok) return res.status(401).json({ error: INVALID });
+      if (u.row_locked) return res.status(403).json({ error: 'This account is locked. Contact an administrator.' });
+      if (v.needsUpgrade) {
+        const newHash = await hashPassword(password);
+        await pool.query('UPDATE admin_users SET password_hash = $1, salt = NULL WHERE id = $2', [newHash, u.id]);
       }
-    } catch (dbErr) {
-      console.warn('DB check for admin_users skipped/fallback:', dbErr);
-    }
-
-    // 3. Check if identifier matches tenant_users (Users belonging to a specific tenant pod)
-    try {
-      const tenantUserResult = await pool.query(
-        `SELECT tu.tenant_name, tu.role, tu.password_hash, tu.salt, tu.must_change_password, c.customer_id, c.display_name, c.subscription_tier, c.account_type 
-         FROM tenant_users tu 
-         LEFT JOIN admin_clients c ON LOWER(c.name) = LOWER(tu.tenant_name) 
-         WHERE LOWER(tu.email) = $1`,
-        [cleanId]
-      );
-
-      if (tenantUserResult.rows.length > 0) {
-        const tu = tenantUserResult.rows[0];
-
-        // Enforce password verification if tenant user has password configured
-        if (tu.password_hash && tu.salt) {
-          if (!password) {
-            return res.status(401).json({ error: 'Password is required to authenticate.' });
-          }
-          const testHash = crypto.createHash('sha256').update(password + tu.salt).digest('hex');
-          if (testHash !== tu.password_hash) {
-            return res.status(401).json({ error: 'Invalid password. Please check credentials or contact administrator.' });
-          }
-        }
-
-        const isPartner = tu.account_type === 'partner' || tu.subscription_tier === 'partner';
-        const customerId = tu.customer_id || (isPartner ? 'PART-4421' : 'CORP-4821');
-        const customerName = (tu.display_name || tu.tenant_name || (isPartner ? 'MSP PARTNER' : 'CORPORATE CLIENT')).toUpperCase();
-        const licenseTier = isPartner ? 'MSP PARTNER PRO' : 'CORPORATE ENTERPRISE';
-
-        // Accurately map tenant user role (e.g. secops -> SOC Analyst, admin -> Partner/Corporate Admin)
-        let mappedRole = 'SOC Analyst';
-        if (tu.role === 'admin') {
-          mappedRole = isPartner ? 'Partner Admin' : 'Corporate Admin';
-        } else if (tu.role === 'secops') {
-          mappedRole = 'SOC Analyst';
-        } else if (tu.role === 'auditor') {
-          mappedRole = 'Compliance Auditor';
-        } else {
-          mappedRole = 'Security Operator';
-        }
-
-        return res.json({
-          success: true,
-          accountType: 'tenant',
-          tenantType: isPartner ? 'partner' : 'corporate',
-          role: mappedRole,
-          customerId,
-          customerName,
-          licenseTier,
-          userEmail: cleanId,
-          workspace: tu.tenant_name,
-          target: 'tenant',
-          redirectUrl: `https://${tu.tenant_name}.quarkshield.ai`,
-          mustChangePassword: !!tu.must_change_password,
-          message: `Redirecting to Tenant Workspace (${tu.tenant_name}).`
-        });
-      }
-    } catch (dbErr) {
-      console.warn('DB check for tenant_users skipped/fallback:', dbErr);
-    }
-
-    // 4. Deterministic smart recognition fallback:
-    // a) Specific partner sridhargs@algomeld.ai or partner keywords
-    if (cleanId === 'sridhargs@algomeld.ai' || cleanId.includes('partner') || cleanId.includes('@partner.') || cleanId.includes('algomeld')) {
+      const superRole = isSuperRole(u.role);
+      const roleLabel = u.role === 'secops_lead' ? 'SecOps Lead' : u.role === 'support_engineer' ? 'Support Engineer' : superRole ? 'Super Admin' : 'Operator';
+      const token = signSession({ sub: u.id, email: u.email, role: u.role, accountType: superRole ? 'superadmin' : 'operator', tenant: null });
+      setSessionCookie(res, token);
+      await pool.query('UPDATE admin_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [u.id]).catch(() => {});
       return res.json({
         success: true,
-        accountType: 'tenant',
-        tenantType: 'partner',
-        target: 'tenant',
-        role: cleanId === 'sridhargs@algomeld.ai' ? 'Partner Admin' : 'SOC Analyst',
-        customerId: 'PART-4421',
-        customerName: 'ALGO MELD MSP',
-        licenseTier: 'MSP PARTNER PRO',
-        userEmail: cleanId,
-        workspace: 'algomeld',
-        redirectUrl: 'https://algomeld.quarkshield.ai',
-        message: 'Authenticated as Algomeld Workspace User.'
-      });
-    }
-
-    // b) Super Admin / Internal operations
-    if (cleanId.includes('@quarkshield.ai') || cleanId === 'superadmin' || cleanId === 'sridhargs@gmail.com') {
-      return res.json({
-        success: true,
-        accountType: 'superadmin',
+        token,
+        accountType: superRole ? 'superadmin' : 'operator',
         target: 'console',
         initialTab: 'admin',
-        role: 'Super Admin',
-        customerId: 'QS-ADMIN-001',
-        customerName: 'INTERNAL USER',
+        role: roleLabel,
+        customerId: 'QS-' + String(u.id).replace(/^usr-/, '').replace(/^op-/, '').toUpperCase(),
+        customerName: u.company || 'INTERNAL USER',
         licenseTier: 'INTERNAL ROOT',
         isInternal: true,
-        userEmail: cleanId,
-        message: 'Authenticated to Central Orchestration Plane as Internal User.'
+        userEmail: u.email,
+        mustChangePassword: !!u.must_change_password,
+        message: 'Authenticated to Central Orchestration Plane.'
       });
     }
 
-    // c) Corporate tenant email or workspace subdomain
-    const emailParts = cleanId.split('@');
-    if (emailParts.length === 2) {
-      const domainName = emailParts[1].split('.')[0];
-      const cleanSubdomain = domainName.replace(/[^a-z0-9-]/g, '');
+    // ---- 2. Tenant user (tenant_users) by email ----
+    const tenantUserResult = await pool.query(
+      `SELECT tu.id, tu.email, tu.tenant_name, tu.role, tu.password_hash, tu.salt, tu.status, tu.must_change_password,
+              c.customer_id, c.display_name, c.subscription_tier, c.account_type, c.status AS client_status
+       FROM tenant_users tu
+       LEFT JOIN admin_clients c ON LOWER(c.name) = LOWER(tu.tenant_name)
+       WHERE LOWER(tu.email) = $1
+       ORDER BY tu.created_at ASC
+       LIMIT 1`,
+      [cleanId]
+    );
+    if (tenantUserResult.rows.length > 0) {
+      const tu = tenantUserResult.rows[0];
+      if (!tu.password_hash) {
+        return res.status(401).json({ error: 'This account has no password set. Ask your administrator to send a reset.' });
+      }
+      const v = await verifyPassword(password, tu.password_hash, tu.salt);
+      if (!v.ok) return res.status(401).json({ error: INVALID });
+      if (tu.status && tu.status !== 'active') {
+        return res.status(403).json({ error: 'This account is disabled. Contact your administrator.' });
+      }
+      if (tu.client_status && tu.client_status !== 'active') {
+        return res.status(403).json({ error: 'This workspace is not active. Contact support.' });
+      }
+      if (v.needsUpgrade) {
+        const newHash = await hashPassword(password);
+        await pool.query('UPDATE tenant_users SET password_hash = $1, salt = NULL WHERE id = $2', [newHash, tu.id]);
+      }
+      const isPartner = tu.account_type === 'partner' || tu.subscription_tier === 'partner';
+      const customerId = tu.customer_id || (isPartner ? 'PART-0000' : 'CORP-0000');
+      const customerName = (tu.display_name || tu.tenant_name).toUpperCase();
+      const licenseTier = isPartner ? 'MSP PARTNER PRO' : 'CORPORATE ENTERPRISE';
+      let mappedRole = 'Security Operator';
+      if (tu.role === 'admin') mappedRole = isPartner ? 'Partner Admin' : 'Corporate Admin';
+      else if (tu.role === 'secops') mappedRole = 'SOC Analyst';
+      else if (tu.role === 'auditor') mappedRole = 'Compliance Auditor';
+      const token = signSession({ sub: tu.id, email: tu.email, role: tu.role || 'secops', accountType: 'tenant', tenant: tu.tenant_name });
+      setSessionCookie(res, token);
+      await pool.query('UPDATE tenant_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [tu.id]).catch(() => {});
       return res.json({
         success: true,
+        token,
         accountType: 'tenant',
-        workspace: cleanSubdomain,
-        redirectUrl: `https://${cleanSubdomain}.quarkshield.ai`,
-        message: `Routing to Tenant Workspace.`
-      });
-    } else {
-      const cleanSubdomain = cleanId.replace(/[^a-z0-9-]/g, '');
-      return res.json({
-        success: true,
-        accountType: 'tenant',
-        workspace: cleanSubdomain,
-        redirectUrl: `https://${cleanSubdomain}.quarkshield.ai`,
-        message: `Routing to Tenant Workspace.`
+        tenantType: isPartner ? 'partner' : 'corporate',
+        role: mappedRole,
+        customerId,
+        customerName,
+        licenseTier,
+        userEmail: tu.email,
+        workspace: tu.tenant_name,
+        target: 'tenant',
+        redirectUrl: `https://${tu.tenant_name}.quarkshield.ai`,
+        mustChangePassword: !!tu.must_change_password,
+        message: `Redirecting to Tenant Workspace (${tu.tenant_name}).`
       });
     }
+
+    // No account matched, or workspace-name-only login: reject.
+    // (Passwordless workspace/keyword fallbacks were removed — they allowed
+    // anyone to log in as super admin or any tenant without a password.)
+    return res.status(401).json({ error: INVALID });
   } catch (err: any) {
     console.error('Unified login error:', err);
     res.status(500).json({ error: 'Authentication service encountered an internal error.' });
   }
+};
+
+/** End the current session. */
+export const logout = async (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  return res.json({ success: true });
+};
+
+/** Return the current authenticated session, or 401. */
+export const getMe = async (req: Request, res: Response) => {
+  if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
+  return res.json({ success: true, user: req.user });
 };
 
 export const forgotPassword = async (req: Request, res: Response) => {
