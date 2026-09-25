@@ -48,6 +48,7 @@ import MoscaMigrationPlanner from './components/MoscaMigrationPlanner';
 import { EnterprisePkiVaults } from './components/EnterprisePkiVaults';
 import { PqcProxyGateway } from './components/PqcProxyGateway';
 import SbomInventory from './components/SbomInventory';
+import ResetPasswordPage from './components/ResetPasswordPage';
 
 export type TabType = 'dashboard' | 'cbom' | 'tokens' | 'git' | 'pki' | 'proxy' | 'planner' | 'admin';
 
@@ -1263,6 +1264,11 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
         return '';
     }
   };
+
+  // Password reset page (from the emailed link) is served regardless of view mode.
+  if (window.location.pathname.toLowerCase().startsWith('/reset-password')) {
+    return <ResetPasswordPage />;
+  }
 
   if (viewMode === 'landing') {
     return (
