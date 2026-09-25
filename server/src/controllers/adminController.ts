@@ -2686,55 +2686,36 @@ export const getMe = async (req: Request, res: Response) => {
 };
 
 export const forgotPassword = async (req: Request, res: Response) => {
+  // Neutral response used in every branch so the endpoint never reveals whether
+  // an account exists (no enumeration).
+  const NEUTRAL = { success: true, message: 'If an account exists for that email, a password reset link has been sent.' };
   try {
     const { email } = req.body;
     if (!email || !email.includes('@')) {
       return res.status(400).json({ error: 'Valid email address is required.' });
     }
-
     const cleanEmail = email.toLowerCase().trim();
 
-    // Check admin_users or tenant_users
-    const adminRes = await pool.query('SELECT id, email, company FROM admin_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
-    const tenantRes = await pool.query('SELECT id, email, tenant_name, first_name FROM tenant_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
-
+    // Does an account exist? (Do NOT create one as a side effect.)
+    const adminRes = await pool.query('SELECT id FROM admin_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
+    const tenantRes = await pool.query('SELECT id FROM tenant_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
     if (adminRes.rowCount === 0 && tenantRes.rowCount === 0) {
-      // Also check admin_clients contact_email / admin_email
-      const clientRes = await pool.query('SELECT name, admin_email, contact_email FROM admin_clients WHERE LOWER(admin_email) = LOWER($1) OR LOWER(contact_email) = LOWER($1) LIMIT 1', [cleanEmail]);
-      if (clientRes.rowCount === 0) {
-        return res.status(404).json({ error: 'No account found matching this email address. Please contact Support@quarkshield.ai.' });
-      }
+      return res.json(NEUTRAL); // silent: no account, no email, no enumeration
     }
 
-    const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-    const salt = crypto.randomBytes(16).toString('hex');
-    const passwordHash = crypto.createHash('sha256').update(tempPassword + salt).digest('hex');
+    // Issue a single-use, time-limited reset token (store only its hash).
+    const token = crypto.randomBytes(32).toString('base64url');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+    await pool.query(
+      `INSERT INTO password_reset_tokens (id, email, token_hash, expires_at) VALUES ($1, $2, $3, $4)`,
+      ['prt-' + crypto.randomUUID().slice(0, 12), cleanEmail, tokenHash, expiresAt]
+    );
 
-    // Update admin_users if present, or insert
-    if (adminRes.rowCount && adminRes.rowCount > 0) {
-      await pool.query(
-        'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
-        [passwordHash, salt, cleanEmail]
-      );
-    } else {
-      const newId = 'usr-' + crypto.randomUUID().substring(0, 8);
-      await pool.query(`
-        INSERT INTO admin_users (id, email, password_hash, salt, role, must_change_password, email_verified, company)
-        VALUES ($1, $2, $3, $4, 'user', true, true, 'Registered Client')
-        ON CONFLICT (email) DO UPDATE SET password_hash = $3, salt = $4, must_change_password = true
-      `, [newId, cleanEmail, passwordHash, salt]);
-    }
-
-    // Update tenant_users if present
-    if (tenantRes.rowCount && tenantRes.rowCount > 0) {
-      await pool.query(
-        'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
-        [passwordHash, salt, cleanEmail]
-      );
-    }
-
-    const loginUrl = 'https://quarkshield.ai';
-    const emailSubject = 'Your QuarkShield Temporary Password & Password Reset Instructions';
+    const base = process.env.APP_BASE_URL || 'https://quarkshield.ai';
+    const resetUrl = `${base}/reset-password?token=${token}`;
+    const loginUrl = base;
+    const emailSubject = 'Reset your QuarkShield password';
     const htmlBody = `
       <!DOCTYPE html>
       <html>
@@ -2746,23 +2727,21 @@ export const forgotPassword = async (req: Request, res: Response) => {
             <p style="margin: 8px 0 0 0; font-size: 13px; color: #94a3b8;">Account Recovery & Password Reset</p>
           </div>
           <div style="padding: 28px;">
-            <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Temporary Password Issued</h2>
+            <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Reset your password</h2>
             <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
               Hello,<br/>
-              A password reset request was received for your QuarkShield account (<code>${cleanEmail}</code>).
+              A password reset was requested for your QuarkShield account (<code>${cleanEmail}</code>).
+              Click the button below to choose a new password. This link expires in 1 hour and can be used once.
+              If you did not request this, you can ignore this email &mdash; your password will not change.
             </p>
-            <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 18px; margin: 20px 0; text-align: center;">
-              <div style="font-size: 12px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; margin-bottom: 6px;">Your Temporary Password</div>
-              <div style="font-family: 'Courier New', monospace; font-size: 22px; font-weight: bold; color: #00f2fe; letter-spacing: 2px;">${tempPassword}</div>
-            </div>
-            <div style="background: rgba(239, 68, 68, 0.12); border-left: 4px solid #ef4444; padding: 12px 16px; border-radius: 4px; margin: 20px 0; color: #fca5a5; font-size: 13px; line-height: 1.5;">
-              <strong>Important Security Policy:</strong> You will be required to change this temporary password immediately upon your next sign-in.
-            </div>
             <div style="text-align: center; margin: 25px 0 10px 0;">
-              <a href="${loginUrl}" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">
-                Sign In to QuarkShield
+              <a href="${resetUrl}" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 6px; font-weight: 600; font-size: 14px; display: inline-block;">
+                Reset Password
               </a>
             </div>
+            <p style="color: #64748b; font-size: 12px; line-height: 1.5; word-break: break-all;">
+              Or paste this link into your browser:<br/>${resetUrl}
+            </p>
           </div>
           <div style="background: #0b0f19; padding: 18px; text-align: center; font-size: 12px; color: #64748b; border-top: 1px solid #1e293b;">
             QuarkShield Security Operations • Support@quarkshield.ai
@@ -2771,7 +2750,7 @@ export const forgotPassword = async (req: Request, res: Response) => {
       </body>
       </html>
     `;
-    const plainTextBody = `QuarkShield Temporary Password\n\nA password reset request was received for ${cleanEmail}.\n\nTemporary Password: ${tempPassword}\nSign In: ${loginUrl}\n\nYou must change this password immediately upon first login.\n\nQuarkShield Support <Support@quarkshield.ai>`;
+    const plainTextBody = `QuarkShield Password Reset\n\nA password reset was requested for ${cleanEmail}.\nReset your password (link expires in 1 hour, single use):\n${resetUrl}\n\nIf you did not request this, ignore this email; your password will not change.\n\nQuarkShield Support <Support@quarkshield.ai>`;
 
     await sendSupportEmail({
       to: cleanEmail,
@@ -2780,13 +2759,44 @@ export const forgotPassword = async (req: Request, res: Response) => {
       text: plainTextBody
     });
 
-    res.json({
-      success: true,
-      message: `A temporary password has been dispatched to ${cleanEmail} from Support@quarkshield.ai. Please check your inbox and sign in.`
-    });
+    return res.json(NEUTRAL);
   } catch (err: any) {
     console.error('Error in forgotPassword:', err);
-    res.status(500).json({ error: 'Failed to process password reset request.' });
+    return res.json(NEUTRAL); // still neutral on internal error
+  }
+};
+
+/**
+ * Complete a password reset with a token from the emailed link. Single-use,
+ * time-limited; sets a bcrypt password on every account (admin/tenant) for the
+ * token's email.
+ */
+export const resetPassword = async (req: Request, res: Response) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: 'Token and new password are required.' });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({ error: 'New password must be at least 8 characters.' });
+    }
+    const tokenHash = crypto.createHash('sha256').update(String(token)).digest('hex');
+    const r = await pool.query(
+      `SELECT id, email, expires_at, used FROM password_reset_tokens WHERE token_hash = $1`,
+      [tokenHash]
+    );
+    const row = r.rows[0];
+    if (!row || row.used || new Date(row.expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ error: 'This reset link is invalid or has expired. Request a new one.' });
+    }
+    const newHash = await hashPassword(String(newPassword));
+    await pool.query('UPDATE admin_users SET password_hash = $1, salt = NULL, must_change_password = false WHERE LOWER(email) = LOWER($2)', [newHash, row.email]);
+    await pool.query('UPDATE tenant_users SET password_hash = $1, salt = NULL, must_change_password = false WHERE LOWER(email) = LOWER($2)', [newHash, row.email]);
+    await pool.query('UPDATE password_reset_tokens SET used = true WHERE id = $1', [row.id]);
+    return res.json({ success: true, message: 'Password updated. You can now sign in.' });
+  } catch (err: any) {
+    console.error('Error in resetPassword:', err);
+    return res.status(500).json({ error: 'Failed to reset password.' });
   }
 };
 

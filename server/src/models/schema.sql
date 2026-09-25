@@ -536,3 +536,15 @@ ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
 -- TOTP 2FA recovery-code hashes (two_factor_secret already exists on both tables)
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
 ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
+
+-- Password reset tokens (single-use, time-limited). Replaces the old
+-- "forgot password immediately overwrites the password" behaviour.
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id VARCHAR(100) PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  token_hash VARCHAR(255) NOT NULL,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  used BOOLEAN DEFAULT false,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_prt_token_hash ON password_reset_tokens(token_hash);

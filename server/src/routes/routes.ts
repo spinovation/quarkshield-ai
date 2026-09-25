@@ -56,6 +56,7 @@ import {
   resetOperatorPassword,
   resetTenantUserPassword,
   forgotPassword,
+  resetPassword,
   changePassword,
   logout,
   getMe
@@ -105,6 +106,7 @@ const router = Router();
 // ==========================================
 router.post('/auth/login', unifiedLogin);
 router.post('/auth/forgot-password', forgotPassword);
+router.post('/auth/reset-password', resetPassword);
 router.post('/auth/change-password', changePassword);
 router.post('/auth/logout', logout);
 router.get('/auth/me', getMe);
