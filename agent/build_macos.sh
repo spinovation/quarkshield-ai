@@ -7,6 +7,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Clean up any leftover staging directories from prior builds
+rm -rf dmg_stage_* zip_stage_*
+STAGE_DIR=""
+ZIP_STAGE=""
+trap 'rm -rf "$STAGE_DIR" "$ZIP_STAGE"' EXIT INT TERM
+
 echo "======================================================================"
 echo " 🍏 Building QuarkShield Universal macOS Agent (.app, .dmg, .zip)"
 echo "======================================================================"
@@ -115,12 +121,16 @@ for DL_DIR in "../ui/public/downloads" "../ui/dist/downloads"; do
   fi
 done
 
+# 7. Unregister intermediate workspace app bundle to prevent Launchpad duplicates
+echo "🧹 [7/7] Cleaning intermediate workspace app bundle from Launchpad registry..."
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -u QuarkShield.app 2>/dev/null || true
+rm -rf QuarkShield.app
+
 echo "======================================================================"
 echo "✅ macOS Build, Packaging & Distribution Complete!"
 echo "   • Universal Binary:  quarkshield-scanner-darwin-universal"
 echo "   • Apple Silicon:     quarkshield-scanner-darwin-arm64"
 echo "   • Intel x86_64:      quarkshield-scanner-darwin-amd64"
-echo "   • App Bundle:        QuarkShield.app"
 echo "   • Disk Image (DMG):  QuarkShield-macOS.dmg"
 echo "   • Zip Archive:       quarkshield-scanner-macos.zip"
 echo "======================================================================"
