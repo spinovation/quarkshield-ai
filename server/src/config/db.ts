@@ -16,16 +16,33 @@ const pool = new Pool({
 
 /**
  * Split a SQL script into individual statements on top-level semicolons.
- * Single-quoted string literals are respected so semicolons inside values
- * are not treated as terminators. The schema contains no dollar-quoted
- * blocks or stored functions, so this is sufficient.
+ * Single-quoted string literals AND `--` line comments are respected, so a
+ * semicolon inside a value or inside a comment is not treated as a statement
+ * terminator. The schema contains no dollar-quoted blocks or stored functions,
+ * so this is sufficient.
  */
 const splitSqlStatements = (sql: string): string[] => {
   const statements: string[] = [];
   let current = '';
   let inSingleQuote = false;
+  let inLineComment = false;
   for (let i = 0; i < sql.length; i++) {
     const ch = sql[i];
+
+    // Inside a -- line comment: consume (keep for readability) until newline.
+    if (inLineComment) {
+      current += ch;
+      if (ch === '\n') inLineComment = false;
+      continue;
+    }
+
+    // Start of a -- line comment (only outside a string literal).
+    if (!inSingleQuote && ch === '-' && sql[i + 1] === '-') {
+      inLineComment = true;
+      current += ch;
+      continue;
+    }
+
     if (ch === "'") {
       if (inSingleQuote && sql[i + 1] === "'") {
         current += "''";
@@ -36,17 +53,26 @@ const splitSqlStatements = (sql: string): string[] => {
       current += ch;
       continue;
     }
+
     if (ch === ';' && !inSingleQuote) {
-      const trimmed = current.trim();
-      if (trimmed) statements.push(trimmed);
+      pushStatement(statements, current);
       current = '';
       continue;
     }
     current += ch;
   }
-  const tail = current.trim();
-  if (tail) statements.push(tail);
+  pushStatement(statements, current);
   return statements;
+};
+
+/** Push a statement unless it is empty or contains only whitespace/comments. */
+const pushStatement = (statements: string[], raw: string): void => {
+  const trimmed = raw.trim();
+  if (!trimmed) return;
+  // Ignore chunks that are only line comments (e.g. a trailing comment after ';').
+  const withoutComments = trimmed.replace(/--[^\n]*/g, '').trim();
+  if (!withoutComments) return;
+  statements.push(trimmed);
 };
 
 export const initDb = async () => {
