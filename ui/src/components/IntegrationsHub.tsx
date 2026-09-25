@@ -402,7 +402,7 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
                 fontWeight: 700,
                 letterSpacing: '0.05em'
               }}>
-                WIZ / SPLUNK UNIFIED INGESTION ARCHITECTURE
+                CENTRALIZED MULTI-SOURCE INGESTION ARCHITECTURE
               </span>
             </div>
             <h1 style={{ fontSize: '1.5rem', fontWeight: 800, margin: '0 0 0.4rem 0', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
