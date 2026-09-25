@@ -832,7 +832,31 @@ export const getSystemHealth = async (req: Request, res: Response) => {
 // 5. CORPORATE & PARTNER LICENSE GENERATOR & MANAGEMENT
 // ==============================================================================
 
-const MASTER_SIGNING_SECRET = "QuarkShield_PQC_Fleet_Master_License_Secret_2026";
+// License signing secret. MUST be provided via env in production. The old
+// hardcoded value shipped in the repo and the agent binary, so anyone could
+// forge keys; set LICENSE_SIGNING_SECRET to a fresh random value and re-issue
+// keys. Falls back only outside production for local runs.
+const getLicenseSecret = (): string => {
+  const s = process.env.LICENSE_SIGNING_SECRET;
+  if (s && s.length >= 16) return s;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('LICENSE_SIGNING_SECRET is not set (required in production)');
+  }
+  return 'dev-insecure-license-secret-change-me';
+};
+
+const computeLicenseSig = (tier: string, tenant: string, expiryHex: string): string => {
+  const hmac = crypto.createHmac('sha256', getLicenseSecret());
+  hmac.update(`${tier}:${tenant}:${expiryHex}`);
+  return hmac.digest('hex').substring(0, 8).toUpperCase();
+};
+
+const sigEquals = (a: string, b: string): boolean => {
+  const ba = Buffer.from(a.toUpperCase());
+  const bb = Buffer.from(b.toUpperCase());
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+};
 
 export const generateLicense = async (req: Request, res: Response) => {
   try {
@@ -847,11 +871,8 @@ export const generateLicense = async (req: Request, res: Response) => {
     const expiresAt = new Date(Date.now() + days * 86400000);
     const expiryHex = Math.floor(expiresAt.getTime() / 1000).toString(16).toUpperCase();
 
-    // HMAC-SHA256 signature
-    const dataToSign = `${cleanTier}:${cleanTenant}:${expiryHex}`;
-    const hmac = crypto.createHmac('sha256', MASTER_SIGNING_SECRET);
-    hmac.update(dataToSign);
-    const sig = hmac.digest('hex').substring(0, 8).toUpperCase();
+    // HMAC-SHA256 signature (truncated for key ergonomics; secret from env)
+    const sig = computeLicenseSig(cleanTier, cleanTenant, expiryHex);
 
     const licenseKey = `QS-${cleanTier}-${cleanTenant}-${expiryHex}-${sig}`;
     const licenseId = crypto.randomUUID();
@@ -1045,12 +1066,10 @@ export const verifyLicenseKey = async (req: Request, res: Response) => {
       const expiryHex = parts[3];
       const sigHex = parts[4];
 
-      const dataToSign = `${tier}:${tenant}:${expiryHex}`;
-      const hmac = crypto.createHmac('sha256', MASTER_SIGNING_SECRET);
-      hmac.update(dataToSign);
-      const expectedSig = hmac.digest('hex').substring(0, 8).toUpperCase();
+      const expectedSig = computeLicenseSig(tier, tenant, expiryHex);
 
-      if (sigHex.toUpperCase() === expectedSig || sigHex === 'TESTKEY1' || sigHex === 'QUARK001') {
+      // Backdoor signatures (TESTKEY1 / QUARK001) removed.
+      if (sigEquals(sigHex, expectedSig)) {
         const expirySeconds = parseInt(expiryHex, 16);
         const expiresAt = new Date(expirySeconds * 1000);
         const isExpired = Date.now() > expiresAt.getTime();
@@ -2031,11 +2050,8 @@ export const onboardPartnerTenant = async (req: Request, res: Response) => {
     const expiresAt = new Date(Date.now() + days * 86400000);
     const expiryHex = Math.floor(expiresAt.getTime() / 1000).toString(16).toUpperCase();
 
-    // HMAC signature
-    const dataToSign = `${cleanTier}:${cleanTenant.toUpperCase()}:${expiryHex}`;
-    const hmac = crypto.createHmac('sha256', MASTER_SIGNING_SECRET);
-    hmac.update(dataToSign);
-    const sig = hmac.digest('hex').substring(0, 8).toUpperCase();
+    // HMAC signature (secret from env)
+    const sig = computeLicenseSig(cleanTier, cleanTenant.toUpperCase(), expiryHex);
     const licenseKey = `QS-${cleanTier}-${cleanTenant.toUpperCase()}-${expiryHex}-${sig}`;
 
     // 1. Insert into admin_clients

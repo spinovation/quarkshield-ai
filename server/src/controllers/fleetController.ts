@@ -637,6 +637,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       );
       if (licResult.rowCount && licResult.rowCount > 0) {
         const lic = licResult.rows[0];
+        // DEF-22: reject enrollment with an expired license.
+        if (lic.expires_at && new Date(lic.expires_at).getTime() < Date.now()) {
+          return res.status(403).json({ error: 'License has expired. Renew the license to continue enrolling machines.' });
+        }
         const existingTokenRes = await pool.query(
           "SELECT id, name FROM fleet_tokens WHERE LOWER(tenant_name) = LOWER($1) AND status = 'active' ORDER BY created_at ASC LIMIT 1",
           [lic.tenant_name]
@@ -671,7 +675,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     const cleanHost = (hostname || '').trim();
     const cleanComp = (computer_name || cleanHost).trim();
 
-    // Deduplication Lookup: Match existing machine by Hardware UUID or normalized Hostname within this tenant
+    // Deduplication Lookup: Match existing machine by Hardware UUID or normalized Hostname within this tenant.
+    // (DEF-35) The old "any darwin host matching %ganapati% is the same machine"
+    // rule was removed — it collapsed every Mac in a tenant into one record.
     const matchQuery = `
       SELECT id, hostname, computer_name, hardware_uuid FROM fleet_machines
       WHERE (LOWER(tenant_name) = LOWER($1) OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', '')))
@@ -679,14 +685,39 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
           (hardware_uuid IS NOT NULL AND hardware_uuid != '' AND hardware_uuid = $2)
           OR LOWER(hostname) = LOWER($3)
           OR LOWER(REPLACE(hostname, '.local', '')) = LOWER(REPLACE($3, '.local', ''))
-          OR (os = 'darwin' AND $4 = 'darwin' AND (LOWER(hostname) LIKE '%ganapati%' OR LOWER(COALESCE(computer_name, '')) LIKE '%ganapati%'))
         )
       ORDER BY last_seen DESC LIMIT 1;
     `;
-    const existingResult = await pool.query(matchQuery, [assignedTenant, cleanHwUUID, cleanHost, os || '']);
+    const existingResult = await pool.query(matchQuery, [assignedTenant, cleanHwUUID, cleanHost]);
+
+    const isExistingMachine = !!(existingResult.rowCount && existingResult.rows[0]?.id);
+
+    // DEF-21: enforce seat limits when enrolling a NEW machine. The seat count is
+    // the max of active license seats for the tenant and the client's mca_limit.
+    if (!isExistingMachine) {
+      const seatRes = await pool.query(
+        `SELECT
+           COALESCE((SELECT MAX(seats) FROM admin_licenses WHERE LOWER(tenant_name) = LOWER($1) AND status != 'revoked'), 0) AS lic_seats,
+           COALESCE((SELECT mca_limit FROM admin_clients WHERE LOWER(name) = LOWER($1) OR LOWER(REPLACE(name,'-','')) = LOWER(REPLACE($1,'-','')) LIMIT 1), 0) AS mca_limit`,
+        [assignedTenant]
+      );
+      const licSeats = Number(seatRes.rows[0]?.lic_seats || 0);
+      const mcaLimit = Number(seatRes.rows[0]?.mca_limit || 0);
+      const seatLimit = Math.max(licSeats, mcaLimit);
+      if (seatLimit > 0) {
+        const countRes = await pool.query(
+          `SELECT COUNT(*)::int AS n FROM fleet_machines WHERE LOWER(tenant_name) = LOWER($1)`,
+          [assignedTenant]
+        );
+        const current = Number(countRes.rows[0]?.n || 0);
+        if (current >= seatLimit) {
+          return res.status(403).json({ error: `Seat limit reached (${current}/${seatLimit}). Remove a machine or upgrade the license to enroll more.` });
+        }
+      }
+    }
 
     let machineId: string;
-    if (existingResult.rowCount && existingResult.rows[0]?.id) {
+    if (isExistingMachine) {
       machineId = existingResult.rows[0].id;
     } else {
       const hashInput = cleanHwUUID ? `${assignedTenant}-${cleanHwUUID}` : `${assignedTenant}-${cleanHost}`;
