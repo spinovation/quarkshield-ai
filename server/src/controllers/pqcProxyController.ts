@@ -1,6 +1,9 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
+import tls from 'tls';
+import net from 'net';
+import { assertPublicHost } from '../utils/ssrf';
 
 // Helper to syndicate proxy gateway primitives into CBOM assets inventory
 export const syndicateProxyToAssets = async (id: string, name: string, listenPort: number, upstreamUrl: string, tlsCurve: string, tenantName: string) => {
@@ -164,6 +167,19 @@ export const deleteProxy = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Validate a proxy gateway's upstream target (DEF-51/52).
+ *
+ * This is a config-generate + validate feature: QuarkShield does not run the
+ * proxy, it generates nginx/Envoy config the customer deploys. "Validate" now
+ * does a real check of the configured upstream rather than returning a canned
+ * handshake:
+ *  - upstream reachable over TCP (and, for https upstreams on a public host, the
+ *    real negotiated TLS protocol/cipher is reported);
+ *  - internal/loopback upstreams (the common case for a terminating proxy) are
+ *    format-validated only, since the server must not open connections to
+ *    internal hosts on a caller's behalf (SSRF).
+ */
 export const testProxyHandshake = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -173,27 +189,67 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
     }
     const p = lookup.rows[0];
 
-    // Increment handshakes
-    await pool.query('UPDATE pqc_proxies SET handshake_count = handshake_count + 1 WHERE id = $1', [id]);
+    let upstream: URL;
+    try { upstream = new URL(p.upstream_url); }
+    catch { return res.status(400).json({ success: false, error: `Upstream URL is not valid: ${p.upstream_url}` }); }
 
-    res.json({
-      success: true,
-      proxyId: id,
-      name: p.name,
-      listenPort: p.listen_port,
-      upstreamUrl: p.upstream_url,
-      negotiatedProtocol: 'TLSv1.3 (RFC 8446)',
-      keyExchange: 'X25519MLKEM768 (Curve ID: 0x11ec / NIST FIPS 203)',
-      cipherSuite: 'TLS_AES_256_GCM_SHA384',
-      forwardSecrecy: 'Perfect Forward Secrecy (PFS) + Post-Quantum KEM',
-      handshakeLatencyMs: Math.floor(18 + Math.random() * 25),
-      quantumResilience: 'Protected against Harvest Now, Decrypt Later (HNDL) attacks.'
+    const port = upstream.port ? Number(upstream.port) : (upstream.protocol === 'https:' ? 443 : 80);
+
+    // Internal/loopback upstream: validate config only (do not connect — SSRF).
+    let isPublic = true;
+    try { await assertPublicHost(upstream.hostname); } catch { isPublic = false; }
+
+    if (!isPublic) {
+      return res.json({
+        success: true, proxyId: id, name: p.name, listenPort: p.listen_port, upstreamUrl: p.upstream_url,
+        validation: 'config-valid',
+        message: `Config is valid. Upstream ${upstream.hostname}:${port} is internal, so the live PQC handshake must be verified where the generated proxy config is deployed.`,
+        recommendedCurve: p.tls_curve || 'X25519MLKEM768',
+      });
+    }
+
+    // Public upstream: do a real TLS/TCP probe and report what actually negotiated.
+    const started = Date.now();
+    const result = await probeUpstream(upstream.hostname, port, upstream.protocol === 'https:');
+    await pool.query('UPDATE pqc_proxies SET handshake_count = handshake_count + 1 WHERE id = $1', [id]);
+    return res.json({
+      success: true, proxyId: id, name: p.name, listenPort: p.listen_port, upstreamUrl: p.upstream_url,
+      validation: 'target-reachable',
+      reachable: result.reachable,
+      negotiatedProtocol: result.protocol,
+      cipherSuite: result.cipher,
+      latencyMs: Date.now() - started,
+      recommendedCurve: p.tls_curve || 'X25519MLKEM768',
+      message: result.reachable
+        ? `Upstream reachable. ${result.protocol ? 'Negotiated ' + result.protocol : ''}`.trim()
+        : `Upstream ${upstream.hostname}:${port} did not respond.`,
     });
   } catch (err: any) {
-    console.error('Error testing proxy handshake:', err);
-    res.status(500).json({ error: 'Failed to test proxy handshake.' });
+    console.error('Error validating proxy target:', err);
+    res.status(500).json({ error: 'Failed to validate proxy target: ' + err.message });
   }
 };
+
+/** Probe an upstream: TLS handshake for https, plain TCP connect otherwise. */
+const probeUpstream = (host: string, port: number, https: boolean): Promise<{ reachable: boolean; protocol?: string; cipher?: string }> =>
+  new Promise((resolve) => {
+    let done = false;
+    const finish = (r: { reachable: boolean; protocol?: string; cipher?: string }) => { if (!done) { done = true; resolve(r); } };
+    if (https) {
+      const socket = tls.connect({ host, port, servername: host, rejectUnauthorized: false, timeout: 6000 }, () => {
+        const proto = socket.getProtocol() || undefined;
+        const cipher = socket.getCipher()?.name;
+        socket.end();
+        finish({ reachable: true, protocol: proto || undefined, cipher });
+      });
+      socket.on('error', () => finish({ reachable: false }));
+      socket.on('timeout', () => { socket.destroy(); finish({ reachable: false }); });
+    } else {
+      const socket = net.connect({ host, port, timeout: 6000 }, () => { socket.end(); finish({ reachable: true }); });
+      socket.on('error', () => finish({ reachable: false }));
+      socket.on('timeout', () => { socket.destroy(); finish({ reachable: false }); });
+    }
+  });
 
 export const getProxyTemplate = async (req: Request, res: Response) => {
   try {

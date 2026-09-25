@@ -1,6 +1,25 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
+import { discoverKmsKeys, pingKms, DiscoveredAsset, KmsConfig } from '../lib/awsKms';
+
+// Providers with a real backend implemented. Others return clearly-labeled
+// preview (simulated) data until their integrations land (DEF-51).
+const REAL_PROVIDERS = new Set(['aws_kms']);
+
+const parseKmsConfig = (row: any): KmsConfig => {
+  let cfg: any = {};
+  try { cfg = typeof row.config_summary === 'string' ? JSON.parse(row.config_summary) : (row.config_summary || {}); } catch { cfg = {}; }
+  return {
+    roleArn: cfg.roleArn || cfg.role_arn,
+    externalId: cfg.externalId || cfg.external_id,
+    regions: cfg.regions || (cfg.region ? [cfg.region] : undefined),
+    region: cfg.region,
+    endpointUrl: row.endpoint_url || cfg.endpointUrl || undefined,
+    accessKeyId: cfg.accessKeyId,
+    secretAccessKey: cfg.secretAccessKey,
+  };
+};
 
 export const getPkiConnectors = async (req: Request, res: Response) => {
   try {
@@ -64,14 +83,24 @@ export const createPkiConnector = async (req: Request, res: Response) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', 0, 0, 0, NOW())
     `, [id, cleanTenant, name, provider, endpointUrl || '', authType, JSON.stringify(sanitizedConfig)]);
 
-    // Trigger initial discovery sync
-    await executeDiscoverySync(id, cleanTenant, provider, name);
-
-    res.status(201).json({
-      success: true,
-      connectorId: id,
-      message: `Connector '${name}' (${provider}) successfully enrolled and initial key synchronization completed.`
-    });
+    // Trigger initial discovery sync. If it fails (e.g. bad credentials), keep the
+    // connector (marked errored by executeDiscoverySync) rather than failing the
+    // whole create, and report the warning.
+    try {
+      const result = await executeDiscoverySync(id, cleanTenant, provider, name);
+      return res.status(201).json({
+        success: true,
+        connectorId: id,
+        totalKeysDiscovered: result.total,
+        message: `Connector '${name}' (${provider}) enrolled; discovered ${result.total} keys.`
+      });
+    } catch (syncErr: any) {
+      return res.status(201).json({
+        success: true,
+        connectorId: id,
+        warning: `Connector saved, but initial discovery failed: ${syncErr.message}. Fix the configuration and re-sync.`
+      });
+    }
   } catch (err: any) {
     console.error('Error creating PKI connector:', err);
     res.status(500).json({ error: 'Failed to create PKI connector: ' + err.message });
@@ -87,15 +116,28 @@ export const testPkiConnector = async (req: Request, res: Response) => {
     }
     const c = lookup.rows[0];
 
-    // Simulated probe / health check
+    // Real reachability + auth check for implemented providers.
+    if (c.provider === 'aws_kms') {
+      const started = Date.now();
+      try {
+        const r = await pingKms(parseKmsConfig(c));
+        return res.json({
+          success: true, connectorId: id, provider: c.provider, endpoint: c.endpoint_url,
+          status: 'HEALTHY', latencyMs: Date.now() - started, region: r.region, message: r.message,
+        });
+      } catch (e: any) {
+        return res.status(502).json({
+          success: false, connectorId: id, provider: c.provider, status: 'UNREACHABLE',
+          error: `AWS KMS check failed: ${e.name || 'Error'}: ${e.message}`,
+        });
+      }
+    }
+
+    // Preview providers: not yet implemented. Be honest rather than fake healthy.
     res.json({
-      success: true,
-      connectorId: id,
-      provider: c.provider,
-      endpoint: c.endpoint_url,
-      status: 'HEALTHY',
-      latencyMs: Math.floor(25 + Math.random() * 40),
-      message: `Successfully authenticated to ${c.name} via ${c.auth_type}. Vault endpoint is reachable and responsive.`
+      success: true, connectorId: id, provider: c.provider, endpoint: c.endpoint_url,
+      status: 'PREVIEW',
+      message: `${c.provider} is a preview connector; live reachability testing is not yet implemented for it.`,
     });
   } catch (err: any) {
     console.error('Error testing connector:', err);
@@ -184,6 +226,29 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
   await pool.query('DELETE FROM pki_synced_assets WHERE connector_id = $1', [connectorId]);
   await pool.query("DELETE FROM assets WHERE source IN ('cloud_kms', 'enterprise_pki') AND (source_ref = $1 OR source_ref = $2)", [connectorId, connectorName]).catch(() => {});
 
+  // Real discovery for implemented providers (AWS KMS). On error we record the
+  // failure on the connector and surface zero assets rather than faking success.
+  if (REAL_PROVIDERS.has(provider)) {
+    const row = (await pool.query('SELECT config_summary, endpoint_url FROM pki_connectors WHERE id = $1', [connectorId])).rows[0] || {};
+    try {
+      let assets: DiscoveredAsset[] = [];
+      if (provider === 'aws_kms') assets = await discoverKmsKeys(parseKmsConfig(row));
+      return await persistAssets(connectorId, tenantName, provider, connectorName, assets);
+    } catch (e: any) {
+      await pool.query(
+        `UPDATE pki_connectors SET sync_status = 'error', last_error = $1, last_sync_at = NOW() WHERE id = $2`,
+        [`${e.name || 'Error'}: ${e.message}`.slice(0, 480), connectorId]
+      );
+      throw e;
+    }
+  }
+
+  // Preview providers: simulated inventory (clearly labeled downstream).
+  const mockAssets = mockAssetsFor(provider);
+  return persistAssets(connectorId, tenantName, provider, connectorName, mockAssets);
+}
+
+function mockAssetsFor(provider: string): DiscoveredAsset[] {
   let mockAssets: any[] = [];
 
   if (provider === 'aws_kms') {
@@ -218,11 +283,15 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
     ];
   }
 
+  return mockAssets.map(a => ({ ...a, expiresAt: null })) as DiscoveredAsset[];
+}
+
+async function persistAssets(connectorId: string, tenantName: string, provider: string, connectorName: string, assets: DiscoveredAsset[]) {
   let vuln = 0;
   let pqc = 0;
   const sourceType = provider === 'ad_cs' ? 'enterprise_pki' : 'cloud_kms';
 
-  for (const a of mockAssets) {
+  for (const a of assets) {
     if (a.vuln) vuln++;
     else pqc++;
 
@@ -231,9 +300,9 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
 
     await pool.query(`
       INSERT INTO pki_synced_assets (
-        id, connector_id, tenant_name, asset_name, asset_type, algorithm, 
+        id, connector_id, tenant_name, asset_name, asset_type, algorithm,
         key_size, is_vulnerable, risk_level, quantum_threat, status, rotation_enabled, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Active', $11, NOW() + INTERVAL '365 days')
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Active', $11, COALESCE($12, NOW() + INTERVAL '365 days'))
     `, [
       pkiAssetId,
       connectorId,
@@ -245,7 +314,8 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
       a.vuln,
       a.risk,
       a.threat,
-      a.rot
+      a.rot,
+      a.expiresAt || null
     ]);
 
     // Syndicate into central assets inventory for unified CBOM & source filtering
@@ -288,7 +358,7 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
       last_sync_at = NOW(),
       last_error = NULL
     WHERE id = $4
-  `, [mockAssets.length, vuln, pqc, connectorId]);
+  `, [assets.length, vuln, pqc, connectorId]);
 
-  return { total: mockAssets.length, vulnerable: vuln, pqcReady: pqc };
+  return { total: assets.length, vulnerable: vuln, pqcReady: pqc };
 }
