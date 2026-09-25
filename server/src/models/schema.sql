@@ -206,13 +206,7 @@ VALUES
   ('usr-demo', 'democlient@example.com', NULL, NULL, 'user', true, true, false, false, false, 'Demo Client Workspace', CURRENT_TIMESTAMP - INTERVAL '12 minutes'),
   ('usr-locked', 'locked_client@example.com', NULL, NULL, 'user', true, false, false, false, true, 'Locked Security Node', CURRENT_TIMESTAMP - INTERVAL '24 minutes'),
   ('usr-pending', 'pending_client@example.com', NULL, NULL, 'user', true, false, false, false, false, 'Pending Evaluation Node', NULL)
-ON CONFLICT (email) DO UPDATE SET 
-  role = EXCLUDED.role,
-  cmdb_enabled = EXCLUDED.cmdb_enabled,
-  playbook_enabled = EXCLUDED.playbook_enabled,
-  web3_enabled = EXCLUDED.web3_enabled,
-  row_locked = EXCLUDED.row_locked,
-  last_login = EXCLUDED.last_login;
+ON CONFLICT (email) DO NOTHING;  -- seed only; do not overwrite admin edits on restart (DEF-18)
 
 -- Seed initial client organizations / tenants for quarkshield.ai
 INSERT INTO admin_clients (id, name, display_name, app_port, db_port, status, subscription_tier, mca_limit, two_factor_policy, user_count, asset_count, account_type, customer_id, admin_email, contact_name)
@@ -222,19 +216,7 @@ VALUES
   ('client-vanguard-corp', 'vanguard-logistics', 'Vanguard Global Logistics', 5003, 5435, 'active', 'growth', 500, 'optional', 1, 8, 'corporate', 'CORP-4821', 's.jenkins@vanguardlogistics.com', 'Sarah Jenkins'),
   ('client-apex-msp', 'apex-cyber', 'Apex Cyber Defense MSP', 5050, 5436, 'active', 'growth', 300, 'optional', 1, 12, 'partner', 'PART-9148', 'm.vance@apexcyberdefense.io', 'Marcus Vance'),
   ('client-cyber-shield', 'cybershield-partners', 'CyberShield Managed Security', 5051, 5437, 'active', 'growth', 50, 'optional', 1, 4, 'partner', 'PART-8830', 'd.chen@cybershieldsec.com', 'David Chen')
-ON CONFLICT (name) DO UPDATE SET 
-  display_name = EXCLUDED.display_name,
-  app_port = EXCLUDED.app_port,
-  db_port = EXCLUDED.db_port,
-  status = EXCLUDED.status,
-  subscription_tier = EXCLUDED.subscription_tier,
-  mca_limit = EXCLUDED.mca_limit,
-  user_count = EXCLUDED.user_count,
-  asset_count = EXCLUDED.asset_count,
-  account_type = EXCLUDED.account_type,
-  customer_id = EXCLUDED.customer_id,
-  admin_email = EXCLUDED.admin_email,
-  contact_name = EXCLUDED.contact_name;
+ON CONFLICT (name) DO NOTHING;  -- seed only; do not overwrite tenant edits on restart (DEF-18)
 
 INSERT INTO admin_licenses (id, license_key, tenant_name, customer_id, tier, duration_days, seats, status, expires_at, contact_name, contact_email)
 VALUES
@@ -275,34 +257,10 @@ CREATE TABLE IF NOT EXISTS git_scans (
 -- Purge duplicate enrollment rows and keep strictly the latest sync per machine
 -- =========================================================================
 
--- 1. Deduplicate DESKTOP-QFOTIIO (keep the row with highest asset_count/most recent scan)
-DELETE FROM assets 
-WHERE machine_id IN (
-  SELECT id FROM fleet_machines 
-  WHERE LOWER(hostname) LIKE '%desktop-qfotiio%' 
-    AND asset_count < 100
-);
-
-DELETE FROM fleet_machines 
-WHERE LOWER(hostname) LIKE '%desktop-qfotiio%' 
-  AND asset_count < 100;
-
--- 2. Deduplicate Mac workstation (merge Ganapatis-MBP into Ganapatis-MacBook-Pro)
-DELETE FROM assets 
-WHERE machine_id IN (
-  SELECT id FROM fleet_machines 
-  WHERE LOWER(hostname) = 'ganapatis-mbp'
-);
-
-DELETE FROM fleet_machines 
-WHERE LOWER(hostname) = 'ganapatis-mbp';
-
--- 3. Set friendly computer_name and hardware_uuid for remaining Mac workstation
-UPDATE fleet_machines 
-SET 
-  computer_name = 'Ganapati’s MacBook Pro',
-  hardware_uuid = COALESCE(hardware_uuid, 'CC509944-0DEA-5041-984A-C9319F82233F')
-WHERE LOWER(hostname) LIKE '%ganapati%' OR os = 'darwin';
+-- (Removed) Developer-specific machine dedup/rename migrations that ran on
+-- every boot: they deleted machines by hostname and renamed EVERY darwin
+-- machine to one name with a fixed hardware_uuid, corrupting multi-Mac
+-- tenants (DEF-18/35). One-time cleanups do not belong in the boot schema.
 
 -- 4. Ensure computer_name is populated for other known physical machines
 UPDATE fleet_machines 
