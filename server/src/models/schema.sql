@@ -537,6 +537,28 @@ ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
 ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
 
+-- Support tickets + attachments (Help/Feedback widget). Attachments store the
+-- actual bytes so screenshots/logs are retained, not just filenames (DEF-48).
+CREATE TABLE IF NOT EXISTS support_tickets (
+  id VARCHAR(100) PRIMARY KEY,
+  name VARCHAR(255),
+  email VARCHAR(255) NOT NULL,
+  subject VARCHAR(255) NOT NULL,
+  message TEXT NOT NULL,
+  attachment_count INTEGER DEFAULT 0,
+  status VARCHAR(50) DEFAULT 'open',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS support_ticket_attachments (
+  id VARCHAR(100) PRIMARY KEY,
+  ticket_id VARCHAR(100) NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+  filename VARCHAR(255),
+  mime_type VARCHAR(100),
+  size_bytes INTEGER,
+  data_base64 TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Password reset tokens (single-use, time-limited). Replaces the old
 -- "forgot password immediately overwrites the password" behaviour.
 CREATE TABLE IF NOT EXISTS password_reset_tokens (

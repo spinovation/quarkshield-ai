@@ -87,17 +87,39 @@ export default function HelpFeedbackWidget({ userEmail, defaultOpen = false }: P
     setErrorMsg('');
 
     try {
-      // Build payload
-      const payload: any = {
+      // Read each attachment's actual bytes as base64 so screenshots/logs are
+      // delivered, not just their filenames (DEF-48).
+      const readAsBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const comma = result.indexOf(',');
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(new Error('Failed to read attachment'));
+        reader.readAsDataURL(file);
+      });
+
+      const totalBytes = files.reduce((n, f) => n + f.size, 0);
+      if (totalBytes > 18 * 1024 * 1024) {
+        setErrorMsg('Attachments are too large (18 MB total max). Remove one and try again.');
+        setSubmitting(false);
+        return;
+      }
+
+      const attachments = await Promise.all(files.map(async (f) => ({
+        name: f.name,
+        size: f.size,
+        type: f.type,
+        data: await readAsBase64(f),
+      })));
+
+      const payload = {
         subject,
         message: message.trim(),
         email: email.trim() || 'anonymous@quarkshield.ai',
         name: email.includes('@') ? email.split('@')[0] : 'Workstation User',
-        attachments: files.map((f) => ({
-          name: f.name,
-          size: f.size,
-          type: f.type
-        }))
+        attachments,
       };
 
       const res = await fetch('/api/support/contact', {
@@ -117,13 +139,9 @@ export default function HelpFeedbackWidget({ userEmail, defaultOpen = false }: P
         setOpen(false);
       }, 2200);
     } catch (err: any) {
-      console.warn('Support ticket submission notice:', err);
-      // Even if network drops or offline, provide graceful acknowledgment
-      setStatus('success');
-      setTimeout(() => {
-        resetForm();
-        setOpen(false);
-      }, 2200);
+      // Surface the real failure instead of pretending it succeeded (DEF-48).
+      setStatus('error');
+      setErrorMsg(err?.message || 'Could not submit your request. Please try again.');
     } finally {
       setSubmitting(false);
     }
