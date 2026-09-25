@@ -622,11 +622,12 @@ type CBOMCryptoProperties struct {
 }
 
 type CBOMComponent struct {
-	Type             string               `json:"type"`
-	BomRef           string               `json:"bom-ref"`
-	Name             string               `json:"name"`
-	CryptoProperties CBOMCryptoProperties `json:"cryptoProperties"`
-	Properties       []CBOMProperty       `json:"properties"`
+	Type             string                `json:"type"`
+	BomRef           string                `json:"bom-ref"`
+	Name             string                `json:"name"`
+	Version          string                `json:"version,omitempty"`
+	CryptoProperties *CBOMCryptoProperties `json:"cryptoProperties,omitempty"`
+	Properties       []CBOMProperty        `json:"properties"`
 }
 
 type CBOMMetadata struct {
@@ -668,11 +669,16 @@ func GenerateCycloneDXCBOM(assets []AuditResult, hostname string, osName string)
 		if strings.Contains(a.Algorithm, "P-") || strings.Contains(a.Algorithm, "25519") {
 			curve = a.Algorithm
 		}
+		compType := "cryptographic-asset"
+		if a.Type == "package" || a.Type == "sbom" || a.Type == "library" || a.Type == "dependency" {
+			compType = "library"
+		}
+
 		comp := CBOMComponent{
-			Type:   "cryptographic-asset",
+			Type:   compType,
 			BomRef: a.ID,
 			Name:   a.Name,
-			CryptoProperties: CBOMCryptoProperties{
+			CryptoProperties: &CBOMCryptoProperties{
 				AssetType: cdxAssetType(a.Type),
 				AlgorithmProperties: CBOMAlgoProperties{
 					Primitive:                cdxPrimitive(a.Algorithm),

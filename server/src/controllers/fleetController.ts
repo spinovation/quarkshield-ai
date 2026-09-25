@@ -919,6 +919,80 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       ]);
     }
 
+    // Ingest Software BOM components into tenant's sbom_components catalog
+    const sbomUpsertQuery = `
+      INSERT INTO sbom_components (
+        id, tenant_name, source, source_ref, file_path, name, version, ecosystem, purl, license,
+        has_vulnerabilities, vuln_count, max_severity, vulnerabilities, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, CURRENT_TIMESTAMP)
+      ON CONFLICT (id) DO UPDATE SET
+        source_ref = EXCLUDED.source_ref,
+        file_path = EXCLUDED.file_path,
+        name = EXCLUDED.name,
+        version = EXCLUDED.version,
+        ecosystem = EXCLUDED.ecosystem,
+        purl = EXCLUDED.purl,
+        license = EXCLUDED.license,
+        has_vulnerabilities = EXCLUDED.has_vulnerabilities,
+        vuln_count = EXCLUDED.vuln_count,
+        max_severity = EXCLUDED.max_severity,
+        vulnerabilities = EXCLUDED.vulnerabilities,
+        updated_at = CURRENT_TIMESTAMP;
+    `;
+
+    for (const a of processedAssets) {
+      if (a.type === 'package' || a.type === 'sbom' || a.type === 'library' || a.type === 'dependency') {
+        const rawItem = safeAssets.find((sa: any) => sa.name === a.name || sa.path === a.path) || {};
+        const ecosystem = rawItem.ecosystem || (a.path?.includes('package.json') ? 'npm' : (a.path?.includes('requirements.txt') ? 'pypi' : (a.path?.includes('go.mod') ? 'golang' : 'os_pkg')));
+        const version = rawItem.version || 'installed';
+        const purl = `pkg:${ecosystem}/${encodeURIComponent(a.name)}@${encodeURIComponent(version)}`;
+        
+        let vulnerabilities: any[] = [];
+        if (Array.isArray(rawItem.cveList) && rawItem.cveList.length > 0) {
+          vulnerabilities = rawItem.cveList.map((cve: string) => ({
+            cveId: cve,
+            title: `${a.name} ${cve} Security Vulnerability`,
+            cvssScore: a.risk_level === 'critical' ? 9.8 : (a.risk_level === 'high' ? 8.2 : 5.5),
+            severity: a.risk_level === 'critical' ? 'critical' : (a.risk_level === 'high' ? 'high' : 'medium'),
+            fixedVersion: 'latest',
+            remediationCmd: a.recommendation || '',
+            description: a.explainer || a.description || ''
+          }));
+        } else if (a.is_vulnerable) {
+          const cveMatch = (a.status + ' ' + a.description).match(/CVE-[0-9]{4}-[0-9]+/i);
+          const cveId = cveMatch ? cveMatch[0].toUpperCase() : 'CVE-PQC-EXPOSURE';
+          vulnerabilities = [{
+            cveId,
+            title: `${a.name} Classical Cryptography / Vulnerability`,
+            cvssScore: a.risk_level === 'critical' ? 9.8 : (a.risk_level === 'high' ? 8.0 : 6.0),
+            severity: a.risk_level === 'critical' ? 'critical' : (a.risk_level === 'high' ? 'high' : 'medium'),
+            fixedVersion: 'latest',
+            remediationCmd: a.recommendation || '',
+            description: a.explainer || a.description || ''
+          }];
+        }
+
+        const sbomId = 'sbom-' + crypto.createHash('sha256').update(`${assignedTenant}-${cleanHost}-${a.name}-${version}`).digest('hex').substring(0, 24);
+
+        await pool.query(sbomUpsertQuery, [
+          sbomId,
+          assignedTenant,
+          'endpoint',
+          cleanHost,
+          a.path || a.name,
+          a.name,
+          version,
+          ecosystem,
+          purl,
+          rawItem.license || 'Open Source',
+          a.is_vulnerable,
+          vulnerabilities.length,
+          a.risk_level,
+          JSON.stringify(vulnerabilities)
+        ]).catch(err => console.warn('Failed to upsert sbom_component from telemetry:', err.message));
+      }
+    }
+
     // Record drift: assets added/removed since the previous scan (DEF-36).
     try {
       const newMap = new Map<string, boolean>();

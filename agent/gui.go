@@ -22,6 +22,7 @@ var embeddedWebFS embed.FS
 type ScanRequest struct {
 	Quick bool   `json:"quick"`
 	Path  string `json:"path"`
+	Mode  string `json:"mode,omitempty"`
 }
 
 type SyncRequest struct {
@@ -39,6 +40,7 @@ type ScanState struct {
 	ScannedFiles int           `json:"scannedFiles"`
 	FoundAssets  int           `json:"foundAssets"`
 	Error        string        `json:"error,omitempty"`
+	ScanType     string        `json:"scanType,omitempty"`
 	Findings     []AuditResult `json:"findings,omitempty"`
 	cancelFunc   context.CancelFunc
 }
@@ -304,11 +306,12 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		currentScanState.ScannedFiles = 0
 		currentScanState.FoundAssets = 0
 		currentScanState.Error = ""
+		currentScanState.ScanType = req.Mode
 		currentScanState.Findings = nil
 		currentScanState.cancelFunc = cancel
 		currentScanState.Unlock()
 
-		go func(quick bool, targetPath string, scanCtx context.Context) {
+		go func(quick bool, targetPath string, mode string, scanCtx context.Context) {
 			defer func() {
 				if r := recover(); r != nil {
 					currentScanState.Lock()
@@ -319,13 +322,23 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 				}
 			}()
 
-			findings, scannedCount, err := RunScanWithProgress(scanCtx, quick, targetPath, func(curPath string, scanned int, found int) {
+			progressCb := func(curPath string, scanned int, found int) {
 				currentScanState.Lock()
 				currentScanState.CurrentPath = curPath
 				currentScanState.ScannedFiles = scanned
 				currentScanState.FoundAssets = found
 				currentScanState.Unlock()
-			})
+			}
+
+			var findings []AuditResult
+			var scannedCount int
+			var err error
+
+			if strings.ToLower(mode) == "sbom" {
+				findings, scannedCount, err = RunSbomScanWithProgress(scanCtx, progressCb)
+			} else {
+				findings, scannedCount, err = RunScanWithProgress(scanCtx, quick, targetPath, progressCb)
+			}
 
 			currentScanState.Lock()
 			defer currentScanState.Unlock()
@@ -353,14 +366,18 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 				findingsMutex.Unlock()
 
 				scanType := "full"
-				if quick {
+				if strings.ToLower(mode) == "sbom" {
+					scanType = "sbom"
+				} else if quick {
 					scanType = "quick"
 				} else if targetPath != "" {
 					scanType = "custom"
 				}
+
+				currentScanState.ScanType = scanType
 				_, _ = SaveScanResult(scanType, targetPath, scannedCount, findings)
 			}
-		}(req.Quick, req.Path, ctx)
+		}(req.Quick, req.Path, req.Mode, ctx)
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
