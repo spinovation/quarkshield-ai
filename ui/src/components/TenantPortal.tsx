@@ -1,3 +1,4 @@
+import { downloadCsv } from '../lib/csv';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Shield,
@@ -649,21 +650,9 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const handleExportUserLogs = () => {
     const headers = ['Timestamp', 'Event', 'Category', 'Description', 'IP Address', 'Attestation Status'];
     const rows = filteredUserLogs.map(l => [
-      `"${l.timestamp}"`,
-      `"${l.event}"`,
-      `"${l.category}"`,
-      `"${l.description.replace(/"/g, '""')}"`,
-      `"${l.ipAddress}"`,
-      `"${l.attestationStatus}"`
+      l.timestamp, l.event, l.category, l.description, l.ipAddress, l.attestationStatus,
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `user-internal-logs-${cleanSlug}-${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsv(`user-internal-logs-${cleanSlug}-${new Date().toISOString().split('T')[0]}.csv`, headers, rows);
     addInternalLog('INTERNAL_LOGS_EXPORTED', 'admin', 'Exported internal security and audit logs to CSV', 'FIPS 204 Signed');
   };
 

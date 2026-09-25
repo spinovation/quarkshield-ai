@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
+import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 
 // ==========================================
 // 1. FLEET TOKENS
@@ -271,35 +272,24 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
           url: "https://quarkshield.ai"
         }
       },
-      components: rows.map(r => ({
-        type: "cryptographic-asset",
-        bomRef: r.id,
+      components: rows.map(r => cbomComponent({
+        id: r.id,
         name: r.name,
-        path: r.path || undefined,
-        cryptoProperties: {
-          assetType: r.type === 'ssh_key' ? 'key' : (r.type === 'certificate' ? 'certificate' : 'protocol'),
-          algorithmProperties: {
-            name: r.algorithm || 'Unknown',
-            keyLength: r.key_size || undefined,
-            parameterSetIdentifier: r.hash_algorithm || undefined,
-            curve: r.algorithm?.includes('P-') || r.algorithm?.includes('25519') ? r.algorithm : undefined,
-            quantumSecurityLevel: r.is_vulnerable ? 0 : 3
-          },
-          detectionContext: {
-            filePath: r.path || r.description?.split(' ')[0] || r.name,
-            machineHostname: r.hostname || 'Unknown Endpoint',
-            operatingSystem: r.os || 'Unknown OS'
-          }
-        },
-        properties: [
-          { name: "pqc:quantumStatus", value: r.status },
-          { name: "pqc:riskLevel", value: r.risk_level },
-          { name: "pqc:recommendation", value: r.recommendation },
-          { name: "pqc:explainer", value: r.explainer },
-          { name: "pqc:complianceViolations", value: JSON.stringify(r.compliance_violations || []) },
-          { name: "pqc:assetSource", value: r.source || "endpoint" },
-          { name: "pqc:sourceReference", value: r.sourceRef || r.hostname || "Workstation" }
-        ]
+        algorithm: r.algorithm,
+        keySize: r.key_size,
+        hashAlgorithm: r.hash_algorithm,
+        isVulnerable: r.is_vulnerable,
+        assetKind: r.type,
+        status: r.status,
+        riskLevel: r.risk_level,
+        recommendation: r.recommendation,
+        explainer: r.explainer,
+        path: r.path,
+        hostname: r.hostname,
+        os: r.os,
+        source: r.source || 'endpoint',
+        sourceRef: r.sourceRef || r.hostname || 'Workstation',
+        complianceViolations: r.compliance_violations || [],
       }))
     };
 
@@ -313,11 +303,6 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         pqcReadyCount: pqcReadyAssets,
         tenant: tenantName
       });
-      const digestSha256 = crypto.createHash('sha256').update(canonicalPayload).digest('hex');
-      const signatureBuffer = crypto.createHmac('sha384', 'quarkshield-pqc-root-signing-key-2026')
-        .update(digestSha256)
-        .digest('base64');
-
       cbom.declarations = {
         assessors: [
           {
@@ -404,16 +389,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         ]
       };
 
-      cbom.signature = {
-        algorithm: "ML-DSA-65",
-        keyId: "urn:quarkshield:pqc:pki:mldsa65:root-ca",
-        publicKey: {
-          type: "ML-DSA-65 (NIST FIPS 204)",
-          fingerprint: `SHA256:${digestSha256.substring(0, 32)}...`
-        },
-        value: signatureBuffer,
-        timestamp
-      };
+      cbom.signature = cbomSignature(canonicalPayload, timestamp);
     }
 
     res.json(cbom);

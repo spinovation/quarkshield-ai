@@ -254,7 +254,22 @@ const probeUpstream = (host: string, port: number, https: boolean): Promise<{ re
 export const getProxyTemplate = async (req: Request, res: Response) => {
   try {
     const { format = 'nginx' } = req.params;
-    const { port = 8443, upstream = 'http://127.0.0.1:8080', name = 'quarkshield-pqc-proxy' } = req.query;
+    const rawPort = req.query.port;
+    const rawUpstream = req.query.upstream;
+    const rawName = req.query.name;
+
+    // DEF-52: sanitize query values before interpolating them into generated
+    // config, so a crafted link cannot inject directives into the template.
+    const portNum = parseInt(String(rawPort ?? ''), 10);
+    const port = Number.isInteger(portNum) && portNum >= 1 && portNum <= 65535 ? portNum : 8443;
+    let upstream = 'http://127.0.0.1:8080';
+    if (rawUpstream !== undefined) {
+      try {
+        const u = new URL(String(rawUpstream));
+        if (u.protocol === 'http:' || u.protocol === 'https:') upstream = u.origin;
+      } catch { /* keep default on invalid URL */ }
+    }
+    const name = String(rawName ?? 'quarkshield-pqc-proxy').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 64) || 'quarkshield-pqc-proxy';
 
     if (format === 'nginx') {
       const config = `# ==============================================================================

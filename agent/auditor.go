@@ -526,9 +526,45 @@ type CBOMProperty struct {
 }
 
 type CBOMAlgoProperties struct {
-	Name                 string `json:"name"`
-	KeyLength            int    `json:"keyLength,omitempty"`
-	QuantumSecurityLevel int    `json:"quantumSecurityLevel"`
+	Primitive                string `json:"primitive"`
+	Curve                    string `json:"curve,omitempty"`
+	NistQuantumSecurityLevel int    `json:"nistQuantumSecurityLevel"`
+}
+
+// cdxAssetType maps an internal asset type to a valid CycloneDX 1.6
+// cryptoProperties.assetType enum value.
+func cdxAssetType(t string) string {
+	switch strings.ToLower(t) {
+	case "certificate", "ca_root":
+		return "certificate"
+	case "private_key", "public_key", "ssh_key", "key":
+		return "related-crypto-material"
+	case "network_probe", "protocol", "config":
+		return "protocol"
+	default:
+		return "algorithm"
+	}
+}
+
+// cdxPrimitive maps an algorithm name to a valid CycloneDX algorithmProperties.primitive.
+func cdxPrimitive(algo string) string {
+	a := strings.ToLower(algo)
+	switch {
+	case strings.Contains(a, "rsa"):
+		return "pke"
+	case strings.Contains(a, "ecdsa"), strings.Contains(a, "ed25519"), strings.Contains(a, "dsa"):
+		return "signature"
+	case strings.Contains(a, "ecdh"), strings.Contains(a, "kem"), strings.Contains(a, "mlkem"), strings.Contains(a, "x25519"):
+		return "kem"
+	case strings.Contains(a, "aes"), strings.Contains(a, "chacha"):
+		return "ae"
+	case strings.Contains(a, "hmac"):
+		return "mac"
+	case strings.Contains(a, "sha"), strings.Contains(a, "md5"):
+		return "hash"
+	default:
+		return "unknown"
+	}
 }
 
 type CBOMCryptoProperties struct {
@@ -579,19 +615,25 @@ func GenerateCycloneDXCBOM(assets []AuditResult, hostname string, osName string)
 			qLevel = 3
 		}
 
+		curve := ""
+		if strings.Contains(a.Algorithm, "P-") || strings.Contains(a.Algorithm, "25519") {
+			curve = a.Algorithm
+		}
 		comp := CBOMComponent{
 			Type:   "cryptographic-asset",
 			BomRef: a.ID,
 			Name:   a.Name,
 			CryptoProperties: CBOMCryptoProperties{
-				AssetType: a.Type,
+				AssetType: cdxAssetType(a.Type),
 				AlgorithmProperties: CBOMAlgoProperties{
-					Name:                 a.Algorithm,
-					KeyLength:            a.KeySize,
-					QuantumSecurityLevel: qLevel,
+					Primitive:                cdxPrimitive(a.Algorithm),
+					Curve:                    curve,
+					NistQuantumSecurityLevel: qLevel,
 				},
 			},
 			Properties: []CBOMProperty{
+				{Name: "quarkshield:algorithm", Value: a.Algorithm},
+				{Name: "quarkshield:keyLength", Value: fmt.Sprintf("%d", a.KeySize)},
 				{Name: "quarkshield:quantumStatus", Value: a.Status},
 				{Name: "quarkshield:riskLevel", Value: a.RiskLevel},
 				{Name: "quarkshield:recommendation", Value: a.Recommendation},

@@ -1,3 +1,4 @@
+import { downloadCsv } from '../lib/csv';
 import React, { useState, useEffect } from 'react';
 import { 
   GitBranch, 
@@ -295,25 +296,18 @@ export const GitRepoAuditor: React.FC = () => {
     if (!activeScan || !activeScan.findings.length) return;
     const headers = ['File Path', 'Line Number', 'Asset Name', 'Algorithm', 'Key Size / Curve', 'Risk Level', 'Quantum Vulnerable', 'Quantum Threat', 'Status', 'Recommendation'];
     const rows = activeScan.findings.map(f => [
-      `"${f.filePath}"`,
+      f.filePath,
       f.lineNumber || '',
-      `"${f.assetName}"`,
-      `"${f.algorithm}"`,
-      `"${f.keySize || f.curve || ''}"`,
-      `"${f.riskLevel.toUpperCase()}"`,
+      f.assetName,
+      f.algorithm,
+      f.keySize || f.curve || '',
+      f.riskLevel.toUpperCase(),
       f.isVulnerable ? 'YES' : 'NO (PQC)',
-      `"${f.quantumThreat.replace(/"/g, '""')}"`,
-      `"${f.status}"`,
-      `"${f.recommendation.replace(/"/g, '""')}"`
+      f.quantumThreat,
+      f.status,
+      f.recommendation,
     ]);
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${(activeScan.repoName || 'repo').replace(/[\/\\]/g, '_')}_crypto_findings.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsv(`${(activeScan.repoName || 'repo').replace(/[\/\\]/g, '_')}_crypto_findings.csv`, headers, rows);
   };
 
   const handleCopyCode = (text: string, id: string) => {

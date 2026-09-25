@@ -6,6 +6,7 @@ import path from 'path';
 import os from 'os';
 import { execFile } from 'child_process';
 import { assertPublicHost } from '../utils/ssrf';
+import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 
 export interface GitFinding {
   id: string;
@@ -917,33 +918,21 @@ export const exportGitCBOM = async (req: Request, res: Response) => {
           url: "https://quarkshield.ai"
         }
       },
-      components: findings.map((f: GitFinding) => ({
-        type: "cryptographic-asset",
-        bomRef: f.id,
+      components: findings.map((f: GitFinding) => cbomComponent({
+        id: f.id,
         name: f.assetName,
-        cryptoProperties: {
-          assetType: f.category === 'private_key' ? 'key' : (f.category === 'certificate' ? 'certificate' : 'algorithm'),
-          algorithmProperties: {
-            name: f.algorithm,
-            keyLength: f.keySize || undefined,
-            curve: f.curve || undefined,
-            quantumSecurityLevel: f.isVulnerable ? 0 : 3
-          },
-          detectionContext: {
-            filePath: f.filePath,
-            lineNumber: f.lineNumber,
-            repository: summary.repoUrl
-          }
-        },
-        properties: [
-          { name: "pqc:status", value: f.status },
-          { name: "pqc:riskLevel", value: f.riskLevel },
-          { name: "pqc:quantumThreat", value: f.quantumThreat },
-          { name: "pqc:recommendation", value: f.recommendation },
-          { name: "pqc:complianceViolations", value: JSON.stringify(f.complianceStandards || []) },
-          { name: "pqc:assetSource", value: "git_repo" },
-          { name: "pqc:sourceReference", value: summary.repoUrl }
-        ]
+        algorithm: f.algorithm,
+        keySize: f.keySize,
+        isVulnerable: f.isVulnerable,
+        assetKind: f.category,
+        status: f.status,
+        riskLevel: f.riskLevel,
+        explainer: f.quantumThreat,
+        recommendation: f.recommendation,
+        path: `${f.filePath}:${f.lineNumber}`,
+        source: 'git_repo',
+        sourceRef: summary.repoUrl,
+        complianceViolations: f.complianceStandards || [],
       }))
     };
 
@@ -956,11 +945,6 @@ export const exportGitCBOM = async (req: Request, res: Response) => {
         pqcReadyCount: pqcReadyAssets,
         repoUrl: summary.repoUrl
       });
-      const digestSha256 = crypto.createHash('sha256').update(canonicalPayload).digest('hex');
-      const signatureBuffer = crypto.createHmac('sha384', 'quarkshield-pqc-root-signing-key-2026')
-        .update(digestSha256)
-        .digest('base64');
-
       cbom.declarations = {
         assessors: [
           {
@@ -1022,16 +1006,7 @@ export const exportGitCBOM = async (req: Request, res: Response) => {
         ]
       };
 
-      cbom.signature = {
-        algorithm: "ML-DSA-65",
-        keyId: "urn:quarkshield:pqc:pki:mldsa65:root-ca",
-        publicKey: {
-          type: "ML-DSA-65 (NIST FIPS 204)",
-          fingerprint: `SHA256:${digestSha256.substring(0, 32)}...`
-        },
-        value: signatureBuffer,
-        timestamp
-      };
+      cbom.signature = cbomSignature(canonicalPayload, timestamp);
     }
 
     res.setHeader('Content-Type', 'application/json');

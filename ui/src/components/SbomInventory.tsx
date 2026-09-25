@@ -1,3 +1,4 @@
+import { downloadCsv } from '../lib/csv';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Package,
@@ -202,26 +203,11 @@ export default function SbomInventory({ tenant = 'quarkshield.ai', apiUrl = '', 
       const fixedVer = Array.isArray(c.vulnerabilities) && c.vulnerabilities.length > 0 ? c.vulnerabilities[0].fixedVersion : 'N/A';
       const remCmd = Array.isArray(c.vulnerabilities) && c.vulnerabilities.length > 0 ? c.vulnerabilities[0].remediationCmd : 'N/A';
       return [
-        `"${c.name}"`,
-        `"${c.version}"`,
-        `"${c.ecosystem}"`,
-        `"${c.purl || ''}"`,
-        `"${c.max_severity}"`,
-        `"${c.vuln_count || 0}"`,
-        `"${cves}"`,
-        `"${fixedVer}"`,
-        `"${remCmd}"`,
-        `"${c.source_ref || ''}"`
-      ].join(',');
+        c.name, c.version, c.ecosystem, c.purl || '', c.max_severity,
+        c.vuln_count || 0, cves, fixedVer, remCmd, c.source_ref || '',
+      ];
     });
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `${activeTenant.toLowerCase()}-sbom-inventory.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    downloadCsv(`${activeTenant.toLowerCase()}-sbom-inventory.csv`, headers, rows);
   };
 
   return (
