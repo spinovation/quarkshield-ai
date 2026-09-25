@@ -12,7 +12,7 @@
 
 ## Table of Contents
 1. [Platform Overview & 3-Tier Enterprise Strategy](#1-platform-overview--3-tier-enterprise-strategy)
-2. [Feature 1: Unified Integrations Hub (Wiz / Splunk Ingestion Model)](#2-feature-1-unified-integrations-hub)
+2. [Feature 1: Unified Integrations Hub (Centralized Ingestion Architecture)](#2-feature-1-unified-integrations-hub)
 3. [Feature 2: Tier 1 Cloud KMS Connectors (AWS KMS & Azure Key Vault)](#3-feature-2-tier-1-cloud-kms-connectors)
 4. [Feature 3: Tier 1 Enterprise PKI & Secret Vaults (AD CS & HashiCorp Vault)](#4-feature-3-tier-1-enterprise-pki--secret-vaults)
 5. [Feature 4: Tier 2 Transparent Hybrid Quantum TLS Reverse Proxy Gateway](#5-feature-4-tier-2-transparent-hybrid-quantum-tls-reverse-proxy-gateway)
@@ -42,7 +42,7 @@ All discoveries flow automatically into a centralized **Cryptographic Bill of Ma
 ## 2. Feature 1: Unified Integrations Hub
 
 ### Purpose
-The **Unified Integrations Hub** serves as the single-pane command center for managing all ingestion connectors across the enterprise. Modeled after modern cloud security platforms (such as Wiz and Splunk), it consolidates setup blueprints, IAM permissions, credentials, and live telemetry feeds into one cohesive directory. This eliminates navigation fragmentation and removes duplicated setup screens from administrative menus.
+The **Unified Integrations Hub** serves as the single-pane command center for managing all ingestion connectors across the enterprise. Modeled after modern enterprise cloud security architectures, it consolidates setup blueprints, IAM permissions, credentials, and live telemetry feeds into one cohesive directory. This eliminates navigation fragmentation and removes duplicated setup screens from administrative menus.
 
 ### Steps to Connect
 1. Log into the QuarkShield Portal (`https://quarkshield.ai` or your custom tenant subdomain e.g., `https://[tenant].quarkshield.ai`).
