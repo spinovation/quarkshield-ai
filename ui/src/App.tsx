@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Laptop, 
   Server, 
@@ -386,6 +386,10 @@ export default function App() {
   const [expandedTenants, setExpandedTenants] = useState<Record<string, boolean>>({});
   const [selectedTenantFilter, setSelectedTenantFilter] = useState<string>('all');
   const [tenantSearchQuery, setTenantSearchQuery] = useState('');
+  const [isTenantDropdownOpen, setIsTenantDropdownOpen] = useState(false);
+  const [registeredClients, setRegisteredClients] = useState<any[]>([]);
+  const tenantDropdownRef = useRef<HTMLDivElement>(null);
+  const tenantSearchInputRef = useRef<HTMLInputElement>(null);
   const [showLicense2FAModal, setShowLicense2FAModal] = useState(false);
   const [showTOTPModal, setShowTOTPModal] = useState(false);
   const [showBackupCodesModal, setShowBackupCodesModal] = useState(false);
@@ -676,11 +680,43 @@ export default function App() {
     }
   };
 
+  // 4. Fetch Client Registry (MSP Partners & Corporate Tenants)
+  const fetchClients = async () => {
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const headers: Record<string, string> = {};
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      const res = await fetch('/api/admin/clients', { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setRegisteredClients(Array.isArray(data) ? data : []);
+      }
+    } catch (err) {
+      console.warn('Could not fetch registered clients:', err);
+    }
+  };
+
   useEffect(() => {
     fetchMachines();
     fetchTokens();
     fetchCBOM();
+    fetchClients();
   }, []);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (tenantDropdownRef.current && !tenantDropdownRef.current.contains(event.target as Node)) {
+        setIsTenantDropdownOpen(false);
+      }
+    };
+    if (isTenantDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isTenantDropdownOpen]);
 
   const handleCreateToken = async () => {
     if (!newTokenName.trim()) return;
@@ -937,29 +973,182 @@ export default function App() {
     setExpandedTenants(next);
   };
 
-  // Available Tenants for CBOM Explorer
-  const allAvailableTenants = React.useMemo(() => {
-    const names = new Set<string>();
-    machines.forEach(m => {
-      if (m.tenantName) names.add(m.tenantName);
-      else if (m.groupName) names.add(m.groupName);
-    });
-    if (names.size === 0) {
-      names.add('Apex Defense Labs (MSP)');
-      names.add('PARTNERTEST (MSP Partner)');
-      names.add('Executive Engineering Fleet');
-    }
-    return Array.from(names);
-  }, [machines]);
+  // Unified Tenant & MSP Partner Directory (combines registered clients from admin_clients and machine telemetry)
+  const unifiedTenantList = useMemo(() => {
+    const tenantMap = new Map<string, {
+      key: string;
+      displayName: string;
+      rawName: string;
+      customerId?: string;
+      accountType?: string;
+      isMSP: boolean;
+      aliases: string[];
+      machineCount: number;
+    }>();
 
-  const filteredTenantList = allAvailableTenants.filter(t => 
-    !tenantSearchQuery || t.toLowerCase().includes(tenantSearchQuery.toLowerCase().trim())
-  );
+    // 1. Process registered clients from /api/admin/clients
+    (registeredClients || []).forEach((c: any) => {
+      const rawName = c.name || '';
+      const key = rawName.toLowerCase().trim();
+      if (!key) return;
+
+      let displayName = (c.displayName || c.name || '').trim();
+      if (displayName.toLowerCase() === 'spinovationcorp') displayName = 'Spinovation Corp';
+      else if (displayName.toLowerCase() === 'amberoon') displayName = 'Amberoon';
+      else if (displayName.toLowerCase() === 'algomeld') displayName = 'Algomeld';
+      else if (displayName.toLowerCase() === 'democlient') displayName = 'Demo Client Workspace';
+
+      const customerId = c.customerId || (c.id?.startsWith('PART-') || c.id?.startsWith('CORP-') ? c.id : undefined);
+      const isMSP = c.accountType === 'partner' 
+        || (customerId && customerId.startsWith('PART-'))
+        || displayName.toLowerCase().includes('msp') 
+        || displayName.toLowerCase().includes('partner');
+
+      const aliases = new Set<string>([
+        key,
+        displayName.toLowerCase(),
+        key.replace(/[^a-z0-9]/g, '')
+      ]);
+      if (customerId) {
+        aliases.add(customerId.toLowerCase());
+        aliases.add(customerId.toLowerCase().replace(/[^a-z0-9]/g, ''));
+      }
+      if (key === 'spinovationcorp') {
+        aliases.add('spinovation');
+        aliases.add('spinovation corp');
+      }
+
+      tenantMap.set(key, {
+        key,
+        displayName,
+        rawName,
+        customerId,
+        accountType: isMSP ? 'partner' : 'corporate',
+        isMSP,
+        aliases: Array.from(aliases),
+        machineCount: 0
+      });
+    });
+
+    // 2. Discover and merge any tenants from enrolled machines
+    machines.forEach((m: any) => {
+      const machineTenant = (m.tenantName || m.groupName || '').trim();
+      if (!machineTenant) return;
+
+      const norm = machineTenant.toLowerCase();
+      const clean = norm.replace(/[^a-z0-9]/g, '');
+
+      // Check if machine matches an existing registered client
+      let matchedKey: string | null = null;
+      for (const [k, opt] of tenantMap.entries()) {
+        if (opt.aliases.includes(norm) || opt.aliases.some(a => a.replace(/[^a-z0-9]/g, '') === clean)) {
+          matchedKey = k;
+          break;
+        }
+      }
+
+      if (matchedKey) {
+        const opt = tenantMap.get(matchedKey)!;
+        if (!opt.aliases.includes(norm)) opt.aliases.push(norm);
+      } else {
+        const isMSP = norm.includes('msp') || norm.includes('partner');
+        let displayName = machineTenant;
+        if (norm === 'spinovationcorp') displayName = 'Spinovation Corp';
+        else if (norm === 'algomeld') displayName = 'Algomeld';
+        else if (norm === 'amberoon') displayName = 'Amberoon';
+
+        tenantMap.set(clean || norm, {
+          key: clean || norm,
+          displayName,
+          rawName: machineTenant,
+          isMSP,
+          accountType: isMSP ? 'partner' : 'corporate',
+          aliases: [norm, clean, displayName.toLowerCase()],
+          machineCount: 0
+        });
+      }
+    });
+
+    // 3. Fallback seeds if both sources are empty
+    if (tenantMap.size === 0) {
+      tenantMap.set('algomeld', {
+        key: 'algomeld',
+        displayName: 'Algomeld',
+        rawName: 'algomeld',
+        customerId: 'PART-4421',
+        isMSP: true,
+        accountType: 'partner',
+        aliases: ['algomeld', 'part-4421'],
+        machineCount: 0
+      });
+      tenantMap.set('spinovationcorp', {
+        key: 'spinovationcorp',
+        displayName: 'Spinovation Corp',
+        rawName: 'spinovationcorp',
+        customerId: 'CORP-9812',
+        isMSP: false,
+        accountType: 'corporate',
+        aliases: ['spinovationcorp', 'spinovation', 'corp-9812'],
+        machineCount: 0
+      });
+    }
+
+    // 4. Calculate enrolled machine count for each tenant
+    const list = Array.from(tenantMap.values()).map(tenant => {
+      const count = machines.filter(m => {
+        const mTenant = (m.tenantName || m.groupName || '').toLowerCase().trim();
+        const mClean = mTenant.replace(/[^a-z0-9]/g, '');
+        return tenant.aliases.includes(mTenant) || 
+               tenant.aliases.some(a => a.replace(/[^a-z0-9]/g, '') === mClean);
+      }).length;
+      return { ...tenant, machineCount: count };
+    });
+
+    // 5. SORT ALPHABETICALLY BY DISPLAY NAME (A -> Z)
+    list.sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
+
+    return list;
+  }, [registeredClients, machines]);
+
+  // Selected Tenant Option metadata
+  const selectedTenantOption = useMemo(() => {
+    if (selectedTenantFilter === 'all') return null;
+    const filterNorm = selectedTenantFilter.toLowerCase().trim();
+    const filterClean = filterNorm.replace(/[^a-z0-9]/g, '');
+    return unifiedTenantList.find(t => 
+      t.key === selectedTenantFilter || 
+      t.displayName.toLowerCase() === filterNorm ||
+      t.aliases.includes(filterNorm) ||
+      t.aliases.some(a => a.replace(/[^a-z0-9]/g, '') === filterClean)
+    ) || null;
+  }, [selectedTenantFilter, unifiedTenantList]);
+
+  // Search filter for dropdown list
+  const filteredTenantList = useMemo(() => {
+    if (!tenantSearchQuery.trim()) return unifiedTenantList;
+    const q = tenantSearchQuery.toLowerCase().trim();
+    return unifiedTenantList.filter(t => 
+      t.displayName.toLowerCase().includes(q) ||
+      (t.customerId && t.customerId.toLowerCase().includes(q)) ||
+      (t.isMSP && (q === 'msp' || q === 'partner')) ||
+      (!t.isMSP && (q === 'corp' || q === 'corporate')) ||
+      t.aliases.some(a => a.includes(q))
+    );
+  }, [unifiedTenantList, tenantSearchQuery]);
 
   // CBOM Tenant Scoped calculations
-  const cbomScopedMachines = selectedTenantFilter === 'all'
-    ? machines
-    : machines.filter(m => (m.tenantName || m.groupName || 'Default Fleet') === selectedTenantFilter);
+  const cbomScopedMachines = useMemo(() => {
+    if (selectedTenantFilter === 'all' || !selectedTenantOption) {
+      return machines;
+    }
+    return machines.filter(m => {
+      const mTenant = (m.tenantName || m.groupName || 'Default Fleet').toLowerCase().trim();
+      const mClean = mTenant.replace(/[^a-z0-9]/g, '');
+      return selectedTenantOption.aliases.includes(mTenant) ||
+             selectedTenantOption.aliases.some(a => a.replace(/[^a-z0-9]/g, '') === mClean) ||
+             mTenant === selectedTenantFilter.toLowerCase().trim();
+    });
+  }, [machines, selectedTenantFilter, selectedTenantOption]);
 
   const cbomTotalEndpoints = cbomScopedMachines.length;
   const cbomOnlineEndpoints = cbomScopedMachines.filter(m => m.status === 'online').length;
@@ -969,15 +1158,22 @@ export default function App() {
   const cbomDiscoveredCrypto = cbomScopedMachines.reduce((sum, m) => sum + (m.assetCount || 0), 0);
   const cbomVulnerableAssets = cbomScopedMachines.reduce((sum, m) => sum + (m.vulnerableCount || 0), 0);
 
-  const tenantScopedHostnames = new Set(cbomScopedMachines.map(m => m.hostname));
+  const tenantScopedHostnames = useMemo(() => new Set(cbomScopedMachines.map(m => m.hostname)), [cbomScopedMachines]);
 
   // Filter CBOM components (Scoped by Tenant, Machine, Category, Status, and Search)
   const filteredCBOMComponents = (cbomData?.components || []).filter((comp: any) => {
     const host = comp.cryptoProperties?.detectionContext?.machineHostname;
     const tenantComp = comp.tenantName;
+    const tenantCompClean = tenantComp ? tenantComp.toLowerCase().trim() : '';
+
     const tenantMatch = selectedTenantFilter === 'all' 
       || (host && tenantScopedHostnames.has(host)) 
-      || (tenantComp && tenantComp === selectedTenantFilter);
+      || (selectedTenantOption && tenantCompClean && (
+          selectedTenantOption.aliases.includes(tenantCompClean) ||
+          selectedTenantOption.aliases.some(a => a.replace(/[^a-z0-9]/g, '') === tenantCompClean.replace(/[^a-z0-9]/g, ''))
+         ))
+      || (tenantComp && tenantComp.toLowerCase().trim() === selectedTenantFilter.toLowerCase().trim());
+
     const machineMatch = selectedMachineFilter === 'all' || host === selectedMachineFilter;
     const categoryMatch = selectedCategoryFilter === 'all' || comp.cryptoProperties?.assetType === selectedCategoryFilter;
     const isVulnerable = comp.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0;
@@ -1451,7 +1647,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
 
           {/* Refresh Telemetry */}
           <button
-            onClick={() => { fetchMachines(); fetchCBOM(); fetchTokens(); }}
+            onClick={() => { fetchMachines(); fetchCBOM(); fetchTokens(); fetchClients(); }}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -2173,7 +2369,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                   {cbomFleetRiskScore} <span style={{ fontSize: '1rem', fontWeight: 500, color: 'var(--text-muted)' }}>/ 100</span>
                 </div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                  {selectedTenantFilter === 'all' ? 'Weighted across entire fleet' : `Scoped to ${selectedTenantFilter}`}
+                  {selectedTenantFilter === 'all' ? 'Weighted across entire fleet' : `Scoped to ${selectedTenantOption?.displayName || selectedTenantFilter}`}
                 </div>
               </div>
 
@@ -2200,7 +2396,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               </div>
             </div>
 
-            {/* Tenant / Partner (MSP) View Selector & Search */}
+            {/* Tenant / Partner (MSP) View Selector & Searchable Dropdown */}
             <div className="glass-panel" style={{ padding: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
                 <div>
@@ -2208,91 +2404,324 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                     <Building size={16} color="var(--accent-cyan)" /> Tenant / Partner (MSP) View
                   </h4>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                    Isolated cryptographic inventory view per tenant or MSP partner. Search by partner name or select below.
+                    Isolated cryptographic inventory view per client tenant or MSP partner. Select or search from the alphabetical list below.
                   </p>
                 </div>
 
-                <div style={{ position: 'relative', width: '320px' }}>
-                  <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                  <input
-                    type="text"
-                    placeholder="Search tenant or partner (MSP) by name..."
-                    value={tenantSearchQuery}
-                    onChange={e => setTenantSearchQuery(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '0.45rem 0.75rem 0.45rem 2rem',
-                      background: 'rgba(0,0,0,0.3)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      borderRadius: '6px',
-                      color: '#ffffff',
-                      fontSize: '0.82rem'
-                    }}
-                  />
+                {/* Quick Status / Reset to All */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Active Scope:</span>
+                  <span style={{ 
+                    fontSize: '0.78rem', 
+                    fontWeight: 600, 
+                    padding: '0.2rem 0.6rem', 
+                    borderRadius: '4px',
+                    background: selectedTenantFilter === 'all' ? 'rgba(0, 242, 254, 0.1)' : (selectedTenantOption?.isMSP ? 'rgba(168, 85, 247, 0.15)' : 'rgba(0, 242, 254, 0.15)'),
+                    border: selectedTenantFilter === 'all' ? '1px solid rgba(0, 242, 254, 0.3)' : (selectedTenantOption?.isMSP ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid rgba(0, 242, 254, 0.4)'),
+                    color: selectedTenantFilter === 'all' ? 'var(--accent-cyan)' : (selectedTenantOption?.isMSP ? '#c084fc' : '#38bdf8'),
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.35rem'
+                  }}>
+                    {selectedTenantFilter === 'all' ? (
+                      <>
+                        <Globe size={12} /> Global Fleet (All Tenants)
+                      </>
+                    ) : (
+                      <>
+                        <Building size={12} /> {selectedTenantOption?.displayName || selectedTenantFilter}
+                        {selectedTenantOption?.customerId && (
+                          <span style={{ opacity: 0.75, fontSize: '0.72rem' }}>({selectedTenantOption.customerId})</span>
+                        )}
+                        {selectedTenantOption?.isMSP && (
+                          <span style={{ fontSize: '0.65rem', background: 'rgba(168, 85, 247, 0.3)', padding: '0.05rem 0.3rem', borderRadius: '3px', color: '#e9d5ff' }}>MSP</span>
+                        )}
+                      </>
+                    )}
+                  </span>
+                  {selectedTenantFilter !== 'all' && (
+                    <button
+                      onClick={() => {
+                        setSelectedTenantFilter('all');
+                        setSelectedMachineFilter('all');
+                      }}
+                      className="btn-secondary"
+                      style={{ padding: '0.25rem 0.55rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                      title="Reset to Global Fleet (All Tenants)"
+                    >
+                      <X size={12} /> Reset to All
+                    </button>
+                  )}
                 </div>
               </div>
 
-              {/* Tenant Selection Pills */}
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+              {/* Searchable Dropdown Combobox */}
+              <div ref={tenantDropdownRef} style={{ position: 'relative', width: '100%', maxWidth: '520px' }}>
+                {/* Dropdown Trigger Button */}
                 <button
+                  type="button"
                   onClick={() => {
-                    setSelectedTenantFilter('all');
-                    setSelectedMachineFilter('all');
+                    setIsTenantDropdownOpen(prev => !prev);
+                    if (!isTenantDropdownOpen) {
+                      setTimeout(() => tenantSearchInputRef.current?.focus(), 50);
+                    }
                   }}
                   style={{
-                    padding: '0.45rem 0.85rem',
-                    borderRadius: '6px',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '0.65rem 1rem',
+                    background: 'rgba(13, 21, 39, 0.85)',
+                    border: isTenantDropdownOpen ? '1px solid var(--accent-cyan)' : '1px solid rgba(255, 255, 255, 0.15)',
+                    borderRadius: '8px',
+                    color: '#ffffff',
                     cursor: 'pointer',
-                    background: selectedTenantFilter === 'all' ? 'rgba(0, 242, 254, 0.2)' : 'rgba(255,255,255,0.03)',
-                    border: selectedTenantFilter === 'all' ? '1px solid var(--accent-cyan)' : '1px solid rgba(255,255,255,0.1)',
-                    color: selectedTenantFilter === 'all' ? '#ffffff' : 'var(--text-secondary)',
+                    boxShadow: isTenantDropdownOpen ? '0 0 12px rgba(0, 242, 254, 0.25)' : 'none',
                     transition: 'all 0.15s ease'
                   }}
                 >
-                  🌐 Global Fleet (All Tenants)
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', overflow: 'hidden' }}>
+                    {selectedTenantFilter === 'all' ? (
+                      <>
+                        <div style={{ width: '26px', height: '26px', borderRadius: '6px', background: 'rgba(0, 242, 254, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <Globe size={15} color="var(--accent-cyan)" />
+                        </div>
+                        <div style={{ textAlign: 'left' }}>
+                          <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff' }}>
+                            🌐 Global Fleet (All Tenants)
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            {machines.length} Total Enrolled Endpoints Across Entire Fleet
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ 
+                          width: '26px', 
+                          height: '26px', 
+                          borderRadius: '6px', 
+                          background: selectedTenantOption?.isMSP ? 'rgba(168, 85, 247, 0.2)' : 'rgba(0, 242, 254, 0.15)', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          justifyContent: 'center' 
+                        }}>
+                          <Building size={15} color={selectedTenantOption?.isMSP ? '#c084fc' : 'var(--accent-cyan)'} />
+                        </div>
+                        <div style={{ textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                            <span>{selectedTenantOption?.displayName || selectedTenantFilter}</span>
+                            {selectedTenantOption?.customerId && (
+                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                                [{selectedTenantOption.customerId}]
+                              </span>
+                            )}
+                            {selectedTenantOption?.isMSP && (
+                              <span style={{ fontSize: '0.65rem', background: 'rgba(168, 85, 247, 0.25)', color: '#c084fc', padding: '0.05rem 0.35rem', borderRadius: '3px' }}>
+                                MSP Partner
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                            {selectedTenantOption?.machineCount ?? 0} endpoints registered
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginLeft: '0.5rem' }}>
+                    {isTenantDropdownOpen ? <ChevronUp size={16} color="var(--accent-cyan)" /> : <ChevronDown size={16} color="var(--text-muted)" />}
+                  </div>
                 </button>
 
-                {filteredTenantList.map(tenant => {
-                  const isActive = selectedTenantFilter === tenant;
-                  const isMSP = tenant.toLowerCase().includes('partner') || tenant.toLowerCase().includes('msp');
-                  return (
-                    <button
-                      key={tenant}
-                      onClick={() => {
-                        setSelectedTenantFilter(tenant);
-                        setSelectedMachineFilter('all');
-                      }}
-                      style={{
-                        padding: '0.45rem 0.85rem',
-                        borderRadius: '6px',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        background: isActive 
-                          ? (isMSP ? 'rgba(127, 0, 255, 0.25)' : 'rgba(0, 242, 254, 0.2)') 
-                          : 'rgba(255,255,255,0.03)',
-                        border: isActive 
-                          ? (isMSP ? '1px solid #c084fc' : '1px solid var(--accent-cyan)') 
-                          : '1px solid rgba(255,255,255,0.1)',
-                        color: isActive ? '#ffffff' : 'var(--text-secondary)',
-                        transition: 'all 0.15s ease',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.4rem'
-                      }}
-                    >
-                      <Building size={13} color={isActive ? (isMSP ? '#c084fc' : 'var(--accent-cyan)') : 'var(--text-muted)'} />
-                      <span>{tenant}</span>
-                      {isMSP && (
-                        <span style={{ fontSize: '0.65rem', background: 'rgba(127, 0, 255, 0.3)', color: '#c084fc', padding: '0.05rem 0.35rem', borderRadius: '3px' }}>
-                          MSP
-                        </span>
+                {/* Popover Dropdown Menu */}
+                {isTenantDropdownOpen && (
+                  <div style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 6px)',
+                    left: 0,
+                    right: 0,
+                    zIndex: 1000,
+                    background: '#0a101f',
+                    border: '1px solid rgba(0, 242, 254, 0.35)',
+                    borderRadius: '8px',
+                    boxShadow: '0 16px 40px rgba(0, 0, 0, 0.75), 0 0 16px rgba(0, 242, 254, 0.15)',
+                    overflow: 'hidden',
+                    backdropFilter: 'blur(16px)'
+                  }}>
+                    {/* Search Input Bar inside Popover */}
+                    <div style={{ padding: '0.65rem 0.75rem', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', background: 'rgba(0, 0, 0, 0.3)' }}>
+                      <div style={{ position: 'relative' }}>
+                        <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--accent-cyan)' }} />
+                        <input
+                          ref={tenantSearchInputRef}
+                          type="text"
+                          placeholder="Search partner or tenant name, ID (e.g. Algomeld)..."
+                          value={tenantSearchQuery}
+                          onChange={e => setTenantSearchQuery(e.target.value)}
+                          style={{
+                            width: '100%',
+                            padding: '0.45rem 2rem 0.45rem 2rem',
+                            background: 'rgba(255, 255, 255, 0.06)',
+                            border: '1px solid rgba(255, 255, 255, 0.12)',
+                            borderRadius: '6px',
+                            color: '#ffffff',
+                            fontSize: '0.82rem',
+                            outline: 'none'
+                          }}
+                        />
+                        {tenantSearchQuery && (
+                          <button
+                            type="button"
+                            onClick={() => setTenantSearchQuery('')}
+                            style={{
+                              position: 'absolute',
+                              right: '8px',
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: '2px'
+                            }}
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
+                      <div style={{ marginTop: '0.35rem', fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', justifyContent: 'space-between', padding: '0 0.2rem' }}>
+                        <span>Alphabetical Partner &amp; Tenant Directory (A-Z)</span>
+                        <span>{filteredTenantList.length} of {unifiedTenantList.length} shown</span>
+                      </div>
+                    </div>
+
+                    {/* Scrollable Options List */}
+                    <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                      {/* Pinned Global Fleet Option */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTenantFilter('all');
+                          setSelectedMachineFilter('all');
+                          setIsTenantDropdownOpen(false);
+                        }}
+                        style={{
+                          width: '100%',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '0.65rem 0.85rem',
+                          background: selectedTenantFilter === 'all' ? 'rgba(0, 242, 254, 0.15)' : 'transparent',
+                          border: 'none',
+                          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                          color: selectedTenantFilter === 'all' ? '#ffffff' : 'var(--text-secondary)',
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          transition: 'background 0.12s ease'
+                        }}
+                        onMouseEnter={e => { if (selectedTenantFilter !== 'all') e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                        onMouseLeave={e => { if (selectedTenantFilter !== 'all') e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                          <Globe size={14} color="var(--accent-cyan)" />
+                          <div>
+                            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#ffffff' }}>
+                              🌐 Global Fleet (All Tenants)
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
+                              Full consolidated telemetry
+                            </span>
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.72rem', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.45rem', borderRadius: '4px', color: 'var(--text-muted)' }}>
+                            {machines.length} devices
+                          </span>
+                          {selectedTenantFilter === 'all' && <Check size={14} color="var(--accent-cyan)" />}
+                        </div>
+                      </button>
+
+                      {/* Alphabetical List of Tenants / Partners */}
+                      {filteredTenantList.length === 0 ? (
+                        <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                          No partners or tenants matching "{tenantSearchQuery}"
+                        </div>
+                      ) : (
+                        filteredTenantList.map(tenant => {
+                          const isSelected = selectedTenantFilter === tenant.key || selectedTenantFilter === tenant.displayName;
+                          return (
+                            <button
+                              key={tenant.key}
+                              type="button"
+                              onClick={() => {
+                                setSelectedTenantFilter(tenant.key);
+                                setSelectedMachineFilter('all');
+                                setIsTenantDropdownOpen(false);
+                              }}
+                              style={{
+                                width: '100%',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                padding: '0.6rem 0.85rem',
+                                background: isSelected 
+                                  ? (tenant.isMSP ? 'rgba(168, 85, 247, 0.2)' : 'rgba(0, 242, 254, 0.15)') 
+                                  : 'transparent',
+                                border: 'none',
+                                borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                                color: isSelected ? '#ffffff' : 'var(--text-secondary)',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                transition: 'background 0.12s ease'
+                              }}
+                              onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                              onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', overflow: 'hidden' }}>
+                                <Building size={14} color={tenant.isMSP ? '#c084fc' : 'var(--accent-cyan)'} />
+                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  <span style={{ fontSize: '0.84rem', fontWeight: isSelected ? 700 : 500, color: isSelected ? '#ffffff' : '#e2e8f0' }}>
+                                    {tenant.displayName}
+                                  </span>
+                                  {tenant.customerId && (
+                                    <span style={{ marginLeft: '0.45rem', fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                                      {tenant.customerId}
+                                    </span>
+                                  )}
+                                  {tenant.isMSP ? (
+                                    <span style={{ marginLeft: '0.45rem', fontSize: '0.65rem', background: 'rgba(168, 85, 247, 0.25)', color: '#c084fc', padding: '0.05rem 0.35rem', borderRadius: '3px' }}>
+                                      MSP Partner
+                                    </span>
+                                  ) : (
+                                    <span style={{ marginLeft: '0.45rem', fontSize: '0.65rem', background: 'rgba(0, 242, 254, 0.12)', color: 'var(--accent-cyan)', padding: '0.05rem 0.35rem', borderRadius: '3px' }}>
+                                      Corporate
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexShrink: 0 }}>
+                                <span style={{ 
+                                  fontSize: '0.72rem', 
+                                  background: tenant.machineCount > 0 ? 'rgba(0, 242, 254, 0.1)' : 'rgba(255,255,255,0.04)', 
+                                  color: tenant.machineCount > 0 ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                                  padding: '0.1rem 0.45rem', 
+                                  borderRadius: '4px' 
+                                }}>
+                                  {tenant.machineCount} {tenant.machineCount === 1 ? 'device' : 'devices'}
+                                </span>
+                                {isSelected && <Check size={14} color={tenant.isMSP ? '#c084fc' : 'var(--accent-cyan)'} />}
+                              </div>
+                            </button>
+                          );
+                        })
                       )}
-                    </button>
-                  );
-                })}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Active Tenant / Partner Metadata Banner */}
@@ -2301,8 +2730,8 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                   marginTop: '1rem',
                   padding: '0.85rem 1rem',
                   borderRadius: '6px',
-                  background: 'rgba(0, 242, 254, 0.04)',
-                  border: '1px solid rgba(0, 242, 254, 0.25)',
+                  background: selectedTenantOption?.isMSP ? 'rgba(168, 85, 247, 0.05)' : 'rgba(0, 242, 254, 0.04)',
+                  border: selectedTenantOption?.isMSP ? '1px solid rgba(168, 85, 247, 0.3)' : '1px solid rgba(0, 242, 254, 0.25)',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
@@ -2314,25 +2743,50 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                       width: '36px',
                       height: '36px',
                       borderRadius: '6px',
-                      background: 'rgba(0, 242, 254, 0.15)',
-                      border: '1px solid rgba(0, 242, 254, 0.4)',
+                      background: selectedTenantOption?.isMSP ? 'rgba(168, 85, 247, 0.18)' : 'rgba(0, 242, 254, 0.15)',
+                      border: selectedTenantOption?.isMSP ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid rgba(0, 242, 254, 0.4)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center'
                     }}>
-                      <Building size={18} color="var(--accent-cyan)" />
+                      <Building size={18} color={selectedTenantOption?.isMSP ? '#c084fc' : 'var(--accent-cyan)'} />
                     </div>
                     <div>
-                      <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#ffffff' }}>
-                        {selectedTenantFilter}
+                      <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span>{selectedTenantOption?.displayName || selectedTenantFilter}</span>
+                        {selectedTenantOption?.customerId && (
+                          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontFamily: 'monospace' }}>
+                            ({selectedTenantOption.customerId})
+                          </span>
+                        )}
+                        {selectedTenantOption?.isMSP ? (
+                          <span style={{ fontSize: '0.65rem', background: 'rgba(168, 85, 247, 0.25)', color: '#c084fc', padding: '0.05rem 0.35rem', borderRadius: '3px' }}>
+                            MSP Partner
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.65rem', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--accent-cyan)', padding: '0.05rem 0.35rem', borderRadius: '3px' }}>
+                            Corporate Tenant
+                          </span>
+                        )}
                       </div>
                       <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
                         Isolated Cryptographic CBOM View • {cbomTotalEndpoints} Registered Host Devices
+                        {cbomTotalEndpoints === 0 && ' (No active agents enrolled yet)'}
                       </div>
                     </div>
                   </div>
 
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <button
+                      onClick={() => {
+                        setSelectedTenantFilter('all');
+                        setSelectedMachineFilter('all');
+                      }}
+                      className="btn-secondary"
+                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                    >
+                      <Globe size={13} /> View Global Fleet
+                    </button>
                     <button
                       onClick={() => downloadCBOMJson(false)}
                       className="btn-secondary"
@@ -2429,7 +2883,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
 
               {cbomViewMode === 'sbom' ? (
                 <div style={{ marginTop: '0.75rem' }}>
-                  <SbomInventory tenant={selectedTenantFilter === 'all' ? 'SPINOVATIONCORP' : selectedTenantFilter} apiUrl="" isSuperAdmin={true} />
+                  <SbomInventory tenant={selectedTenantFilter === 'all' ? 'SPINOVATIONCORP' : (selectedTenantOption?.rawName || selectedTenantOption?.key || selectedTenantFilter)} apiUrl="" isSuperAdmin={true} />
                 </div>
               ) : (
                 <>
@@ -2443,7 +2897,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                     style={{ width: '100%', padding: '0.4rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#ffffff', fontSize: '0.8rem' }}
                   >
                     <option value="all" style={{ background: '#0F172A' }}>
-                      {selectedTenantFilter === 'all' ? 'All Endpoints' : `All ${selectedTenantFilter} Endpoints`}
+                      {selectedTenantFilter === 'all' ? 'All Endpoints' : `All ${selectedTenantOption?.displayName || selectedTenantFilter} Endpoints`}
                     </option>
                     {cbomScopedMachines.map(m => (
                       <option key={m.id} value={m.hostname} style={{ background: '#0F172A' }}>{m.hostname}</option>
