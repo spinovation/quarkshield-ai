@@ -1486,12 +1486,18 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               textAlign: 'left',
               cursor: 'pointer',
               transition: 'all 0.15s ease',
-              width: '100%'
+              width: '100%',
+              justifyContent: 'space-between'
             }}
           >
-            <FileCode size={17} color={activeTab === 'cbom' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
-            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              CBOM
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', overflow: 'hidden' }}>
+              <FileCode size={17} color={activeTab === 'cbom' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
+              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                CBOM &amp; SBOM
+              </span>
+            </div>
+            <span style={{ fontSize: '0.62rem', background: 'rgba(0, 242, 254, 0.15)', color: '#38bdf8', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
+              CBOM+SBOM
             </span>
           </button>
 

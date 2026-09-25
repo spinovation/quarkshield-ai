@@ -516,7 +516,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     vulnerableAssets: 98,
     avgRiskScore: 87
   });
-  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'integrations' | 'repositories' | 'pki' | 'proxy' | 'copilot' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'pki' | 'proxy' | 'copilot' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>('overview');
   const [settingsSubTab, setSettingsSubTab] = useState<'profile' | 'users' | 'license' | 'planner'>('profile');
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState<boolean>(true);
   const [deploymentTierTab, setDeploymentTierTab] = useState<'tier1' | 'tier2' | 'tier3' | 'desktop'>('tier1');
@@ -2893,14 +2893,21 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           {[
             { id: 'overview', label: 'Overview & Metrics', icon: Activity },
-            { id: 'cbom', label: 'CBOM', icon: FileCode },
+            { id: 'cbom', label: 'Cryptographic BOM (CBOM)', icon: FileCode },
+            { id: 'sbom', label: 'Software BOM (SBOM)', icon: Package, badge: 'CycloneDX' },
             { id: 'integrations', label: 'Integrations Hub', icon: Layers, badge: 'Unified Hub' },
             { id: 'proxy', label: 'Hybrid Quantum TLS Proxy', icon: Radio, badge: 'Inline' },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
             { id: 'settings', label: 'Settings', icon: Settings }
           ].map(tab => {
             const Icon = tab.icon;
-            const isTabActive = tab.id === 'settings' ? isSettingsActive : activeTab === tab.id;
+            const isTabActive = tab.id === 'settings' 
+              ? isSettingsActive 
+              : tab.id === 'sbom'
+                ? ((activeTab === 'cbom' || (activeTab as any) === 'sbom') && cbomSubTab === 'sbom')
+                : tab.id === 'cbom'
+                  ? ((activeTab === 'cbom' || (activeTab as any) === 'assets') && cbomSubTab !== 'sbom')
+                  : activeTab === tab.id;
             return (
               <React.Fragment key={tab.id}>
                 <button
@@ -2913,6 +2920,12 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         setActiveTab('settings');
                         setIsSettingsMenuOpen(true);
                       }
+                    } else if (tab.id === 'sbom') {
+                      setActiveTab('cbom');
+                      setCbomSubTab('sbom');
+                    } else if (tab.id === 'cbom') {
+                      setActiveTab('cbom');
+                      if (cbomSubTab === 'sbom') setCbomSubTab('assets');
                     } else {
                       setActiveTab(tab.id as any);
                     }
@@ -3500,6 +3513,44 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       </div>
                     </div>
                   </div>
+
+                  {/* Card 5: Software BOM (SBOM) & CVE Correlation */}
+                  <div 
+                    onClick={() => {
+                      setActiveTab('cbom');
+                      setCbomSubTab('sbom');
+                    }}
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(56, 189, 248, 0.25)',
+                      borderRadius: '12px',
+                      padding: '1.25rem',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      position: 'relative'
+                    }}
+                    title="Click to view full CycloneDX 1.6 Software BOM & CVE Correlation"
+                    onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.55)')}
+                    onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.25)')}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div>
+                        <div style={{ fontSize: '0.8rem', color: '#38bdf8', textTransform: 'uppercase', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <span>Software BOM (SBOM)</span>
+                          <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8' }}>CycloneDX 1.6</span>
+                        </div>
+                        <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#ffffff', marginTop: '0.35rem' }}>
+                          SBOM &amp; CVEs
+                        </div>
+                        <div style={{ fontSize: '0.76rem', color: '#38bdf8', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 600 }}>
+                          <span>Open SBOM Scanner &rarr;</span>
+                        </div>
+                      </div>
+                      <div style={{ background: 'rgba(56, 189, 248, 0.15)', padding: '0.65rem', borderRadius: '8px', color: '#38bdf8' }}>
+                        <Package size={22} />
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Enrolled Workstations Preview Card */}
@@ -3767,10 +3818,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               </div>
             )}
 
-            {/* 1. CBOM INVENTORY TAB (Consolidated: Asset Inventory + CycloneDX 1.6 CBOM + Raw JSON) */}
-            {(activeTab === 'cbom' || activeTab === 'assets') && (
+            {/* 1. CBOM & SBOM INVENTORY TAB (Consolidated: Asset Inventory + CycloneDX 1.6 CBOM + Software BOM + Raw JSON) */}
+            {(activeTab === 'cbom' || activeTab === 'assets' || (activeTab as any) === 'sbom') && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                {/* Header Card with 3 Sub-Tabs Switcher */}
+                {/* Header Card with Sub-Tabs Switcher */}
                 <div style={{
                   background: 'rgba(255, 255, 255, 0.025)',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -3782,7 +3833,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                         <FileCode size={22} color="var(--accent-cyan, #38bdf8)" />
                         <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#ffffff' }}>
-                          CBOM
+                          CBOM &amp; Software BOM (SBOM)
                         </h2>
                         <span style={{
                           fontSize: '0.68rem',
@@ -3797,7 +3848,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         </span>
                       </div>
                       <p style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.82rem', margin: '0.35rem 0 0 0' }}>
-                        Comprehensive Cryptographic Bill of Materials (CBOM) tracking cryptographic keys, certificates, Shor-vulnerable primitives, algorithms, and post-quantum migration posture across {client.displayName}.
+                        Comprehensive Cryptographic Bill of Materials (CBOM) and Software Bill of Materials (SBOM) tracking cryptographic keys, certificates, OS packages, software libraries, and CVE correlations across {client.displayName}.
                       </p>
                     </div>
 
