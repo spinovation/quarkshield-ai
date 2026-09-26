@@ -568,14 +568,22 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
 
   let event: Stripe.Event;
 
+  // Fail closed: in production a verified signature is mandatory, otherwise a
+  // forged webhook could fulfill a checkout (create a tenant / mark it paid).
+  if (process.env.NODE_ENV === 'production' && (!webhookSecret || typeof signature !== 'string')) {
+    console.error('Stripe webhook rejected: STRIPE_WEBHOOK_SECRET/signature required in production.');
+    return res.status(400).send('Webhook signature verification required.');
+  }
+
   try {
     const stripe = getStripe();
     if (webhookSecret && typeof signature === 'string') {
       event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
     } else {
-      // In dev or test environments without webhook secret, parse payload directly
-      const payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-      event = payload as Stripe.Event;
+      // Non-production only (no secret configured): parse the raw body directly.
+      const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8')
+        : (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+      event = JSON.parse(raw) as Stripe.Event;
     }
   } catch (err: any) {
     console.error('Stripe webhook signature verification failed:', err.message);
