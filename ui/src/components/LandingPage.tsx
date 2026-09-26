@@ -52,7 +52,9 @@ import {
   CreditCard,
   Star,
   ChevronUp,
-  Cpu
+  Cpu,
+  Search,
+  FileCheck
 } from 'lucide-react';
 import HelpFeedbackWidget from './HelpFeedbackWidget';
 import MoscaMigrationPlanner from './MoscaMigrationPlanner';
