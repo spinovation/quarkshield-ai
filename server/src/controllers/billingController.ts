@@ -110,6 +110,7 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
       subscription_data: {
         trial_period_days: 14,
         metadata: {
+          product: 'quarkshield',
           companyName: companyName.trim(),
           tier: plan.tier,
           seats: String(plan.seatLimit),
@@ -117,6 +118,7 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
         }
       },
       metadata: {
+        product: 'quarkshield',
         registrationId: regId,
         companyName: companyName.trim(),
         contactName: (contactName || '').trim(),
@@ -475,6 +477,24 @@ export const createCustomerPortalSession = async (req: Request, res: Response) =
  */
 async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
   const meta = session.metadata || {};
+
+  // Product-scoping guard: this webhook endpoint may share a Stripe account with
+  // other FedMitigate products. Only fulfill sessions that are provably ours —
+  // either explicitly tagged product=quarkshield, or backed by a pending_registrations
+  // row that QuarkShield's own checkout wrote. Otherwise another product's checkout
+  // would silently provision a bogus QuarkShield tenant/license. Fail safe: skip.
+  const isTagged = meta.product === 'quarkshield';
+  if (!isTagged) {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM pending_registrations WHERE stripe_session_id = $1 OR id = $2 LIMIT 1`,
+      [session.id, meta.registrationId || '']
+    );
+    if (rows.length === 0) {
+      console.log(`Skipping checkout.session.completed ${session.id}: not a QuarkShield registration (no product tag or pending_registrations row).`);
+      return;
+    }
+  }
+
   const companyName = meta.companyName || session.customer_details?.name || 'Enterprise Client';
   const email = (meta.email || session.customer_details?.email || '').toLowerCase().trim();
   const contactName = meta.contactName || session.customer_details?.name || 'Client Administrator';
