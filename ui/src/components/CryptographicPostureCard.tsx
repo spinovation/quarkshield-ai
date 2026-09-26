@@ -22,6 +22,7 @@ export interface CryptographicPostureCardProps {
   tenantName: string;
   metrics: PostureMetrics;
   onViewDetails?: () => void;
+  isLive?: boolean;
 }
 
 /**
@@ -184,7 +185,8 @@ export function calculatePostureMetrics(
 
 export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> = ({
   tenantName,
-  metrics
+  metrics,
+  isLive = true
 }) => {
   const {
     totalAssets,
@@ -210,62 +212,89 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
       background: 'linear-gradient(180deg, rgba(14, 20, 36, 0.95) 0%, rgba(10, 15, 28, 0.98) 100%)',
       border: '1px solid rgba(255, 255, 255, 0.08)',
       borderRadius: '14px',
-      padding: '1.5rem 1.75rem',
+      padding: '1.2rem 1.35rem',
       boxShadow: '0 8px 30px rgba(0, 0, 0, 0.45)',
       display: 'flex',
       flexDirection: 'column',
-      gap: '1.25rem',
-      position: 'relative'
+      gap: '0.85rem',
+      position: 'relative',
+      width: '100%',
+      maxWidth: '560px'
     }}>
-      {/* Header with Title and Triple Dots */}
+      {/* Header with Title and Live status */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        paddingBottom: '0.35rem'
+        paddingBottom: '0.2rem'
       }}>
         <div style={{
           fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-          fontSize: '0.82rem',
+          fontSize: '0.76rem',
           fontWeight: 700,
           letterSpacing: '0.08em',
           color: '#94a3b8',
           textTransform: 'uppercase'
         }}>
-          CRYPTOGRAPHIC POSTURE &mdash; {tenantName} FLEET
+          CRYPTOGRAPHIC POSTURE &mdash; {tenantName.replace(/\s+FLEET$/i, '')}
         </div>
-        <div style={{
-          display: 'flex',
-          gap: '4px',
-          alignItems: 'center',
-          color: '#475569'
-        }}>
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#475569' }} />
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#475569' }} />
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#475569' }} />
-        </div>
+        {isLive ? (
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            background: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid rgba(16, 185, 129, 0.35)',
+            padding: '0.18rem 0.6rem',
+            borderRadius: '16px',
+            fontSize: '0.7rem',
+            fontWeight: 700,
+            letterSpacing: '0.05em',
+            color: '#10b981'
+          }}>
+            <span style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: '#10b981',
+              boxShadow: '0 0 8px #10b981'
+            }} />
+            <span>LIVE</span>
+          </div>
+        ) : (
+          <div style={{
+            display: 'flex',
+            gap: '4px',
+            alignItems: 'center',
+            color: '#475569'
+          }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#475569' }} />
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#475569' }} />
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#475569' }} />
+          </div>
+        )}
       </div>
 
-      {/* 3x2 Grid of Posture Metric Cards */}
+      {/* 3x2 Grid of Posture Metric Cards (Always 3 columns) */}
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-        gap: '1.1rem'
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '0.65rem'
       }}>
         {/* Card 1: TOTAL ASSETS */}
         <div style={{
           background: 'rgba(255, 255, 255, 0.022)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
-          borderRadius: '12px',
-          padding: '1.15rem 1.35rem',
+          borderRadius: '10px',
+          padding: '0.75rem 0.85rem',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          minHeight: '125px'
+          minHeight: '82px'
         }}>
           <div>
             <div style={{
-              fontSize: '0.74rem',
+              fontSize: '0.66rem',
               fontWeight: 600,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
@@ -274,16 +303,16 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
               TOTAL ASSETS
             </div>
             <div style={{
-              fontSize: '2.1rem',
+              fontSize: '1.75rem',
               fontWeight: 800,
               color: '#ffffff',
-              marginTop: '0.35rem',
+              marginTop: '0.2rem',
               lineHeight: 1.1
             }}>
               {totalAssets.toLocaleString()}
             </div>
           </div>
-          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '1rem' }}>
+          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '0.5rem' }}>
             <div style={{ width: '55%', height: '100%', background: '#e2e8f0', borderRadius: '2px' }} />
           </div>
         </div>
@@ -292,16 +321,16 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
         <div style={{
           background: 'rgba(255, 255, 255, 0.022)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
-          borderRadius: '12px',
-          padding: '1.15rem 1.35rem',
+          borderRadius: '10px',
+          padding: '0.75rem 0.85rem',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          minHeight: '125px'
+          minHeight: '82px'
         }}>
           <div>
             <div style={{
-              fontSize: '0.74rem',
+              fontSize: '0.66rem',
               fontWeight: 600,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
@@ -310,17 +339,17 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
               QUANTUM-VULN
             </div>
             <div style={{
-              fontSize: '2.1rem',
+              fontSize: '1.75rem',
               fontWeight: 800,
               color: '#f87171',
-              marginTop: '0.35rem',
+              marginTop: '0.2rem',
               lineHeight: 1.1
             }}>
               {quantumVuln.toLocaleString()}
             </div>
           </div>
-          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '1rem' }}>
-            <div style={{ width: `${Math.max(15, qvPct)}%`, height: '100%', background: '#f87171', borderRadius: '2px' }} />
+          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '0.5rem' }}>
+            <div style={{ width: `${Math.max(20, qvPct)}%`, height: '100%', background: '#f87171', borderRadius: '2px' }} />
           </div>
         </div>
 
@@ -328,16 +357,16 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
         <div style={{
           background: 'rgba(255, 255, 255, 0.022)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
-          borderRadius: '12px',
-          padding: '1.15rem 1.35rem',
+          borderRadius: '10px',
+          padding: '0.75rem 0.85rem',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          minHeight: '125px'
+          minHeight: '82px'
         }}>
           <div>
             <div style={{
-              fontSize: '0.74rem',
+              fontSize: '0.66rem',
               fontWeight: 600,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
@@ -346,17 +375,17 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
               HNDL EXPOSED
             </div>
             <div style={{
-              fontSize: '2.1rem',
+              fontSize: '1.75rem',
               fontWeight: 800,
               color: '#fbbf24',
-              marginTop: '0.35rem',
+              marginTop: '0.2rem',
               lineHeight: 1.1
             }}>
               {hndlExposed.toLocaleString()}
             </div>
           </div>
-          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '1rem' }}>
-            <div style={{ width: `${Math.max(12, hndlPct)}%`, height: '100%', background: '#fbbf24', borderRadius: '2px' }} />
+          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '0.5rem' }}>
+            <div style={{ width: `${Math.max(15, hndlPct)}%`, height: '100%', background: '#fbbf24', borderRadius: '2px' }} />
           </div>
         </div>
 
@@ -364,16 +393,16 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
         <div style={{
           background: 'rgba(255, 255, 255, 0.022)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
-          borderRadius: '12px',
-          padding: '1.15rem 1.35rem',
+          borderRadius: '10px',
+          padding: '0.75rem 0.85rem',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          minHeight: '125px'
+          minHeight: '82px'
         }}>
           <div>
             <div style={{
-              fontSize: '0.74rem',
+              fontSize: '0.66rem',
               fontWeight: 600,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
@@ -382,17 +411,17 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
               CONFIG FINDINGS
             </div>
             <div style={{
-              fontSize: '2.1rem',
+              fontSize: '1.75rem',
               fontWeight: 800,
               color: '#fbbf24',
-              marginTop: '0.35rem',
+              marginTop: '0.2rem',
               lineHeight: 1.1
             }}>
               {configFindings.toLocaleString()}
             </div>
           </div>
-          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '1rem' }}>
-            <div style={{ width: `${Math.max(10, configPct)}%`, height: '100%', background: '#fbbf24', borderRadius: '2px' }} />
+          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '0.5rem' }}>
+            <div style={{ width: `${Math.max(12, configPct)}%`, height: '100%', background: '#fbbf24', borderRadius: '2px' }} />
           </div>
         </div>
 
@@ -400,16 +429,16 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
         <div style={{
           background: 'rgba(255, 255, 255, 0.022)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
-          borderRadius: '12px',
-          padding: '1.15rem 1.35rem',
+          borderRadius: '10px',
+          padding: '0.75rem 0.85rem',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          minHeight: '125px'
+          minHeight: '82px'
         }}>
           <div>
             <div style={{
-              fontSize: '0.74rem',
+              fontSize: '0.66rem',
               fontWeight: 600,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
@@ -418,17 +447,17 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
               PQC READY
             </div>
             <div style={{
-              fontSize: '2.1rem',
+              fontSize: '1.75rem',
               fontWeight: 800,
               color: '#34d399',
-              marginTop: '0.35rem',
+              marginTop: '0.2rem',
               lineHeight: 1.1
             }}>
               {pqcReady.toLocaleString()}
             </div>
           </div>
-          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '1rem' }}>
-            <div style={{ width: `${Math.max(10, pqcPct)}%`, height: '100%', background: '#34d399', borderRadius: '2px' }} />
+          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '0.5rem' }}>
+            <div style={{ width: `${Math.max(12, pqcPct)}%`, height: '100%', background: '#34d399', borderRadius: '2px' }} />
           </div>
         </div>
 
@@ -436,16 +465,16 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
         <div style={{
           background: 'rgba(255, 255, 255, 0.022)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
-          borderRadius: '12px',
-          padding: '1.15rem 1.35rem',
+          borderRadius: '10px',
+          padding: '0.75rem 0.85rem',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          minHeight: '125px'
+          minHeight: '82px'
         }}>
           <div>
             <div style={{
-              fontSize: '0.74rem',
+              fontSize: '0.66rem',
               fontWeight: 600,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
@@ -453,58 +482,18 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
             }}>
               RISK GRADE
             </div>
-
             <div style={{
-              display: 'flex',
-              alignItems: 'baseline',
-              justifyContent: 'space-between',
+              fontSize: '1.75rem',
+              fontWeight: 900,
+              color: gradeColor,
               marginTop: '0.2rem',
-              flexWrap: 'wrap',
-              gap: '0.5rem'
+              lineHeight: 1.1
             }}>
-              <div style={{
-                fontSize: '2.3rem',
-                fontWeight: 900,
-                color: gradeColor,
-                lineHeight: 1
-              }}>
-                {riskGrade}
-              </div>
-
-              {/* Quantum Risk Rating Number Pill */}
-              <div style={{
-                background: '#050811',
-                border: '1px solid rgba(255, 255, 255, 0.09)',
-                borderRadius: '5px',
-                padding: '0.25rem 0.6rem',
-                display: 'inline-flex',
-                alignItems: 'baseline',
-                gap: '0.25rem',
-                fontSize: '0.92rem',
-                fontWeight: 800
-              }}>
-                <span style={{ color: gradeColor }}>{riskScore}</span>
-                <span style={{ color: '#64748b', fontSize: '0.72rem', fontWeight: 500 }}>/ 100</span>
-              </div>
-            </div>
-
-            {/* Shor-Vulnerable Assets Warning */}
-            <div style={{
-              fontSize: '0.74rem',
-              color: '#fbbf24',
-              marginTop: '0.35rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.35rem',
-              fontWeight: 600
-            }}>
-              <AlertTriangle size={12} color="#fbbf24" />
-              <span>{quantumVuln.toLocaleString()} Shor-Vulnerable Assets</span>
+              {riskGrade}
             </div>
           </div>
-
-          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '0.8rem' }}>
-            <div style={{ width: `${Math.max(15, riskScore)}%`, height: '100%', background: gradeColor, borderRadius: '2px' }} />
+          <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden', marginTop: '0.5rem' }}>
+            <div style={{ width: `${Math.max(20, riskScore)}%`, height: '100%', background: gradeColor, borderRadius: '2px' }} />
           </div>
         </div>
       </div>
@@ -512,33 +501,33 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
       {/* Bottom Critical Finding Callout Banner */}
       {topCriticalAsset && (
         <div style={{
-          background: 'rgba(15, 23, 42, 0.6)',
+          background: 'rgba(15, 23, 42, 0.65)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
           borderRadius: '10px',
-          padding: '1.15rem 1.4rem',
+          padding: '0.85rem 1.05rem',
           display: 'flex',
           flexDirection: 'column',
-          gap: '0.75rem',
-          marginTop: '0.35rem'
+          gap: '0.55rem',
+          marginTop: '0.15rem'
         }}>
           {/* Critical Badge & Finding Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
             <span style={{
-              background: 'rgba(239, 68, 68, 0.22)',
-              border: '1px solid rgba(239, 68, 68, 0.5)',
-              color: '#f87171',
-              fontSize: '0.7rem',
+              background: 'rgba(244, 63, 94, 0.18)',
+              border: '1px solid rgba(244, 63, 94, 0.45)',
+              color: '#fb7185',
+              fontSize: '0.68rem',
               fontWeight: 800,
-              padding: '0.15rem 0.55rem',
+              padding: '0.15rem 0.5rem',
               borderRadius: '4px',
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              letterSpacing: '0.05em'
+              letterSpacing: '0.06em'
             }}>
               CRITICAL
             </span>
             <span style={{
               fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              fontSize: '0.86rem',
+              fontSize: '0.82rem',
               color: '#e2e8f0',
               fontWeight: 600
             }}>
@@ -547,11 +536,11 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
           </div>
 
           {/* Labeled Rows: IMPACT, RECOMMEND, REMEDIATE */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: '0.82rem' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '0.75rem', alignItems: 'baseline' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', fontSize: '0.78rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: '0.65rem', alignItems: 'baseline' }}>
               <span style={{
                 fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                fontSize: '0.72rem',
+                fontSize: '0.68rem',
                 color: '#64748b',
                 fontWeight: 700,
                 letterSpacing: '0.06em',
@@ -564,10 +553,10 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
               </span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '0.75rem', alignItems: 'baseline' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: '0.65rem', alignItems: 'baseline' }}>
               <span style={{
                 fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                fontSize: '0.72rem',
+                fontSize: '0.68rem',
                 color: '#64748b',
                 fontWeight: 700,
                 letterSpacing: '0.06em',
@@ -580,10 +569,10 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
               </span>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '0.75rem', alignItems: 'baseline' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr', gap: '0.65rem', alignItems: 'baseline' }}>
               <span style={{
                 fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                fontSize: '0.72rem',
+                fontSize: '0.68rem',
                 color: '#64748b',
                 fontWeight: 700,
                 letterSpacing: '0.06em',
@@ -598,6 +587,21 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
           </div>
         </div>
       )}
+
+      {/* Prototype View Note */}
+      <div style={{
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+        fontSize: '0.7rem',
+        color: '#64748b',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.4rem',
+        paddingLeft: '0.2rem',
+        marginTop: '0.1rem'
+      }}>
+        <span>✦</span>
+        <span>Prototype view &mdash; wires to the live Spinovation Corp CBOM feed (in build)</span>
+      </div>
     </div>
   );
 };
