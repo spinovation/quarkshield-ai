@@ -96,6 +96,7 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
             product_data: {
               name: plan.displayName,
               description: plan.description,
+              tax_code: 'txcd_10103001',
               metadata: {
                 tier: plan.tier,
                 seats: String(plan.seatLimit)
@@ -214,7 +215,8 @@ export const createCustomCheckoutSession = async (req: Request, res: Response) =
       unit_amount: amountCents,
       product_data: {
         name: description,
-        description: `QuarkShield PQC Enterprise License (${seats} Seats • ${tier.toUpperCase()})`
+        description: `QuarkShield PQC Enterprise License (${seats} Seats • ${tier.toUpperCase()})`,
+        tax_code: 'txcd_10103001'
       },
       ...(recurring ? { recurring: { interval: interval === 'year' ? 'year' : 'month' } } : {})
     };
