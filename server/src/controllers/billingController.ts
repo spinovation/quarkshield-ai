@@ -230,6 +230,7 @@ export const createCustomCheckoutSession = async (req: Request, res: Response) =
       success_url: `${APP_HOST}/signup-result.html?status=success&custom=1&invite_id=${inviteId}`,
       cancel_url: `${APP_HOST}/#pricing`,
       metadata: {
+        product: 'quarkshield',
         customCheckoutInviteId: inviteId,
         customerName: customerName || '',
         customerEmail: customerEmail.toLowerCase().trim(),
@@ -481,16 +482,18 @@ async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
   // Product-scoping guard: this webhook endpoint may share a Stripe account with
   // other FedMitigate products. Only fulfill sessions that are provably ours —
   // either explicitly tagged product=quarkshield, or backed by a pending_registrations
-  // row that QuarkShield's own checkout wrote. Otherwise another product's checkout
-  // would silently provision a bogus QuarkShield tenant/license. Fail safe: skip.
-  const isTagged = meta.product === 'quarkshield';
+  // or custom_checkout_invites row that QuarkShield's own checkout wrote.
+  // Otherwise another product's checkout would silently provision a bogus QuarkShield tenant/license.
+  const isTagged = meta.product === 'quarkshield' || Boolean(meta.customCheckoutInviteId);
   if (!isTagged) {
     const { rows } = await pool.query(
-      `SELECT 1 FROM pending_registrations WHERE stripe_session_id = $1 OR id = $2 LIMIT 1`,
-      [session.id, meta.registrationId || '']
+      `SELECT 1 FROM pending_registrations WHERE stripe_session_id = $1 OR id = $2
+       UNION
+       SELECT 1 FROM custom_checkout_invites WHERE stripe_session_id = $1 OR id = $3 LIMIT 1`,
+      [session.id, meta.registrationId || '', meta.customCheckoutInviteId || '']
     );
     if (rows.length === 0) {
-      console.log(`Skipping checkout.session.completed ${session.id}: not a QuarkShield registration (no product tag or pending_registrations row).`);
+      console.log(`Skipping checkout.session.completed ${session.id}: not a QuarkShield registration (no product tag or matching registration/invite).`);
       return;
     }
   }
@@ -588,10 +591,10 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
 
   let event: Stripe.Event;
 
-  // Fail closed: in production a verified signature is mandatory, otherwise a
-  // forged webhook could fulfill a checkout (create a tenant / mark it paid).
-  if (process.env.NODE_ENV === 'production' && (!webhookSecret || typeof signature !== 'string')) {
-    console.error('Stripe webhook rejected: STRIPE_WEBHOOK_SECRET/signature required in production.');
+  // Fail closed: in production or when a webhook secret is configured, a verified signature is mandatory.
+  // Otherwise a forged webhook could fulfill a checkout (create a tenant / mark it paid).
+  if ((process.env.NODE_ENV === 'production' || webhookSecret) && (!webhookSecret || typeof signature !== 'string')) {
+    console.error('Stripe webhook rejected: STRIPE_WEBHOOK_SECRET/signature required.');
     return res.status(400).send('Webhook signature verification required.');
   }
 
