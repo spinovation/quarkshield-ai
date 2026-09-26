@@ -67,6 +67,7 @@ import { EnterprisePkiVaults } from './EnterprisePkiVaults';
 import { PqcProxyGateway } from './PqcProxyGateway';
 import { IntegrationsHub } from './IntegrationsHub';
 import SbomInventory from './SbomInventory';
+import { CryptographicPostureCard, calculatePostureMetrics } from './CryptographicPostureCard';
 
 export interface InternalUserLog {
   id: string;
@@ -189,11 +190,13 @@ interface Asset {
   description?: string;
   recommendation?: string;
   explainer?: string;
-  complianceViolations?: string;
+  complianceViolations?: string | string[];
   createdAt: string;
   machineId?: string;
   hostname?: string;
   os?: string;
+  source?: string;
+  sourceRef?: string;
 }
 
 interface TenantClient {
@@ -527,6 +530,15 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     } catch (e) {}
     return 'overview';
   });
+
+  const postureMetrics = useMemo(() => {
+    return calculatePostureMetrics(assets, machines, {
+      totalAssets: stats.totalAssets,
+      quantumVuln: stats.vulnerableAssets,
+      riskScore: stats.avgRiskScore
+    });
+  }, [assets, machines, stats]);
+
   const [settingsSubTab, setSettingsSubTab] = useState<'profile' | 'users' | 'license' | 'planner'>('profile');
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState<boolean>(true);
   const [deploymentTierTab, setDeploymentTierTab] = useState<'tier1' | 'tier2' | 'tier3' | 'desktop'>('tier1');
@@ -2910,7 +2922,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         {/* Primary Vertical Navigation Tabs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           {[
-            { id: 'overview', label: 'Overview & Metrics', icon: Activity },
+            { id: 'overview', label: 'Fleet Overview', icon: Laptop },
             { id: 'cbom', label: 'Cryptographic BOM (CBOM)', icon: FileCode },
             { id: 'sbom', label: 'Software BOM (SBOM)', icon: Package, badge: 'CycloneDX' },
             { id: 'integrations', label: 'Integrations Hub', icon: Layers, badge: 'Unified Hub' },
@@ -3531,44 +3543,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       </div>
                     </div>
                   </div>
-
-                  {/* Card 5: Software BOM (SBOM) & CVE Correlation */}
-                  <div 
-                    onClick={() => {
-                      setActiveTab('cbom');
-                      setCbomSubTab('sbom');
-                    }}
-                    style={{
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      border: '1px solid rgba(56, 189, 248, 0.25)',
-                      borderRadius: '12px',
-                      padding: '1.25rem',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      position: 'relative'
-                    }}
-                    title="Click to view full CycloneDX 1.6 Software BOM & CVE Correlation"
-                    onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.55)')}
-                    onMouseLeave={e => (e.currentTarget.style.borderColor = 'rgba(56, 189, 248, 0.25)')}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                      <div>
-                        <div style={{ fontSize: '0.8rem', color: '#38bdf8', textTransform: 'uppercase', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <span>Software BOM (SBOM)</span>
-                          <span style={{ fontSize: '0.65rem', padding: '1px 6px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8' }}>CycloneDX 1.6</span>
-                        </div>
-                        <div style={{ fontSize: '1.45rem', fontWeight: 800, color: '#ffffff', marginTop: '0.35rem' }}>
-                          SBOM &amp; CVEs
-                        </div>
-                        <div style={{ fontSize: '0.76rem', color: '#38bdf8', marginTop: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.3rem', fontWeight: 600 }}>
-                          <span>Open SBOM Scanner &rarr;</span>
-                        </div>
-                      </div>
-                      <div style={{ background: 'rgba(56, 189, 248, 0.15)', padding: '0.65rem', borderRadius: '8px', color: '#38bdf8' }}>
-                        <Package size={22} />
-                      </div>
-                    </div>
-                  </div>
                 </div>
 
                 {/* Enrolled Workstations Preview Card */}
@@ -4097,12 +4071,19 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
                 {/* SUB-TAB 1: ASSET INVENTORY */}
                 {cbomSubTab === 'assets' && (
-                  <div style={{
-                    background: 'rgba(255, 255, 255, 0.025)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    borderRadius: '12px',
-                    padding: '1.75rem'
-                  }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    {/* Overall Asset Inventory Posture Dashboard */}
+                    <CryptographicPostureCard
+                      tenantName={client.displayName.toUpperCase()}
+                      metrics={postureMetrics}
+                    />
+
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.025)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      padding: '1.75rem'
+                    }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
                       <div>
                         <h3 style={{ fontSize: '1.15rem', fontWeight: 700, margin: '0 0 0.3rem 0', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -4351,6 +4332,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         </div>
                       </div>
                     )}
+                  </div>
                   </div>
                 )}
 

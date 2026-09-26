@@ -49,6 +49,7 @@ import { EnterprisePkiVaults } from './components/EnterprisePkiVaults';
 import { PqcProxyGateway } from './components/PqcProxyGateway';
 import SbomInventory from './components/SbomInventory';
 import ResetPasswordPage from './components/ResetPasswordPage';
+import { CryptographicPostureCard, calculatePostureMetrics } from './components/CryptographicPostureCard';
 
 export type TabType = 'dashboard' | 'cbom' | 'tokens' | 'git' | 'pki' | 'proxy' | 'planner' | 'admin';
 
@@ -1207,6 +1208,34 @@ export default function App() {
     return JSON.stringify(cbomData, null, 2);
   }, [cbomData]);
 
+  // Super Admin Posture Metrics Computation (Global or Scoped per Tenant)
+  const mappedSuperAdminAssets = useMemo(() => {
+    return filteredCBOMComponents.map((comp: any) => ({
+      id: comp.bomRef || comp.name,
+      name: comp.name,
+      type: comp.cryptoProperties?.assetType || 'cryptographic-asset',
+      algorithm: comp.cryptoProperties?.algorithmProperties?.name || comp.name,
+      keySize: comp.cryptoProperties?.algorithmProperties?.keyLength,
+      isVulnerable: comp.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0,
+      riskLevel: comp.properties?.find((p: any) => p.name === 'quarkshield:riskLevel')?.value || (comp.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0 ? 'high' : 'low'),
+      path: comp.cryptoProperties?.detectionContext?.filePath,
+      hostname: comp.cryptoProperties?.detectionContext?.machineHostname,
+      complianceViolations: comp.properties?.find((p: any) => p.name === 'quarkshield:complianceViolations')?.value
+    }));
+  }, [filteredCBOMComponents]);
+
+  const superAdminPostureMetrics = useMemo(() => {
+    return calculatePostureMetrics(mappedSuperAdminAssets, cbomScopedMachines, {
+      totalAssets: cbomDiscoveredCrypto > 0 ? cbomDiscoveredCrypto : mappedSuperAdminAssets.length,
+      quantumVuln: cbomVulnerableAssets > 0 ? cbomVulnerableAssets : mappedSuperAdminAssets.filter(a => a.isVulnerable).length,
+      riskScore: cbomFleetRiskScore > 0 ? cbomFleetRiskScore : undefined
+    });
+  }, [mappedSuperAdminAssets, cbomScopedMachines, cbomDiscoveredCrypto, cbomVulnerableAssets, cbomFleetRiskScore]);
+
+  const superAdminPostureTitle = selectedTenantFilter === 'all'
+    ? 'GLOBAL MULTI-TENANT'
+    : (selectedTenantOption?.displayName?.toUpperCase() || selectedTenantFilter.toUpperCase());
+
   // Active Token for code generation
   const activeTokenString = selectedDeploymentToken || (tokens[0]?.token || 'YOUR_FLEET_TOKEN');
 
@@ -2360,56 +2389,6 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
         {activeTab === 'cbom' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             
-            {/* Top 4 KPI Metric Cards for CBOM (Scoped to selected tenant/partner or global) */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1rem' }}>
-              <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.82rem', fontWeight: 600 }}>
-                  <span>TOTAL ENROLLED ENDPOINTS</span>
-                  <Laptop size={18} color="var(--accent-cyan)" />
-                </div>
-                <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ffffff' }}>{cbomTotalEndpoints}</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--status-secure)' }} />
-                  <span>{cbomOnlineEndpoints} active online in scope</span>
-                </div>
-              </div>
-
-              <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.82rem', fontWeight: 600 }}>
-                  <span>FLEET QUANTUM RISK SCORE</span>
-                  <ShieldAlert size={18} color={cbomFleetRiskScore > 60 ? 'var(--status-vulnerable)' : 'var(--accent-cyan)'} />
-                </div>
-                <div style={{ fontSize: '2rem', fontWeight: 800, color: cbomFleetRiskScore > 60 ? 'var(--status-vulnerable)' : '#ffffff' }}>
-                  {cbomFleetRiskScore} <span style={{ fontSize: '1rem', fontWeight: 500, color: 'var(--text-muted)' }}>/ 100</span>
-                </div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                  {selectedTenantFilter === 'all' ? 'Weighted across entire fleet' : `Scoped to ${selectedTenantOption?.displayName || selectedTenantFilter}`}
-                </div>
-              </div>
-
-              <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.82rem', fontWeight: 600 }}>
-                  <span>DISCOVERED CRYPTO SECRETS</span>
-                  <Lock size={18} color="var(--accent-cyan)" />
-                </div>
-                <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ffffff' }}>{cbomDiscoveredCrypto}</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                  Keys, certificates, JKS, and tunnel configs
-                </div>
-              </div>
-
-              <div className="glass-panel" style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.82rem', fontWeight: 600 }}>
-                  <span>VULNERABLE ASSETS</span>
-                  <AlertOctagon size={18} color="var(--status-vulnerable)" />
-                </div>
-                <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--status-vulnerable)' }}>{cbomVulnerableAssets}</div>
-                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                  Require ML-KEM / ML-DSA migration
-                </div>
-              </div>
-            </div>
-
             {/* Tenant / Partner (MSP) View Selector & Searchable Dropdown */}
             <div className="glass-panel" style={{ padding: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
@@ -2821,6 +2800,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                 </div>
               )}
             </div>
+
+            {/* Overall Asset Inventory Posture Dashboard (A-F Grading & Industry Risk Formula) */}
+            <CryptographicPostureCard
+              tenantName={superAdminPostureTitle}
+              metrics={superAdminPostureMetrics}
+            />
 
             {/* CBOM Explorer Panel */}
             <div className="glass-panel" style={{ padding: '1.5rem' }}>
