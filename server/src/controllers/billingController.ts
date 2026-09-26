@@ -85,7 +85,6 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
 
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      payment_method_types: ['card'],
       line_items: [
         {
           price_data: {
@@ -222,7 +221,6 @@ export const createCustomCheckoutSession = async (req: Request, res: Response) =
 
     const session = await stripe.checkout.sessions.create({
       mode: recurring ? 'subscription' : 'payment',
-      payment_method_types: ['card'],
       line_items: [{ price_data: priceData, quantity: 1 }],
       customer_email: customerEmail.toLowerCase().trim(),
       success_url: `${APP_HOST}/signup-result.html?status=success&custom=1&invite_id=${inviteId}`,
