@@ -3813,6 +3813,12 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             {/* 1. CBOM & SBOM INVENTORY TAB (Consolidated: Asset Inventory + CycloneDX 1.6 CBOM + Software BOM + Raw JSON) */}
             {(activeTab === 'cbom' || activeTab === 'assets' || (activeTab as any) === 'sbom') && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                {/* Overall Asset Inventory Posture Dashboard (A-F Grading & Industry Risk Formula) */}
+                <CryptographicPostureCard
+                  tenantName={client.displayName.toUpperCase()}
+                  metrics={postureMetrics}
+                />
+
                 {/* Header Card with Sub-Tabs Switcher */}
                 <div style={{
                   background: 'rgba(255, 255, 255, 0.025)',
@@ -4072,12 +4078,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 {/* SUB-TAB 1: ASSET INVENTORY */}
                 {cbomSubTab === 'assets' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    {/* Overall Asset Inventory Posture Dashboard */}
-                    <CryptographicPostureCard
-                      tenantName={client.displayName.toUpperCase()}
-                      metrics={postureMetrics}
-                    />
-
                     <div style={{
                       background: 'rgba(255, 255, 255, 0.025)',
                       border: '1px solid rgba(255, 255, 255, 0.08)',

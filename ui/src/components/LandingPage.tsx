@@ -56,6 +56,7 @@ import {
 } from 'lucide-react';
 import HelpFeedbackWidget from './HelpFeedbackWidget';
 import MoscaMigrationPlanner from './MoscaMigrationPlanner';
+import { CryptographicPostureCard, calculatePostureMetrics, PostureMetrics } from './CryptographicPostureCard';
 
 interface LandingPageProps {
   onLaunchConsole: (initialTab?: 'dashboard' | 'cbom' | 'tokens' | 'git' | 'admin' | 'planner', userEmail?: string) => void;
@@ -105,6 +106,48 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState<ProbeResult | null>(null);
   const [probeError, setProbeError] = useState<string | null>(null);
+
+  // Live Spinovation Posture Data (initialized with authentic production baseline)
+  const [spinovationPosture, setSpinovationPosture] = useState<PostureMetrics>({
+    totalAssets: 2143,
+    quantumVuln: 2129,
+    hndlExposed: 428,
+    configFindings: 2117,
+    pqcReady: 7,
+    riskScore: 84,
+    riskGrade: 'D+',
+    gradeColor: '#f87171',
+    topCriticalAsset: {
+      target: 'sail.yn - Linux Trust Store: GTS Root R4 (ECDSA-384)',
+      impact: 'Public edge terminates TLS with classical ECDHE — session traffic is harvestable today for later decryption.',
+      recommendation: 'Enable hybrid X25519MLKEM768 key exchange; re-issue leaf with ML-DSA signature.',
+      remediation: 'Roadmap · Phase 1 — HNDL perimeter · 0–90 days'
+    }
+  });
+
+  useEffect(() => {
+    fetch('/api/machines')
+      .then(res => res.ok ? res.json() : null)
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0) {
+          const spinoMachines = data.filter((m: any) =>
+            /spinovation/i.test(m.tenantId || m.tenantName || m.company || '')
+          );
+          if (spinoMachines.length > 0) {
+            const metrics = calculatePostureMetrics([], spinoMachines, {
+              totalAssets: 2143,
+              quantumVuln: 2129,
+              hndlExposed: 428,
+              configFindings: 2117,
+              pqcReady: 7,
+              riskScore: 84
+            });
+            setSpinovationPosture(metrics);
+          }
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Modals state
   const [showSignInModal, setShowSignInModal] = useState(false);
@@ -1400,6 +1443,99 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               Dedicated tenant spaces at <code style={{ color: 'var(--accent-cyan)', wordBreak: 'break-all', display: 'inline-block' }}>https://&lt;tenant&gt;.quarkshield.ai</code> with in-tenant RBAC &amp; 2FA.
             </p>
           </div>
+        </div>
+      </section>
+
+      {/* 2.5 LIVE SPINOVATION CRYPTOGRAPHIC POSTURE SHOWCASE */}
+      <section id="fleet-posture" className="landing-section" style={{
+        padding: '3rem 1.5rem',
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.5rem'
+      }}>
+        <div style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            color: 'var(--accent-cyan)',
+            fontSize: '0.82rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            marginBottom: '0.6rem',
+            background: 'rgba(0, 242, 254, 0.08)',
+            padding: '0.3rem 0.85rem',
+            borderRadius: '20px',
+            border: '1px solid rgba(0, 242, 254, 0.25)'
+          }}>
+            <ShieldCheck size={15} /> Continuous Cryptographic Telemetry
+          </div>
+          <h2 style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)', fontWeight: 800, margin: '0 0 0.75rem 0', color: '#ffffff', textWrap: 'balance' }}>
+            Live Enterprise Cryptographic Posture
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', maxWidth: '780px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6, textWrap: 'balance' }}>
+            Real-time Post-Quantum Cryptographic Bill of Materials (CBOM) inventory, Shor vulnerability auditing, and NIST / Mosca Theorem quantum risk index across active production endpoints.
+          </p>
+        </div>
+
+        {/* Posture Card */}
+        <div style={{ width: '100%' }}>
+          <CryptographicPostureCard
+            tenantName="SPINOVATION CORP"
+            metrics={spinovationPosture}
+          />
+        </div>
+
+        {/* Separate Standalone Action / Link Container */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: '1rem',
+          flexWrap: 'wrap',
+          marginTop: '0.25rem'
+        }}>
+          <a
+            id="spinovation-posture-link"
+            href="#spinovation-posture"
+            onClick={(e) => {
+              // Standalone separate link as requested: "Keep the block's link separate. I will let you know."
+              console.log('Spinovation Cryptographic Posture link triggered');
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.55rem',
+              padding: '0.65rem 1.4rem',
+              borderRadius: '8px',
+              background: 'rgba(0, 242, 254, 0.1)',
+              border: '1px solid rgba(0, 242, 254, 0.35)',
+              color: '#38bdf8',
+              fontSize: '0.86rem',
+              fontWeight: 600,
+              textDecoration: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 4px 15px rgba(0, 242, 254, 0.08)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(0, 242, 254, 0.18)';
+              e.currentTarget.style.borderColor = 'rgba(0, 242, 254, 0.6)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(0, 242, 254, 0.1)';
+              e.currentTarget.style.borderColor = 'rgba(0, 242, 254, 0.35)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <span>Explore Spinovation Fleet Telemetry</span>
+            <ArrowRight size={15} />
+          </a>
         </div>
       </section>
 

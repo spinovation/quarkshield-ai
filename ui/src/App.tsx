@@ -1472,7 +1472,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
 
         {/* Primary Navigation Tabs */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-          {/* Fleet Overview */}
+          {/* Global Fleet Overview */}
           <button
             onClick={() => setActiveTab('dashboard')}
             style={{
@@ -1494,7 +1494,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           >
             <Laptop size={17} color={activeTab === 'dashboard' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Fleet Overview ({machines.length})
+              Global Fleet Overview ({machines.length})
             </span>
           </button>
 
@@ -2814,7 +2814,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div>
                   <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Layers size={18} color="var(--accent-cyan)" /> Cryptographic &amp; Software Bill of Materials (CycloneDX 1.6)
+                    <Layers size={18} color="var(--accent-cyan)" /> CBOM &amp; Software BOM (CycloneDX 1.6)
                   </h3>
                   <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
                     Standardized inventory adhering to the global CycloneDX 1.6 specification for cryptographic primitives and software dependencies.
