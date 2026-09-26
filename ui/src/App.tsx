@@ -2388,7 +2388,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
         {/* TAB 2: CBOM EXPLORER */}
         {activeTab === 'cbom' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            
+            {/* Overall Asset Inventory Posture Dashboard (A-F Grading & Industry Risk Formula) */}
+            <CryptographicPostureCard
+              tenantName={superAdminPostureTitle}
+              metrics={superAdminPostureMetrics}
+            />
+
             {/* Tenant / Partner (MSP) View Selector & Searchable Dropdown */}
             <div className="glass-panel" style={{ padding: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1rem' }}>
@@ -2800,12 +2805,6 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                 </div>
               )}
             </div>
-
-            {/* Overall Asset Inventory Posture Dashboard (A-F Grading & Industry Risk Formula) */}
-            <CryptographicPostureCard
-              tenantName={superAdminPostureTitle}
-              metrics={superAdminPostureMetrics}
-            />
 
             {/* CBOM Explorer Panel */}
             <div className="glass-panel" style={{ padding: '1.5rem' }}>
