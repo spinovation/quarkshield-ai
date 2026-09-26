@@ -31,6 +31,26 @@
   --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   --shadow-glow: 0 0 20px rgba(0, 242, 254, 0.1);
   --shadow-card: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+
+  /* Developer Hand-off Design Tokens */
+  --bg: #080b16;
+  --bg-2: #0c1122;
+  --surface: #121a30;
+  --surface-2: #18213c;
+  --line: #26304f;
+  --line-soft: #1c2540;
+  --text: #eef1fa;
+  --muted: #9aa6c4;
+  --faint: #6b7699;
+  --purple: #a855f7;
+  --cyan: #22d3ee;
+  --critical: #fb5a76;
+  --warning: #f5b544;
+  --good: #34d399;
+  --font-serif: 'Playfair Display', Georgia, serif;
+  --font-display: 'Sora', sans-serif;
+  --font-body: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-code: 'IBM Plex Mono', 'Fira Code', monospace;
 }
 
 * {

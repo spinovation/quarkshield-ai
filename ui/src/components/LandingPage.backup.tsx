@@ -719,133 +719,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
     }
   };
 
-
-  // =========================================================================
-  // ASSESSMENT FLOW (3-STEP MODAL) STATE & HANDLERS
-  // =========================================================================
-  const [showAssessmentModal, setShowAssessmentModal] = useState(false);
-  const [assessmentStep, setAssessmentStep] = useState<1 | 2 | 3>(1);
-  const [assessmentInterests, setAssessmentInterests] = useState<string[]>(['PQC/Quantum Readiness']);
-  const [assessmentName, setAssessmentName] = useState('');
-  const [assessmentEmail, setAssessmentEmail] = useState('');
-  const [assessmentCompany, setAssessmentCompany] = useState('');
-  const [assessmentRole, setAssessmentRole] = useState('Security Architect');
-  const [assessmentEnvSize, setAssessmentEnvSize] = useState('50 - 250 endpoints');
-  const [assessmentTier, setAssessmentTier] = useState<string | null>(null);
-  const [assessmentTarget, setAssessmentTarget] = useState<string | null>(null);
-  const [assessmentHoneypot, setAssessmentHoneypot] = useState('');
-  const [assessmentSubmitting, setAssessmentSubmitting] = useState(false);
-  const [assessmentError, setAssessmentError] = useState<string | null>(null);
-  const [assessmentSuccessRecap, setAssessmentSuccessRecap] = useState<any>(null);
-
-  const handleOpenAssessment = (interest?: string, tier?: string, target?: string) => {
-    if (interest) {
-      setAssessmentInterests(prev => prev.includes(interest) ? prev : [...prev, interest]);
-    }
-    if (tier) {
-      setAssessmentTier(tier);
-    }
-    if (target) {
-      setAssessmentTarget(target);
-    }
-    setAssessmentStep(1);
-    setAssessmentError(null);
-    setShowAssessmentModal(true);
-  };
-
-  const toggleInterest = (interest: string) => {
-    setAssessmentInterests(prev => 
-      prev.includes(interest)
-        ? (prev.length > 1 ? prev.filter(i => i !== interest) : prev)
-        : [...prev, interest]
-    );
-  };
-
-  const isBusinessEmailFormat = (email: string) => {
-    const freeDomains = [
-      'gmail.com', 'yahoo.com', 'ymail.com', 'outlook.com', 'hotmail.com',
-      'live.com', 'msn.com', 'icloud.com', 'me.com', 'mac.com', 'aol.com',
-      'proton.me', 'protonmail.com', 'gmx.com', 'gmx.net', 'zoho.com', 'mail.com', 'fastmail.com'
-    ];
-    if (!email || !email.includes('@')) return false;
-    const domain = email.split('@')[1]?.toLowerCase().trim();
-    if (!domain) return false;
-    return !freeDomains.includes(domain);
-  };
-
-  const handleAssessmentSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!assessmentName.trim()) {
-      setAssessmentError('Please enter your full name.');
-      return;
-    }
-    if (!assessmentEmail.trim() || !isBusinessEmailFormat(assessmentEmail)) {
-      setAssessmentError('Please provide a corporate work email address (free email providers like Gmail or Yahoo are not supported).');
-      return;
-    }
-    if (!assessmentCompany.trim()) {
-      setAssessmentError('Please enter your company or organization name.');
-      return;
-    }
-
-    setAssessmentSubmitting(true);
-    setAssessmentError(null);
-
-    try {
-      const res = await fetch('/api/assessment', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: assessmentName.trim(),
-          email: assessmentEmail.trim(),
-          company: assessmentCompany.trim(),
-          role: assessmentRole,
-          environmentSize: assessmentEnvSize,
-          interests: assessmentInterests,
-          tier: assessmentTier,
-          target: assessmentTarget,
-          honeypot: assessmentHoneypot
-        })
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to submit assessment request.');
-      }
-
-      setAssessmentSuccessRecap({
-        assessmentId: data.assessmentId || ('pqc_req_' + Date.now()),
-        name: assessmentName.trim(),
-        email: assessmentEmail.trim(),
-        company: assessmentCompany.trim(),
-        role: assessmentRole,
-        environmentSize: assessmentEnvSize,
-        interests: [...assessmentInterests],
-        tier: assessmentTier
-      });
-      setAssessmentStep(3);
-    } catch (err: any) {
-      setAssessmentError(err.message || 'Network error submitting request. Please email PQCA@quarkshield.ai directly.');
-    } finally {
-      setAssessmentSubmitting(false);
-    }
-  };
-
   return (
-    <div style={{
-      minHeight: '100vh',
-      width: '100%',
-      background: 'var(--bg, #080b16)',
-      color: 'var(--text, #eef1fa)',
-      display: 'flex',
-      flexDirection: 'column',
-      paddingTop: '72px',
-      fontFamily: 'var(--font-body, "IBM Plex Sans", sans-serif)'
-    }}>
+    <div style={{ minHeight: '100vh', width: '100%', background: 'var(--bg-deep)', color: 'var(--text-primary)', display: 'flex', flexDirection: 'column', paddingTop: '68px' }}>
       
-      {/* ========================================================================= */}
-      {/* 1. STICKY NAV (BLUR BACKGROUND) */}
-      {/* ========================================================================= */}
+      {/* 1. TOP ENTERPRISE NAVIGATION HEADER */}
       <header className="landing-header" style={{
         position: 'fixed',
         top: 0,
@@ -853,65 +730,48 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
         right: 0,
         width: '100%',
         zIndex: 1000,
-        background: 'rgba(8, 11, 22, 0.92)',
+        background: 'rgba(6, 8, 13, 0.94)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
-        borderBottom: '1px solid var(--line, #26304f)',
-        transition: 'all 0.25s ease'
+        borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+        transition: 'all 0.3s ease'
       }}>
         <div style={{
-          maxWidth: '1180px',
+          maxWidth: '1360px',
           margin: '0 auto',
-          padding: '0.85rem 1.5rem',
+          padding: '0.95rem 2rem',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           gap: '1.5rem'
         }}>
-          {/* Brand Wordmark: Playfair Display + Opaque Shield */}
+          {/* Brand Logo */}
           <div 
-            style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer', userSelect: 'none' }} 
+            style={{ display: 'flex', alignItems: 'center', cursor: 'pointer' }} 
             onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-            title="QuarkShield | Enterprise Cryptographic Intelligence Platform"
+            title="QuarkShield.ai | Quantum-Resilient Endpoint Observability"
           >
-            <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #b76bfb 0%, #7c3aed 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: '0 2px 10px rgba(124, 58, 237, 0.45)',
-              flexShrink: 0
-            }}>
-              <Shield size={18} color="#ffffff" strokeWidth={2.4} fill="#ffffff" fillOpacity={0.25} />
-            </div>
-            <div style={{
-              fontFamily: 'var(--font-serif, "Playfair Display", Georgia, serif)',
-              fontSize: '1.45rem',
-              fontWeight: 700,
-              color: '#ffffff',
-              letterSpacing: '-0.02em',
-              lineHeight: 1
-            }}>
-              quark<span style={{ fontStyle: 'italic', fontWeight: 400 }}>shield</span>
-            </div>
+            <img 
+              src="/quarkshield-logo.png" 
+              alt="quarkshield" 
+              style={{ 
+                height: '34px', 
+                width: 'auto', 
+                display: 'block',
+                objectFit: 'contain'
+              }} 
+            />
           </div>
 
-          {/* Desktop Navigation Links */}
-          <nav className="desktop-nav" style={{ display: 'flex', alignItems: 'center', gap: '1.8rem' }}>
-            <a href="#platform" className="landing-nav-link" style={{ fontSize: '0.88rem', fontWeight: 500, color: 'var(--text-secondary, #cbd5e1)', textDecoration: 'none', transition: 'color 0.15s ease' }}>
-              Platform
-            </a>
-            <a href="#pricing" className="landing-nav-link" style={{ fontSize: '0.88rem', fontWeight: 500, color: 'var(--text-secondary, #cbd5e1)', textDecoration: 'none', transition: 'color 0.15s ease' }}>
-              Pricing
-            </a>
-            <a href="#downloads" className="landing-nav-link" style={{ fontSize: '0.88rem', fontWeight: 500, color: 'var(--text-secondary, #cbd5e1)', textDecoration: 'none', transition: 'color 0.15s ease' }}>
-              Downloads
+          {/* Desktop Navigation Menu */}
+          <nav className="desktop-nav" style={{ display: 'flex', alignItems: 'center', gap: '2.2rem' }}>
+            {/* About Us */}
+            <a href="#about-us" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <Building size={14} />
+              About Us
             </a>
 
-            {/* Resources Dropdown Trigger */}
+            {/* Resources Dropdown */}
             <div 
               ref={resourcesDropdownRef}
               style={{ position: 'relative' }}
@@ -924,15 +784,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                 style={{
                   background: 'none',
                   border: 'none',
-                  color: resourcesDropdownOpen ? 'var(--cyan, #22d3ee)' : 'var(--text-secondary, #cbd5e1)',
-                  fontSize: '0.88rem',
+                  color: resourcesDropdownOpen ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                  fontSize: '0.92rem',
                   fontWeight: 500,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.3rem',
-                  padding: '0.35rem 0.2rem',
-                  transition: 'color 0.15s ease'
+                  gap: '0.35rem',
+                  padding: '0.4rem 0.25rem',
+                  transition: 'color 0.2s ease'
                 }}
                 aria-expanded={resourcesDropdownOpen}
                 aria-haspopup="true"
@@ -941,574 +801,767 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                 <ChevronDown 
                   size={14} 
                   style={{ 
-                    transform: resourcesDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                    transition: 'transform 0.2s cubic-bezier(0.4, 0, 0.2, 1)'
+                    transition: 'transform 0.2s ease', 
+                    transform: resourcesDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' 
                   }} 
                 />
               </button>
 
-              {/* Resources Mega-Menu Dropdown Panel (390px, Scrollable) */}
               {resourcesDropdownOpen && (
                 <div 
-                  className="glass-panel"
-                  style={{
-                    position: 'absolute',
-                    top: 'calc(100% + 12px)',
-                    left: '50%',
-                    transform: 'translateX(-50%)',
-                    width: '390px',
-                    maxHeight: '480px',
-                    overflowY: 'auto',
-                    background: 'rgba(12, 17, 34, 0.98)',
-                    backdropFilter: 'blur(24px)',
-                    WebkitBackdropFilter: 'blur(24px)',
-                    border: '1px solid var(--line, #26304f)',
-                    borderRadius: '14px',
-                    padding: '0.65rem',
-                    boxShadow: '0 20px 50px rgba(0, 0, 0, 0.6), 0 0 25px rgba(0, 242, 254, 0.1)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.2rem',
-                    zIndex: 1100
-                  }}
+                  className="resources-dropdown"
                   onMouseEnter={handleResourcesMouseEnter}
                   onMouseLeave={handleResourcesMouseLeave}
                 >
-                  <div style={{ padding: '0.5rem 0.65rem 0.35rem', fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', color: 'var(--muted, #9aa6c4)', textTransform: 'uppercase' }}>
-                    Enterprise Cryptographic Intelligence
+                  <div 
+                    className="resources-dropdown-item"
+                    style={{ cursor: 'pointer', background: 'rgba(0, 242, 254, 0.05)', borderRadius: '6px' }}
+                    onClick={() => {
+                      setResourcesDropdownOpen(false);
+                      setGuideModal('overview');
+                    }}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'linear-gradient(135deg, rgba(0, 242, 254, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)',
+                      border: '1px solid rgba(0, 242, 254, 0.4)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-cyan)',
+                      flexShrink: 0
+                    }}>
+                      <BookOpen size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        Documentation Center
+                        <span style={{ fontSize: '0.64rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(0, 242, 254, 0.15)', color: 'var(--accent-cyan)', border: '1px solid rgba(0, 242, 254, 0.3)' }}>Docs</span>
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Architecture, CBOM schema, algorithm standards & fleet deployment
+                      </div>
+                    </div>
                   </div>
 
-                  {[
-                    {
-                      icon: FileText,
-                      iconColor: '#38bdf8',
-                      title: 'Documentation Center',
-                      badge: 'Docs',
-                      badgeBg: 'rgba(56, 189, 248, 0.15)',
-                      badgeColor: '#38bdf8',
-                      desc: 'Architectural blueprints, agentless probes, and API specs.',
-                      href: '/docs/AGENTLESS_PQC_ARCHITECTURE.md',
-                      external: true
-                    },
-                    {
-                      icon: Layers,
-                      iconColor: '#a855f7',
-                      title: 'Enterprise Features & Operations',
-                      badge: '3-Tier',
-                      badgeBg: 'rgba(168, 85, 247, 0.15)',
-                      badgeColor: '#c084fc',
-                      desc: 'Multi-tenant isolation, automated RBAC, and governance.',
-                      href: '/docs/QUARKSHIELD_ENTERPRISE_FEATURES_GUIDE.md',
-                      external: true
-                    },
-                    {
-                      icon: Laptop,
-                      iconColor: '#38bdf8',
-                      title: 'Windows User Guide',
-                      desc: 'Authenticode-signed scanner installation & Schannel audits.',
-                      href: '/docs/WINDOWS_USER_GUIDE.md',
-                      external: true
-                    },
-                    {
-                      icon: Cpu,
-                      iconColor: '#34d399',
-                      title: 'macOS User Guide',
-                      desc: 'Apple Silicon & Intel Universal binary deployment guide.',
-                      href: '/docs/MACOS_USER_GUIDE.md',
-                      external: true
-                    },
-                    {
-                      icon: Server,
-                      iconColor: '#f5b544',
-                      title: 'Linux User Guide',
-                      desc: 'RPM/DEB package discovery & Kernel crypto driver audits.',
-                      href: '/docs/LINUX_USER_GUIDE.md',
-                      external: true
-                    },
-                    {
-                      icon: Radio,
-                      iconColor: '#ec4899',
-                      title: 'CNSA 2.0 & PQC Intel',
-                      badge: 'Mandates',
-                      badgeBg: 'rgba(236, 72, 153, 0.15)',
-                      badgeColor: '#f472b6',
-                      desc: 'Live NSA CNSA 2.0, NIST FIPS, and OMB M-23-02 bulletins.',
-                      href: '#cnsa-news',
-                      external: false
-                    },
-                    {
-                      icon: Activity,
-                      iconColor: '#22d3ee',
-                      title: "Mosca's Migration Planner",
-                      badge: 'X+Y>Z',
-                      badgeBg: 'rgba(34, 211, 238, 0.15)',
-                      badgeColor: '#22d3ee',
-                      desc: 'Mathematical risk modeling computing quantum exposure deficit.',
-                      href: '#planner',
-                      external: false
-                    },
-                    {
-                      icon: HelpCircle,
-                      iconColor: '#94a3b8',
-                      title: 'Post-Quantum FAQs',
-                      desc: 'Answers on Shor vulnerability, HNDL risk, and hybrid ciphers.',
-                      href: '#faq',
-                      external: false
-                    }
-                  ].map((item, idx) => {
-                    const ItemIcon = item.icon;
-                    return (
-                      <a
-                        key={idx}
-                        href={item.href}
-                        target={item.external ? '_blank' : undefined}
-                        rel={item.external ? 'noopener noreferrer' : undefined}
-                        onClick={() => setResourcesDropdownOpen(false)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: '0.75rem',
-                          padding: '0.65rem 0.75rem',
-                          borderRadius: '8px',
-                          textDecoration: 'none',
-                          transition: 'all 0.15s ease',
-                          background: 'transparent'
-                        }}
-                        onMouseEnter={e => {
-                          e.currentTarget.style.background = 'rgba(255, 255, 255, 0.04)';
-                        }}
-                        onMouseLeave={e => {
-                          e.currentTarget.style.background = 'transparent';
-                        }}
-                      >
-                        <div style={{
-                          width: '32px',
-                          height: '32px',
-                          borderRadius: '6px',
-                          background: 'rgba(255, 255, 255, 0.04)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                          marginTop: '2px'
-                        }}>
-                          <ItemIcon size={16} color={item.iconColor} />
-                        </div>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', marginBottom: '0.15rem' }}>
-                            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#ffffff' }}>
-                              {item.title}
-                            </span>
-                            {item.badge && (
-                              <span style={{
-                                fontSize: '0.65rem',
-                                fontWeight: 700,
-                                padding: '0.08rem 0.35rem',
-                                borderRadius: '4px',
-                                background: item.badgeBg,
-                                color: item.badgeColor
-                              }}>
-                                {item.badge}
-                              </span>
-                            )}
-                            {item.external && <ArrowUpRight size={11} color="var(--muted, #9aa6c4)" />}
-                          </div>
-                          <p style={{ margin: 0, fontSize: '0.74rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.35 }}>
-                            {item.desc}
-                          </p>
-                        </div>
-                      </a>
-                    );
-                  })}
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '0.25rem 0' }} />
+
+                  <div 
+                    className="resources-dropdown-item"
+                    style={{ cursor: 'pointer', background: 'rgba(168, 85, 247, 0.08)', borderRadius: '6px' }}
+                    onClick={() => {
+                      setResourcesDropdownOpen(false);
+                      setGuideModal('features');
+                    }}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(0, 242, 254, 0.25) 100%)',
+                      border: '1px solid rgba(168, 85, 247, 0.4)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#c084fc',
+                      flexShrink: 0
+                    }}>
+                      <Cpu size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        Enterprise Features &amp; Operations Guide
+                        <span style={{ fontSize: '0.64rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.35)' }}>3-Tier Model</span>
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Step-by-step setup, execution, and CBOM results across all 3 tiers
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '0.25rem 0' }} />
+
+                  <div 
+                    className="resources-dropdown-item"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setResourcesDropdownOpen(false);
+                      setGuideModal('windows');
+                    }}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'rgba(0, 242, 254, 0.12)',
+                      border: '1px solid rgba(0, 242, 254, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-cyan)',
+                      flexShrink: 0
+                    }}>
+                      <Laptop size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.15rem' }}>
+                        Windows User Guide
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Installation, SmartScreen trust, cert stores, Intune & CBOM export
+                      </div>
+                    </div>
+                  </div>
+
+                  <div 
+                    className="resources-dropdown-item"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setResourcesDropdownOpen(false);
+                      setGuideModal('mac');
+                    }}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'rgba(168, 85, 247, 0.12)',
+                      border: '1px solid rgba(168, 85, 247, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#a855f7',
+                      flexShrink: 0
+                    }}>
+                      <Laptop size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.15rem' }}>
+                        macOS User Guide
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Universal DMG, Apple Developer ID, Keychain auditing & Jamf
+                      </div>
+                    </div>
+                  </div>
+
+                  <div 
+                    className="resources-dropdown-item"
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => {
+                      setResourcesDropdownOpen(false);
+                      setGuideModal('linux');
+                    }}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'rgba(245, 158, 11, 0.12)',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#f59e0b',
+                      flexShrink: 0
+                    }}>
+                      <Server size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.15rem' }}>
+                        Linux User Guide
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Static agent, systemd daemon, container volumes & Ansible
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '0.2rem 0' }} />
+
+                  <a 
+                    href="#cnsa-news" 
+                    className="resources-dropdown-item"
+                    onClick={() => setResourcesDropdownOpen(false)}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'rgba(16, 185, 129, 0.12)',
+                      border: '1px solid rgba(16, 185, 129, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#10b981',
+                      flexShrink: 0
+                    }}>
+                      <Radio size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.15rem' }}>
+                        CNSA 2.0 & PQC Intel
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        NIST FIPS 203/204/205 advisories, NSA mandates & transition milestones
+                      </div>
+                    </div>
+                  </a>
+
+                  <a 
+                    href="#planner" 
+                    className="resources-dropdown-item"
+                    onClick={() => setResourcesDropdownOpen(false)}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'linear-gradient(135deg, rgba(0, 242, 254, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%)',
+                      border: '1px solid rgba(0, 242, 254, 0.4)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'var(--accent-cyan)',
+                      flexShrink: 0
+                    }}>
+                      <Calendar size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+                        Mosca&apos;s Migration Planner
+                        <span style={{ fontSize: '0.64rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>X+Y&gt;Z</span>
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Interactive timeline modeling &amp; organizational risk horizons
+                      </div>
+                    </div>
+                  </a>
+
+                  <a 
+                    href="#faq" 
+                    className="resources-dropdown-item"
+                    onClick={() => setResourcesDropdownOpen(false)}
+                  >
+                    <div style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      background: 'rgba(168, 85, 247, 0.12)',
+                      border: '1px solid rgba(168, 85, 247, 0.3)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: '#c084fc',
+                      flexShrink: 0
+                    }}>
+                      <HelpCircle size={16} />
+                    </div>
+                    <div>
+                      <div className="item-title" style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff', marginBottom: '0.15rem' }}>
+                        Post-Quantum FAQs
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', lineHeight: 1.35 }}>
+                        Keys &amp; zero-exfiltration, Shor&apos;s algorithm, HNDL &amp; OS trust roots
+                      </div>
+                    </div>
+                  </a>
                 </div>
               )}
             </div>
 
-            {/* Support Link (Opens Form Modal) */}
-            <button
-              type="button"
-              onClick={() => setShowSupportModal(true)}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-secondary, #cbd5e1)',
-                fontSize: '0.88rem',
-                fontWeight: 500,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                padding: 0,
-                transition: 'color 0.15s ease'
-              }}
-              onMouseEnter={e => e.currentTarget.style.color = '#38bdf8'}
-              onMouseLeave={e => e.currentTarget.style.color = 'var(--text-secondary, #cbd5e1)'}
-            >
+            {/* Migration Planner Link */}
+            <a href="#planner" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <Calendar size={14} />
+              Migration Planner
+            </a>
+
+            {/* Downloads Link */}
+            <a href="#downloads" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <Download size={14} />
+              Downloads
+            </a>
+
+            {/* Pricing Link */}
+            <a href="#pricing" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <CreditCard size={14} />
+              Pricing
+            </a>
+
+            {/* Careers */}
+            <a href="#careers" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <Briefcase size={14} />
+              Careers
+            </a>
+
+            {/* Support */}
+            <a href="#support" className="landing-nav-link" style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <LifeBuoy size={14} />
               Support
-            </button>
+            </a>
           </nav>
 
-          {/* Action CTAs */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          {/* Header Action Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <button
               onClick={() => setShowSignInModal(true)}
-              className="btn-secondary"
+              className="btn-header-console"
               style={{
-                padding: '0.48rem 0.95rem',
-                fontSize: '0.82rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                borderRadius: '8px'
-              }}
-            >
-              <User size={14} />
-              <span>Console Sign In</span>
-            </button>
-
-            <button
-              onClick={() => handleOpenAssessment()}
-              style={{
-                padding: '0.52rem 1.15rem',
-                borderRadius: '8px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
+                background: 'linear-gradient(135deg, rgba(127, 0, 255, 0.35) 0%, rgba(0, 242, 254, 0.25) 100%)',
+                border: '1px solid rgba(0, 242, 254, 0.4)',
                 color: '#ffffff',
-                fontSize: '0.84rem',
+                padding: '0.55rem 1.25rem',
+                borderRadius: '7px',
+                fontSize: '0.86rem',
                 fontWeight: 600,
                 cursor: 'pointer',
-                display: 'flex',
+                display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.45rem',
-                boxShadow: '0 4px 16px rgba(168, 85, 247, 0.4)',
-                transition: 'all 0.2s ease',
-                whiteSpace: 'nowrap'
+                transition: 'all 0.2s',
+                boxShadow: '0 0 14px rgba(0, 242, 254, 0.2)'
               }}
-              onMouseEnter={e => e.currentTarget.style.transform = 'translateY(-1px)'}
-              onMouseLeave={e => e.currentTarget.style.transform = 'translateY(0)'}
             >
-              <ShieldCheck size={15} />
-              <span>Request Assessment</span>
+              <Lock size={14} color="var(--accent-cyan)" /> Console Sign In
             </button>
 
-            {/* Mobile Hamburger Toggle */}
+            {/* Mobile Menu Toggle Button (44x44px accessible touch target) */}
             <button
-              onClick={() => setMobileMenuOpen(prev => !prev)}
-              className="mobile-menu-toggle"
+              className="mobile-nav-toggle"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               style={{
-                display: 'none',
-                background: 'transparent',
-                border: 'none',
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid rgba(255, 255, 255, 0.18)',
+                borderRadius: '8px',
                 color: '#ffffff',
+                width: '44px',
+                height: '44px',
+                minWidth: '44px',
+                minHeight: '44px',
+                padding: 0,
                 cursor: 'pointer',
-                padding: '4px'
+                display: 'none',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0
               }}
-              aria-label="Toggle menu"
+              aria-label="Toggle navigation"
             >
-              {mobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+              {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
         </div>
 
-        {/* Mobile Navigation Drawer */}
+        {/* Mobile Dropdown Menu */}
         {mobileMenuOpen && (
           <div style={{
-            background: 'rgba(8, 11, 22, 0.98)',
-            borderBottom: '1px solid var(--line, #26304f)',
-            padding: '1.25rem 1.5rem',
+            background: 'rgba(9, 14, 26, 0.98)',
+            borderBottom: '1px solid rgba(0, 242, 254, 0.25)',
+            padding: '1.25rem 2rem',
             display: 'flex',
             flexDirection: 'column',
-            gap: '1rem'
+            gap: '1rem',
+            maxHeight: 'calc(100vh - 70px)',
+            overflowY: 'auto'
           }}>
-            <a href="#platform" onClick={() => setMobileMenuOpen(false)} style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem' }}>Platform</a>
-            <a href="#pricing" onClick={() => setMobileMenuOpen(false)} style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem' }}>Pricing</a>
-            <a href="#downloads" onClick={() => setMobileMenuOpen(false)} style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem' }}>Downloads</a>
-            <a href="#prober" onClick={() => setMobileMenuOpen(false)} style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem' }}>Live TLS Prober</a>
-            <a href="#planner" onClick={() => setMobileMenuOpen(false)} style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem' }}>Mosca Migration Planner</a>
-            <a href="#cnsa-news" onClick={() => setMobileMenuOpen(false)} style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem' }}>CNSA 2.0 Intel</a>
-            <a href="#faq" onClick={() => setMobileMenuOpen(false)} style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem' }}>FAQs</a>
-            <button onClick={() => { setMobileMenuOpen(false); setShowSupportModal(true); }} style={{ background: 'none', border: 'none', color: '#38bdf8', textAlign: 'left', fontSize: '0.95rem', padding: 0 }}>Support</button>
-            <button onClick={() => { setMobileMenuOpen(false); handleOpenAssessment(); }} style={{ padding: '0.75rem', borderRadius: '8px', background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)', color: '#ffffff', border: 'none', fontWeight: 600, fontSize: '0.9rem' }}>
-              Request a PQC Assessment
-            </button>
+            {/* About Us */}
+            <a 
+              href="#about-us" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <Building size={16} color="#a855f7" /> About Us
+            </a>
+
+            <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '0.1rem 0' }} />
+
+            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-cyan)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Resources &amp; Docs
+            </div>
+            <div 
+              onClick={() => { setMobileMenuOpen(false); setGuideModal('overview'); }}
+              style={{ color: 'var(--accent-cyan)', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <BookOpen size={15} color="var(--accent-cyan)" /> Documentation Center
+            </div>
+            <div 
+              onClick={() => { setMobileMenuOpen(false); setGuideModal('features'); }}
+              style={{ color: '#c084fc', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <Cpu size={15} color="#c084fc" /> Enterprise Features &amp; Operations Guide
+            </div>
+            <div 
+              onClick={() => { setMobileMenuOpen(false); setGuideModal('windows'); }}
+              style={{ color: '#ffffff', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <Laptop size={15} color="var(--accent-cyan)" /> Windows User Guide
+            </div>
+            <div 
+              onClick={() => { setMobileMenuOpen(false); setGuideModal('mac'); }}
+              style={{ color: '#ffffff', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <Laptop size={15} color="#a855f7" /> macOS User Guide
+            </div>
+            <div 
+              onClick={() => { setMobileMenuOpen(false); setGuideModal('linux'); }}
+              style={{ color: '#ffffff', cursor: 'pointer', fontSize: '0.92rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <Server size={15} color="#f59e0b" /> Linux User Guide
+            </div>
+            <a 
+              href="#cnsa-news" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.92rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <Radio size={15} color="#10b981" /> CNSA 2.0 &amp; PQC Intel
+            </a>
+            <a 
+              href="#faq" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.92rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem', paddingLeft: '0.5rem' }}
+            >
+              <HelpCircle size={15} color="#c084fc" /> Post-Quantum FAQs
+            </a>
+            <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', margin: '0.2rem 0' }} />
+            <a 
+              href="#planner" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <Calendar size={16} color="var(--accent-cyan)" /> Mosca&apos;s Migration Planner
+            </a>
+            <a 
+              href="#downloads" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <Download size={16} color="var(--accent-cyan)" /> Downloads
+            </a>
+            <a 
+              href="#pricing" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <CreditCard size={16} color="var(--accent-cyan)" /> Pricing &amp; Commercial Plans
+            </a>
+            <a 
+              href="#careers" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <Briefcase size={16} color="#f59e0b" /> Careers
+            </a>
+            <a 
+              href="#support" 
+              onClick={() => setMobileMenuOpen(false)}
+              style={{ color: '#ffffff', textDecoration: 'none', fontSize: '0.95rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+            >
+              <LifeBuoy size={16} color="#38bdf8" /> Support
+            </a>
+            <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.1)', paddingTop: '0.75rem', display: 'flex', gap: '0.75rem' }}>
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  setShowSignInModal(true);
+                }}
+                className="btn-primary"
+                style={{ width: '100%', padding: '0.65rem', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+              >
+                <Lock size={15} /> Console Sign In
+              </button>
+            </div>
           </div>
         )}
       </header>
 
-      {/* ========================================================================= */}
-      {/* 2. HERO SECTION (55 / 45 SPLIT) */}
-      {/* ========================================================================= */}
+      {/* 2. HERO SECTION */}
       <section className="landing-hero-section" style={{
-        maxWidth: '1180px',
+        padding: 'calc(75px + 2.5rem) 1.5rem 2.5rem 1.5rem',
+        maxWidth: '1200px',
         margin: '0 auto',
-        padding: '3.5rem 1.5rem 2.5rem',
-        width: '100%',
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1.22fr) minmax(0, 1fr)',
-        gap: '2.5rem',
-        alignItems: 'center'
+        textAlign: 'center',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '1.8rem',
+        width: '100%'
       }}>
-        {/* Left Column (55%): Positioning, Headline, Dual CTA, Trust Line */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.4rem' }}>
-          
-          {/* Eyebrow Pill */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            background: 'rgba(168, 85, 247, 0.1)',
-            border: '1px solid rgba(168, 85, 247, 0.35)',
-            padding: '0.28rem 0.8rem',
-            borderRadius: '20px',
-            width: 'fit-content',
-            fontSize: '0.76rem',
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            color: '#c084fc'
-          }}>
-            <ShieldCheck size={14} color="#c084fc" />
-            <span>Enterprise Cryptographic Intelligence Platform</span>
-          </div>
-
-          {/* Hero Headline */}
-          <h1 style={{
-            fontSize: 'clamp(2.1rem, 4vw, 3.2rem)',
-            fontWeight: 800,
-            lineHeight: 1.15,
-            letterSpacing: '-0.025em',
-            margin: 0,
-            color: '#ffffff',
-            fontFamily: 'var(--font-display, "Sora", sans-serif)'
-          }}>
-            Know where your cryptography is.{' '}
-            <span style={{
-              background: 'linear-gradient(135deg, #b466ff 0%, #22d3ee 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              display: 'block',
-              marginTop: '0.2rem'
-            }}>
-              Know what’s at risk.
-            </span>
-          </h1>
-
-          {/* Supporting Copy */}
-          <p style={{
-            fontSize: '1.05rem',
-            lineHeight: 1.6,
-            color: 'var(--muted, #9aa6c4)',
-            margin: 0,
-            maxWidth: '560px'
-          }}>
-            Continuous discovery, automated CBOM generation, and migration tracking across hybrid cloud, workstation fleets, and network perimeters. Zero agents required.
-          </p>
-
-          {/* Dual CTAs */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1rem',
-            flexWrap: 'wrap',
-            marginTop: '0.4rem'
-          }}>
-            <button
-              onClick={() => handleOpenAssessment()}
-              style={{
-                padding: '0.85rem 1.65rem',
-                borderRadius: '10px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
-                color: '#ffffff',
-                fontSize: '0.96rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.55rem',
-                boxShadow: '0 6px 24px rgba(168, 85, 247, 0.45)',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 8px 30px rgba(168, 85, 247, 0.6)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 6px 24px rgba(168, 85, 247, 0.45)';
-              }}
-            >
-              <ShieldCheck size={18} />
-              <span>Request a PQC Assessment</span>
-              <ArrowRight size={16} />
-            </button>
-
-            <a
-              href="#prober"
-              style={{
-                padding: '0.82rem 1.45rem',
-                borderRadius: '10px',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                background: 'rgba(255, 255, 255, 0.03)',
-                color: '#ffffff',
-                fontSize: '0.92rem',
-                fontWeight: 600,
-                textDecoration: 'none',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.45rem',
-                transition: 'all 0.2s ease'
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.07)';
-                e.currentTarget.style.borderColor = 'rgba(0, 242, 254, 0.4)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.03)';
-                e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.15)';
-              }}
-            >
-              <Terminal size={16} color="var(--cyan, #22d3ee)" />
-              <span>Test your website now</span>
-            </a>
-          </div>
-
-          {/* Trust Framing Line */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.6rem',
-            fontSize: '0.82rem',
-            color: 'var(--muted, #9aa6c4)',
-            marginTop: '0.2rem',
-            lineHeight: 1.45
-          }}>
-            <CheckCircle2 size={16} color="#34d399" style={{ flexShrink: 0 }} />
-            <span>
-              Works alongside your existing PKI, PAM, KMS, and HSMs &mdash; non-disruptive, zero-exfiltration.
-            </span>
-          </div>
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.6rem',
+          padding: '0.35rem 0.95rem',
+          borderRadius: '50px',
+          background: 'rgba(127, 0, 255, 0.12)',
+          border: '1px solid rgba(127, 0, 255, 0.35)',
+          fontSize: '0.82rem',
+          color: '#c084fc',
+          fontWeight: 600,
+          maxWidth: '100%',
+          flexWrap: 'wrap',
+          justifyContent: 'center'
+        }}>
+          <Zap size={14} color="#00f2fe" />
+          <span>Post-Quantum Cryptography Discovery &amp; Fleet Vulnerability Management</span>
         </div>
 
-        {/* Right Column (45%): Live Spinovation Corp CBOM Panel */}
-        <div style={{ position: 'relative', width: '100%', minWidth: 0 }}>
-          {/* Pulsing Live Badge Overlay */}
-          <div style={{
-            position: 'absolute',
-            top: '-12px',
-            right: '16px',
-            zIndex: 10,
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.45rem',
-            background: 'rgba(10, 15, 28, 0.95)',
-            border: '1px solid rgba(52, 211, 153, 0.4)',
-            padding: '0.25rem 0.75rem',
-            borderRadius: '20px',
-            fontSize: '0.72rem',
-            fontWeight: 700,
-            letterSpacing: '0.06em',
-            color: '#34d399',
-            boxShadow: '0 4px 15px rgba(0, 0, 0, 0.5)'
-          }}>
-            <span style={{
-              width: '7px',
-              height: '7px',
-              borderRadius: '50%',
-              background: '#34d399',
-              boxShadow: '0 0 10px #34d399',
-              animation: 'pulse 2s infinite'
-            }} />
-            <span>LIVE FLEET FEED</span>
+        <h1 style={{
+          fontSize: 'clamp(2.1rem, 4.5vw, 3.2rem)',
+          fontWeight: 800,
+          lineHeight: 1.2,
+          letterSpacing: '-0.015em',
+          textWrap: 'balance',
+          maxWidth: '960px',
+          background: 'linear-gradient(180deg, #ffffff 0%, #cbd5e1 100%)',
+          WebkitBackgroundClip: 'text',
+          WebkitTextFillColor: 'transparent'
+        }}>
+          Continuous Cryptographic BOM &amp; Active Quantum Threat Defense
+        </h1>
+
+        <p style={{
+          fontSize: 'clamp(1rem, 2vw, 1.18rem)',
+          color: 'var(--text-secondary)',
+          maxWidth: '860px',
+          lineHeight: 1.65,
+          textWrap: 'balance'
+        }}>
+          Enterprise Cryptographic Observability and automated Cryptographic Bill of Materials (CBOM) orchestration. Engineered to safeguard national security systems and distributed IT infrastructure against Harvest Now, Decrypt Later (HNDL) quantum threats.
+        </p>
+
+        {/* Hero CTA Row - Clear Primary / Secondary / Tertiary Hierarchy */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '0.5rem' }}>
+          {/* Primary CTA */}
+          <a
+            href="#downloads"
+            style={{
+              background: 'linear-gradient(135deg, #00f2fe 0%, #0984e3 100%)',
+              color: '#06080d',
+              padding: '0.9rem 2.2rem',
+              borderRadius: '8px',
+              fontSize: '1rem',
+              fontWeight: 700,
+              textDecoration: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              boxShadow: '0 0 24px rgba(0, 242, 254, 0.45)',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <Download size={18} /> Download Desktop Scanner
+          </a>
+
+          {/* Secondary CTA */}
+          <a
+            href="#prober"
+            style={{
+              background: 'rgba(0, 242, 254, 0.08)',
+              border: '1px solid rgba(0, 242, 254, 0.4)',
+              color: 'var(--accent-cyan)',
+              padding: '0.9rem 2.2rem',
+              borderRadius: '8px',
+              fontSize: '1rem',
+              fontWeight: 600,
+              textDecoration: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <Zap size={18} /> Test Outbound TLS Probe <ArrowRight size={16} />
+          </a>
+
+          {/* Tertiary CTA Link */}
+          <button
+            onClick={() => {
+              const hasUser = localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user');
+              if (hasUser) {
+                onLaunchConsole('git');
+              } else {
+                setShowSignInModal(true);
+              }
+            }}
+            style={{
+              background: 'transparent',
+              border: '1px solid rgba(168, 85, 247, 0.35)',
+              color: '#c084fc',
+              padding: '0.9rem 1.8rem',
+              borderRadius: '8px',
+              fontSize: '0.98rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <GitBranch size={17} /> Audit Git Repos →
+          </button>
+        </div>
+
+        {/* Feature Badges Grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
+          gap: '1.25rem',
+          width: '100%',
+          marginTop: '2rem'
+        }}>
+          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '12px', minWidth: 0 }}>
+            <div style={{ color: 'var(--accent-cyan)', marginBottom: '0.5rem' }}><FileCode size={22} /></div>
+            <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: '#ffffff' }}>CycloneDX 1.6 CBOM</h4>
+            <p style={{ fontSize: '0.84rem', margin: 0, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Standardized Cryptographic Bill of Materials covering RSA, ECC, OpenSSH, certificates, and keys.
+            </p>
           </div>
 
-          <CryptographicPostureCard
-            tenantName="SPINOVATION CORP"
-            metrics={spinovationPosture}
-          />
+          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '12px', minWidth: 0 }}>
+            <div style={{ color: '#c084fc', marginBottom: '0.5rem' }}><Activity size={22} /></div>
+            <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: '#ffffff' }}>Active Outbound TLS Probe</h4>
+            <p style={{ fontSize: '0.84rem', margin: 0, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Direct TLS 1.3 socket handshake inspection checking for X25519MLKEM768 hybrid key encapsulation.
+            </p>
+          </div>
 
-          {/* Standalone Action Link Container */}
-          <div style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            marginTop: '0.65rem'
-          }}>
-            <a
-              id="spinovation-posture-link"
-              href="#fleet-posture"
-              onClick={(e) => {
-                e.preventDefault();
-                handleOpenAssessment('Inventory/CBOM', undefined, 'Spinovation Fleet Baseline');
-              }}
-              style={{
-                fontSize: '0.78rem',
-                color: 'var(--cyan, #22d3ee)',
-                textDecoration: 'none',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                fontWeight: 600,
-                transition: 'opacity 0.15s ease'
-              }}
-              onMouseEnter={e => e.currentTarget.style.opacity = '0.8'}
-              onMouseLeave={e => e.currentTarget.style.opacity = '1'}
-            >
-              <span>Explore Spinovation Fleet Telemetry</span>
-              <ArrowRight size={13} />
-            </a>
+          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '12px', minWidth: 0 }}>
+            <div style={{ color: 'var(--status-secure)', marginBottom: '0.5rem' }}><Laptop size={22} /></div>
+            <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: '#ffffff' }}>Multi-OS Fleet Discovery</h4>
+            <p style={{ fontSize: '0.84rem', margin: 0, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Cross-platform agents for Windows, macOS (Apple Silicon &amp; Intel), and Linux cloud servers.
+            </p>
+          </div>
+
+          <div className="glass-panel" style={{ padding: '1.25rem', textAlign: 'left', borderRadius: '12px', minWidth: 0 }}>
+            <div style={{ color: '#38bdf8', marginBottom: '0.5rem' }}><ShieldCheck size={22} /></div>
+            <h4 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.35rem 0', color: '#ffffff' }}>Isolated Pod Subdomains</h4>
+            <p style={{ fontSize: '0.84rem', margin: 0, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Dedicated tenant spaces at <code style={{ color: 'var(--accent-cyan)', wordBreak: 'break-all', display: 'inline-block' }}>https://&lt;tenant&gt;.quarkshield.ai</code> with in-tenant RBAC &amp; 2FA.
+            </p>
           </div>
         </div>
       </section>
 
-      {/* ========================================================================= */}
-      {/* 3. ACTIVE OUTBOUND TLS PROBER (#prober) */}
-      {/* ========================================================================= */}
-      <section id="prober" className="landing-section" style={{
+      {/* 2.5 LIVE SPINOVATION CRYPTOGRAPHIC POSTURE SHOWCASE */}
+      <section id="fleet-posture" className="landing-section" style={{
         padding: '3rem 1.5rem',
-        background: 'rgba(12, 17, 34, 0.65)',
-        borderTop: '1px solid var(--line, #26304f)',
-        borderBottom: '1px solid var(--line, #26304f)'
+        maxWidth: '1200px',
+        margin: '0 auto',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1.5rem'
+      }}>
+        <div style={{ textAlign: 'center', marginBottom: '0.5rem' }}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            color: 'var(--accent-cyan)',
+            fontSize: '0.82rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            textTransform: 'uppercase',
+            marginBottom: '0.6rem',
+            background: 'rgba(0, 242, 254, 0.08)',
+            padding: '0.3rem 0.85rem',
+            borderRadius: '20px',
+            border: '1px solid rgba(0, 242, 254, 0.25)'
+          }}>
+            <ShieldCheck size={15} /> Continuous Cryptographic Telemetry
+          </div>
+          <h2 style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)', fontWeight: 800, margin: '0 0 0.75rem 0', color: '#ffffff', textWrap: 'balance' }}>
+            Live Enterprise Cryptographic Posture
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', maxWidth: '780px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6, textWrap: 'balance' }}>
+            Real-time Post-Quantum Cryptographic Bill of Materials (CBOM) inventory, Shor vulnerability auditing, and NIST / Mosca Theorem quantum risk index across active production endpoints.
+          </p>
+        </div>
+
+        {/* Posture Card */}
+        <div style={{ width: '100%' }}>
+          <CryptographicPostureCard
+            tenantName="SPINOVATION CORP"
+            metrics={spinovationPosture}
+          />
+        </div>
+
+        {/* Separate Standalone Action / Link Container */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          gap: '1rem',
+          flexWrap: 'wrap',
+          marginTop: '0.25rem'
+        }}>
+          <a
+            id="spinovation-posture-link"
+            href="#spinovation-posture"
+            onClick={(e) => {
+              // Standalone separate link as requested: "Keep the block's link separate. I will let you know."
+              console.log('Spinovation Cryptographic Posture link triggered');
+            }}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.55rem',
+              padding: '0.65rem 1.4rem',
+              borderRadius: '8px',
+              background: 'rgba(0, 242, 254, 0.1)',
+              border: '1px solid rgba(0, 242, 254, 0.35)',
+              color: '#38bdf8',
+              fontSize: '0.86rem',
+              fontWeight: 600,
+              textDecoration: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: '0 4px 15px rgba(0, 242, 254, 0.08)'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(0, 242, 254, 0.18)';
+              e.currentTarget.style.borderColor = 'rgba(0, 242, 254, 0.6)';
+              e.currentTarget.style.transform = 'translateY(-1px)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(0, 242, 254, 0.1)';
+              e.currentTarget.style.borderColor = 'rgba(0, 242, 254, 0.35)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            <span>Explore Spinovation Fleet Telemetry</span>
+            <ArrowRight size={15} />
+          </a>
+        </div>
+      </section>
+
+      {/* 3. ACTIVE OUTBOUND TLS PROBER INTERACTIVE WIDGET */}
+      <section id="prober" className="landing-section" style={{
+        padding: '2.5rem 1.5rem',
+        background: 'rgba(13, 19, 33, 0.65)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+        borderBottom: '1px solid rgba(255, 255, 255, 0.06)'
       }}>
         <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem', width: '100%' }}>
           
           <div style={{ textAlign: 'center' }}>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              color: 'var(--cyan, #22d3ee)',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              marginBottom: '0.5rem'
-            }}>
-              <Terminal size={15} />
-              <span>Live Outbound TLS Network Prober</span>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+              <Terminal size={16} /> Live Outbound TLS Network Prober
             </div>
-            <h2 style={{
-              fontSize: 'clamp(1.75rem, 3.5vw, 2.4rem)',
-              fontWeight: 800,
-              margin: '0 0 0.8rem 0',
-              color: '#ffffff',
-              fontFamily: 'var(--font-display, "Sora", sans-serif)'
-            }}>
+            <h2 style={{ fontSize: 'clamp(1.75rem, 3.5vw, 2.4rem)', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff', textWrap: 'balance' }}>
               Inspect Public &amp; Enterprise Endpoints for Quantum Vulnerability
             </h2>
-            <p style={{ color: 'var(--muted, #9aa6c4)', maxWidth: '720px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6 }}>
+            <p style={{ color: 'var(--text-secondary)', maxWidth: '720px', margin: '0 auto', fontSize: '1rem', lineHeight: 1.6, textWrap: 'balance' }}>
               Establish a direct TLS 1.3 socket handshake with any host or port. Instantly verify if the server negotiates classical ECDHE (vulnerable to Harvest Now, Decrypt Later) or Post-Quantum ML-KEM-768 hybrid key exchange.
             </p>
           </div>
 
           {/* Prober Input Box */}
-          <div style={{
-            background: 'var(--surface, #121a30)',
-            border: '1px solid var(--line, #26304f)',
-            padding: '1.8rem',
-            borderRadius: '14px',
-            boxShadow: '0 10px 30px rgba(0, 0, 0, 0.4)'
-          }}>
+          <div className="glass-panel" style={{ padding: '1.8rem', borderRadius: '12px', background: 'rgba(10, 15, 28, 0.85)' }}>
             <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <div style={{ flex: 1, minWidth: '280px', position: 'relative' }}>
                 <input
@@ -1520,179 +1573,201 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                   style={{
                     width: '100%',
                     padding: '0.85rem 1.1rem',
-                    background: 'rgba(0, 0, 0, 0.45)',
-                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    background: 'rgba(0, 0, 0, 0.4)',
+                    border: '1px solid rgba(0, 242, 254, 0.3)',
                     borderRadius: '8px',
                     color: '#ffffff',
-                    fontSize: '0.92rem',
-                    fontFamily: 'var(--font-code, monospace)',
+                    fontSize: '1.05rem',
+                    fontFamily: 'var(--font-mono)',
                     outline: 'none',
-                    transition: 'border-color 0.2s ease'
+                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.5)'
                   }}
-                  onFocus={(e) => e.target.style.borderColor = 'var(--cyan, #22d3ee)'}
-                  onBlur={(e) => e.target.style.borderColor = 'rgba(255, 255, 255, 0.12)'}
                 />
               </div>
+
               <button
                 onClick={() => handleRunProbe()}
                 disabled={probing}
+                className="btn-primary"
                 style={{
-                  padding: '0.85rem 1.75rem',
+                  padding: '0.85rem 2rem',
                   borderRadius: '8px',
-                  border: 'none',
-                  background: probing ? 'rgba(0, 242, 254, 0.4)' : 'linear-gradient(135deg, #00f2fe 0%, #0984e3 100%)',
-                  color: '#06080d',
+                  fontSize: '1rem',
                   fontWeight: 700,
-                  fontSize: '0.92rem',
-                  cursor: probing ? 'not-allowed' : 'pointer',
-                  display: 'flex',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.5rem',
-                  boxShadow: '0 4px 15px rgba(0, 242, 254, 0.3)',
-                  transition: 'all 0.2s ease'
+                  gap: '0.6rem',
+                  whiteSpace: 'nowrap'
                 }}
               >
                 {probing ? (
                   <>
-                    <RefreshCw size={16} className="animate-spin" />
-                    <span>Executing Handshake...</span>
+                    <RefreshCw size={18} className="spin" /> Probing TLS Handshake...
                   </>
                 ) : (
                   <>
-                    <Zap size={16} />
-                    <span>Run Socket Probe</span>
+                    <Activity size={18} /> Probe Endpoint
                   </>
                 )}
               </button>
             </div>
 
-            {/* Target Preset Chips */}
+            {/* Target Presets */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '1rem', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '0.78rem', color: 'var(--muted, #9aa6c4)' }}>Preset chips:</span>
-              {[
-                'cloudflare.com',
-                'google.com',
-                'microsoft.com',
-                'github.com',
-                'apple.com',
-                'amazon.com',
-                'meta.com',
-                'linkedin.com'
-              ].map(domain => (
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', fontWeight: 600 }}>Quick Test Presets:</span>
+              {['microsoft.com', 'google.com', 'cloudflare.com', 'github.com', 'apple.com', 'aws.amazon.com'].map(preset => (
                 <button
-                  key={domain}
-                  type="button"
+                  key={preset}
                   onClick={() => {
-                    setProbeTarget(domain);
-                    handleRunProbe(domain);
+                    setProbeTarget(preset);
+                    handleRunProbe(preset);
                   }}
                   style={{
-                    background: probeTarget === domain ? 'rgba(0, 242, 254, 0.2)' : 'rgba(255, 255, 255, 0.05)',
-                    border: probeTarget === domain ? '1px solid var(--cyan, #22d3ee)' : '1px solid rgba(255, 255, 255, 0.08)',
-                    color: probeTarget === domain ? 'var(--cyan, #22d3ee)' : 'var(--text-secondary, #cbd5e1)',
-                    padding: '0.22rem 0.6rem',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
                     borderRadius: '4px',
-                    fontSize: '0.74rem',
-                    fontFamily: 'var(--font-code, monospace)',
+                    padding: '0.25rem 0.6rem',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.8rem',
+                    fontFamily: 'var(--font-mono)',
                     cursor: 'pointer',
-                    transition: 'all 0.15s ease'
+                    transition: 'all 0.15s'
                   }}
+                  onMouseEnter={(e) => (e.currentTarget.style.borderColor = 'var(--accent-cyan)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.12)')}
                 >
-                  {domain}
+                  {preset}
                 </button>
               ))}
             </div>
 
+            {/* Error banner */}
             {probeError && (
-              <div style={{
-                marginTop: '1rem',
-                padding: '0.75rem 1rem',
-                borderRadius: '6px',
-                background: 'rgba(251, 90, 118, 0.15)',
-                border: '1px solid rgba(251, 90, 118, 0.35)',
-                color: 'var(--critical, #fb5a76)',
-                fontSize: '0.85rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}>
-                <AlertTriangle size={16} />
+              <div style={{ marginTop: '1.25rem', padding: '0.9rem', borderRadius: '8px', background: 'rgba(239, 68, 68, 0.12)', border: '1px solid var(--status-vulnerable)', color: '#f87171', display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <AlertTriangle size={18} />
                 <span>{probeError}</span>
               </div>
             )}
 
             {/* Probe Results Card */}
             {probeResult && (
-              <div style={{
-                marginTop: '1.5rem',
-                padding: '1.25rem',
-                borderRadius: '10px',
-                background: 'rgba(0, 0, 0, 0.45)',
-                border: probeResult.quantumStatus === 'PQC-Resilient' 
-                  ? '1px solid rgba(52, 211, 153, 0.4)' 
-                  : '1px solid rgba(251, 90, 118, 0.4)'
-              }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <div style={{
-                      padding: '0.3rem 0.75rem',
-                      borderRadius: '6px',
-                      fontSize: '0.82rem',
-                      fontWeight: 700,
-                      background: probeResult.quantumStatus === 'PQC-Resilient' ? 'rgba(52, 211, 153, 0.2)' : 'rgba(251, 90, 118, 0.2)',
-                      color: probeResult.quantumStatus === 'PQC-Resilient' ? '#34d399' : '#fb5a76'
-                    }}>
-                      {probeResult.quantumStatus === 'PQC-Resilient' ? '✓ Post-Quantum Protected' : '⚠️ Harvest Now, Decrypt Later Exposed'}
+              <div style={{ marginTop: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                
+                {/* Status Bar */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '1rem 1.25rem',
+                  borderRadius: '8px',
+                  background: probeResult.riskLevel === 'Secure' ? 'rgba(0, 255, 136, 0.08)' : 'rgba(255, 51, 102, 0.1)',
+                  border: `1px solid ${probeResult.riskLevel === 'Secure' ? 'var(--status-secure)' : 'var(--status-vulnerable)'}`,
+                  flexWrap: 'wrap',
+                  gap: '1rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                    {probeResult.riskLevel === 'Secure' ? (
+                      <CheckCircle2 size={28} color="var(--status-secure)" />
+                    ) : (
+                      <ShieldAlert size={28} color="var(--status-vulnerable)" />
+                    )}
+                    <div>
+                      <div style={{ fontSize: '1.15rem', fontWeight: 700, color: probeResult.riskLevel === 'Secure' ? 'var(--status-secure)' : 'var(--status-vulnerable)' }}>
+                        {probeResult.quantumStatus}
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        Target: <span style={{ fontFamily: 'var(--font-mono)', color: '#ffffff' }}>{probeResult.target}</span> • Risk Assessment: <span style={{ fontWeight: 600 }}>{probeResult.riskLevel}</span>
+                      </div>
                     </div>
-                    <span style={{ fontSize: '0.88rem', fontWeight: 600, color: '#ffffff' }}>
-                      {probeResult.target}
+                  </div>
+
+                  <div style={{ textAlign: 'right' }}>
+                    <span style={{
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      padding: '0.35rem 0.75rem',
+                      borderRadius: '6px',
+                      background: probeResult.riskLevel === 'Secure' ? 'rgba(0, 255, 136, 0.2)' : 'rgba(255, 51, 102, 0.2)',
+                      color: probeResult.riskLevel === 'Secure' ? 'var(--status-secure)' : 'var(--status-vulnerable)',
+                      textTransform: 'uppercase'
+                    }}>
+                      {probeResult.protocol} Handshake
                     </span>
                   </div>
-
-                  <button
-                    onClick={() => handleOpenAssessment('HNDL Assessment', undefined, probeResult.target)}
-                    style={{
-                      padding: '0.45rem 0.95rem',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(168, 85, 247, 0.4)',
-                      background: 'rgba(168, 85, 247, 0.15)',
-                      color: '#c084fc',
-                      fontSize: '0.8rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.4rem'
-                    }}
-                  >
-                    <span>Request Assessment for {probeResult.target}</span>
-                    <ArrowRight size={13} />
-                  </button>
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', fontSize: '0.82rem' }}>
-                  <div>
-                    <span style={{ color: 'var(--muted, #9aa6c4)' }}>Negotiated Cipher: </span>
-                    <code style={{ color: '#ffffff' }}>{probeResult.cipher}</code>
+                {/* Handshake Specs Grid */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                  <div style={{ background: 'rgba(0,0,0,0.35)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Protocol</div>
+                    <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', marginTop: '0.25rem', fontFamily: 'var(--font-mono)' }}>
+                      {probeResult.protocol}
+                    </div>
                   </div>
-                  <div>
-                    <span style={{ color: 'var(--muted, #9aa6c4)' }}>Protocol: </span>
-                    <code style={{ color: '#ffffff' }}>{probeResult.protocol}</code>
+
+                  <div style={{ background: 'rgba(0,0,0,0.35)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Cipher Suite</div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--accent-cyan)', marginTop: '0.25rem', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
+                      {probeResult.cipher}
+                    </div>
                   </div>
-                  <div>
-                    <span style={{ color: 'var(--muted, #9aa6c4)' }}>Key Exchange: </span>
-                    <code style={{ color: probeResult.quantumStatus === 'PQC-Resilient' ? '#34d399' : '#fb5a76' }}>
-                      {probeResult.standard}
-                    </code>
+
+                  <div style={{ background: 'rgba(0,0,0,0.35)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>Key Exchange Curve</div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 600, color: probeResult.standard.includes('MLKEM') ? 'var(--status-secure)' : '#f87171', marginTop: '0.25rem', fontFamily: 'var(--font-mono)' }}>
+                      {probeResult.standard.includes('MLKEM') ? 'X25519MLKEM768 (PQC)' : 'X25519 / Classical ECDHE'}
+                    </div>
+                  </div>
+
+                  <div style={{ background: 'rgba(0,0,0,0.35)', padding: '1rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>FIPS 203 Compliance</div>
+                    <div style={{ fontSize: '0.95rem', fontWeight: 600, color: probeResult.standard.includes('MLKEM') ? 'var(--status-secure)' : '#f87171', marginTop: '0.25rem' }}>
+                      {probeResult.standard.includes('MLKEM') ? 'Compliant' : 'Non-Compliant'}
+                    </div>
                   </div>
                 </div>
 
-                {probeResult.recommendedFix && (
-                  <div style={{ marginTop: '0.85rem', paddingTop: '0.85rem', borderTop: '1px solid rgba(255, 255, 255, 0.08)', fontSize: '0.8rem', color: 'var(--muted, #9aa6c4)' }}>
-                    <strong style={{ color: '#ffffff' }}>Recommended Remediation: </strong>
-                    <span>{probeResult.recommendedFix}</span>
+                {/* Threat Analysis & Remediation */}
+                {probeResult.threatModel && (
+                  <div style={{ background: 'rgba(0,0,0,0.3)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.6rem 0', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <AlertTriangle size={16} color="var(--status-warning)" /> Threat Vector: Harvest Now, Decrypt Later (HNDL)
+                    </h4>
+                    <p style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', margin: '0 0 0.75rem 0', lineHeight: 1.5 }}>
+                      {probeResult.threatModel.hndlRisk}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--accent-cyan)' }}>
+                      <strong>Remediation:</strong> {probeResult.recommendedFix}
+                    </div>
                   </div>
                 )}
+
+                {/* Certificate Chain */}
+                {probeResult.certChain && probeResult.certChain.length > 0 && (
+                  <div style={{ background: 'rgba(0,0,0,0.35)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    <h4 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.8rem 0', color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <Key size={16} color="var(--accent-cyan)" /> TLS Certificate Hierarchy ({probeResult.certChain.length} Certificates)
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                      {probeResult.certChain.map((c, idx) => (
+                        <div key={idx} style={{ padding: '0.75rem', borderRadius: '6px', background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.05)', fontSize: '0.82rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                            <span style={{ fontWeight: 700, color: '#ffffff' }}>#{idx + 1} Subject: {c.subject}</span>
+                            <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>{c.bits}-bit Key</span>
+                          </div>
+                          <div style={{ color: 'var(--text-secondary)' }}>
+                            Issuer: <span style={{ color: '#cbd5e1' }}>{c.issuer}</span>
+                          </div>
+                          <div style={{ color: 'var(--text-muted)', fontSize: '0.78rem', marginTop: '0.2rem', fontFamily: 'var(--font-mono)' }}>
+                            SHA-256 Fingerprint: {c.fingerprint}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
               </div>
             )}
           </div>
@@ -1700,401 +1775,1102 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       </section>
 
       {/* ========================================================================= */}
-      {/* 4. MOSCA MIGRATION PLANNER (#planner) */}
+      {/* 4. CNSA 2.0 & POST-QUANTUM REGULATORY INTELLIGENCE (LIVE RADAR) */}
       {/* ========================================================================= */}
-      <section id="planner" className="landing-section" style={{
-        padding: '3.5rem 1.5rem',
-        maxWidth: '1180px',
-        margin: '0 auto',
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '1.75rem'
-      }}>
-        <div style={{ textAlign: 'center' }}>
+      <section id="cnsa-news" className="landing-section" style={{ padding: '2.5rem 1.5rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: '1.8rem' }}>
           <div style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: '0.5rem',
-            color: '#c084fc',
+            background: 'rgba(16, 185, 129, 0.1)',
+            border: '1px solid rgba(16, 185, 129, 0.35)',
+            color: '#10b981',
+            padding: '0.35rem 0.9rem',
+            borderRadius: '20px',
             fontSize: '0.82rem',
             fontWeight: 700,
             textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            marginBottom: '0.5rem'
+            letterSpacing: '0.05em',
+            marginBottom: '0.75rem'
           }}>
-            <Activity size={15} />
-            <span>Interactive Mosca Theorem Threat Model (X + Y &gt; Z)</span>
+            <Radio size={14} className="spin" style={{ animationDuration: '4s' }} />
+            Live Regulatory Radar • NIST • NSA • White House OMB
           </div>
-          <h2 style={{
-            fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)',
-            fontWeight: 800,
-            margin: '0 0 0.8rem 0',
-            color: '#ffffff',
-            fontFamily: 'var(--font-display, "Sora", sans-serif)'
-          }}>
-            Calculate Your Organization’s Quantum Exposure Deficit
+          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.5rem)', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff', textWrap: 'balance' }}>
+            Post-Quantum Regulatory Horizons &amp; CNSA 2.0 Intelligence
           </h2>
-          <p style={{ color: 'var(--muted, #9aa6c4)', maxWidth: '740px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6 }}>
-            According to Mosca's Theorem, if your data shelf-life (<strong>X</strong>) plus migration time (<strong>Y</strong>) exceeds the time to a cryptanalytically relevant quantum computer (<strong>Z</strong>), your sensitive records are already compromised under Harvest Now, Decrypt Later adversaries.
+          <p style={{ color: 'var(--text-secondary)', maxWidth: '780px', margin: '0 auto', fontSize: '1.05rem', lineHeight: 1.6 }}>
+            Direct federal policy tracking, NIST FIPS releases, and enforcement deadlines for CISOs, defense suppliers, and enterprise cryptographers.
           </p>
         </div>
 
-        {/* Embedded Interactive Planner */}
-        <div style={{
-          background: 'var(--surface, #121a30)',
-          border: '1px solid var(--line, #26304f)',
-          borderRadius: '14px',
-          overflow: 'hidden',
-          padding: '1.5rem'
+        {/* CNSA 2.0 Enforcement Horizon Timeline */}
+        <div className="glass-panel" style={{
+          padding: '2rem',
+          borderRadius: '12px',
+          border: '1px solid rgba(0, 242, 254, 0.25)',
+          background: 'rgba(15, 23, 42, 0.65)',
+          marginBottom: '3rem',
+          boxShadow: '0 12px 32px rgba(0, 0, 0, 0.5)'
         }}>
-          <MoscaMigrationPlanner 
-            variant="landing"
-            onNavigateToScan={() => handleOpenAssessment('Migration Planning')}
-          />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.5rem', flexWrap: 'wrap', gap: '0.8rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+              <ShieldAlert size={20} color="var(--accent-cyan)" />
+              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ffffff' }}>
+                NSA CNSA 2.0 & OMB Migration Horizon
+              </h3>
+            </div>
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.05)', padding: '0.25rem 0.65rem', borderRadius: '4px' }}>
+              National Security Memorandum 10 (NSM-10) Compliance
+            </span>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+            gap: '1.2rem'
+          }}>
+            {[
+              {
+                year: '2025',
+                title: 'Software & Firmware Code Signing',
+                desc: 'NSA requires CNSA 2.0 algorithms for all newly released software and firmware signing. Transition begins immediately.',
+                status: 'Active Enforcement',
+                statusColor: '#f59e0b'
+              },
+              {
+                year: '2030',
+                title: 'Cloud Gateways & Web TLS',
+                desc: 'Web browsers, edge reverse proxies, cloud endpoints, and network security appliances must support ML-KEM/ML-DSA.',
+                status: 'Mandatory Transition',
+                statusColor: '#00f2fe'
+              },
+              {
+                year: '2033',
+                title: 'Legacy Cryptography Phaseout',
+                desc: 'Complete elimination of traditional asymmetric algorithms (RSA-2048/4096, Diffie-Hellman, ECDSA) in National Security Systems.',
+                status: 'Full Prohibition',
+                statusColor: '#ef4444'
+              },
+              {
+                year: '2035',
+                title: 'Complete Quantum Resilience',
+                desc: '100% of all national security assets, critical infrastructure protocols, and public sector data encrypted with PQC standards.',
+                status: 'Permanent Benchmark',
+                statusColor: '#10b981'
+              }
+            ].map((milestone, idx) => (
+              <div key={idx} style={{
+                background: 'rgba(0, 0, 0, 0.4)',
+                padding: '1.25rem',
+                borderRadius: '8px',
+                border: `1px solid rgba(255, 255, 255, 0.08)`,
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.6rem' }}>
+                    <span style={{ fontSize: '1.6rem', fontWeight: 800, color: milestone.statusColor, letterSpacing: '-0.02em' }}>
+                      {milestone.year}
+                    </span>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', color: milestone.statusColor, background: `${milestone.statusColor}18`, padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
+                      {milestone.status}
+                    </span>
+                  </div>
+                  <h4 style={{ margin: '0 0 0.4rem 0', fontSize: '0.98rem', fontWeight: 700, color: '#ffffff' }}>
+                    {milestone.title}
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    {milestone.desc}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
 
-        {/* Mosca Result Hand-off Banner */}
+        {/* Filter Chips */}
+        <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'center', flexWrap: 'wrap', marginBottom: '2rem' }}>
+          {[
+            { id: 'all', label: 'All Intelligence Advisories' },
+            { id: 'CNSA 2.0 Mandate', label: 'NSA CNSA 2.0' },
+            { id: 'FIPS Standards', label: 'NIST Standards (FIPS 203/204)' },
+            { id: 'Federal Policy', label: 'White House OMB' },
+            { id: 'Cryptanalysis', label: 'HNDL Threat Guidance' }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setCnsaFilter(tab.id)}
+              style={{
+                background: cnsaFilter === tab.id ? 'rgba(0, 242, 254, 0.15)' : 'rgba(255, 255, 255, 0.04)',
+                border: `1px solid ${cnsaFilter === tab.id ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.1)'}`,
+                color: cnsaFilter === tab.id ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                padding: '0.5rem 1.15rem',
+                borderRadius: '6px',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s'
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* News Feed Cards Grid */}
         <div style={{
-          padding: '1.25rem 1.75rem',
-          borderRadius: '12px',
-          background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.12) 0%, rgba(34, 211, 238, 0.08) 100%)',
-          border: '1px solid rgba(168, 85, 247, 0.35)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '1rem'
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))',
+          gap: '1.5rem'
         }}>
-          <div>
-            <h4 style={{ margin: '0 0 0.25rem 0', fontSize: '1.05rem', fontWeight: 700, color: '#ffffff' }}>
-              Close your quantum exposure deficit before migration deadlines lock in.
-            </h4>
-            <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--muted, #9aa6c4)' }}>
-              Our team delivers a comprehensive PQC transition roadmap mapping your assets to NIST FIPS 203/204 standards.
-            </p>
+          {(cnsaFilter === 'all' ? cnsaNews : cnsaNews.filter(n => n.category === cnsaFilter)).map((item) => (
+            <div
+              key={item.id}
+              className="glass-panel"
+              style={{
+                background: 'rgba(15, 23, 42, 0.55)',
+                padding: '1.6rem',
+                borderRadius: '10px',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '1.2rem',
+                transition: 'all 0.2s'
+              }}
+            >
+              <div>
+                {/* Meta Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{
+                      fontSize: '0.75rem',
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      color: item.badgeColor,
+                      background: `${item.badgeColor}1a`,
+                      padding: '0.2rem 0.55rem',
+                      borderRadius: '4px',
+                      border: `1px solid ${item.badgeColor}40`
+                    }}>
+                      {item.source}
+                    </span>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      • {item.category}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                    <Calendar size={13} /> {item.publishedDate}
+                  </div>
+                </div>
+
+                {/* Title */}
+                <h3 style={{ margin: '0 0 0.6rem 0', fontSize: '1.2rem', fontWeight: 700, color: '#ffffff', lineHeight: 1.4 }}>
+                  {item.title}
+                </h3>
+
+                {/* Summary */}
+                <p style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                  {item.summary}
+                </p>
+
+                {/* Technical Impact Box */}
+                <div style={{
+                  background: 'rgba(0, 0, 0, 0.35)',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '6px',
+                  borderLeft: `3px solid ${item.badgeColor}`,
+                  fontSize: '0.84rem',
+                  color: '#cbd5e1',
+                  lineHeight: 1.5,
+                  marginBottom: '0.8rem'
+                }}>
+                  <strong style={{ color: item.badgeColor }}>Cryptographic Impact: </strong>
+                  {item.impact}
+                </div>
+              </div>
+
+              {/* Card Footer */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.8rem', borderTop: '1px solid rgba(255, 255, 255, 0.06)', flexWrap: 'wrap', gap: '0.5rem' }}>
+                {item.targetDeadline && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <Activity size={14} color="var(--accent-cyan)" />
+                    <span>{item.targetDeadline}</span>
+                  </div>
+                )}
+                <a
+                  href={item.officialUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    color: 'var(--accent-cyan)',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem'
+                  }}
+                >
+                  Read Official Advisory <ExternalLink size={14} />
+                </a>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* 4B. MOSCA'S QUANTUM MIGRATION PLANNER (INTERACTIVE TIMELINE & MILESTONES) */}
+      {/* ========================================================================= */}
+      <section 
+        id="planner" 
+        className="landing-section" 
+        style={{ 
+          padding: '3.5rem 1.5rem', 
+          maxWidth: '1240px', 
+          margin: '0 auto', 
+          width: '100%',
+          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+          scrollMarginTop: '90px'
+        }}
+      >
+        <MoscaMigrationPlanner variant="landing" />
+      </section>
+
+      {/* 5. MULTI-OS HOST AGENT DOWNLOAD SECTION */}
+      <section id="downloads" className="landing-section" style={{ padding: '2.5rem 1.5rem', maxWidth: '1200px', margin: '0 auto', width: '100%' }}>
+        <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-cyan)', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.5rem' }}>
+            <Download size={16} /> Multi-OS Host Scanners
           </div>
+          <h2 style={{ fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)', fontWeight: 800, margin: '0 0 0.8rem 0', color: '#ffffff', textWrap: 'balance' }}>
+            Lightweight, Standalone Host Cryptographic Scanners
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', maxWidth: '720px', margin: '0 auto', fontSize: '1rem', lineHeight: 1.6, textWrap: 'balance' }}>
+            Zero third-party agent dependencies. Download compiled binaries or deploy via standard enterprise configuration tools (Intune, Jamf, Ansible, or GPO).
+          </p>
+        </div>
+
+        {/* OS Selector Tabs */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', marginBottom: '2rem', flexWrap: 'wrap' }}>
           <button
-            onClick={() => handleOpenAssessment('Migration Planning')}
+            onClick={() => setSelectedOS('windows')}
             style={{
-              padding: '0.7rem 1.45rem',
+              background: selectedOS === 'windows' ? 'rgba(0, 242, 254, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+              border: `1px solid ${selectedOS === 'windows' ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.12)'}`,
+              color: selectedOS === 'windows' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              padding: '0.65rem 1.6rem',
               borderRadius: '8px',
-              border: 'none',
-              background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
-              color: '#ffffff',
-              fontSize: '0.88rem',
+              fontSize: '0.95rem',
               fontWeight: 600,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '0.45rem',
-              boxShadow: '0 4px 15px rgba(168, 85, 247, 0.4)'
+              gap: '0.5rem',
+              transition: 'all 0.2s'
             }}
           >
-            <span>Close this deficit &mdash; Request an Assessment</span>
-            <ArrowRight size={15} />
+            <Laptop size={16} /> Windows 10/11 &amp; Server
+          </button>
+
+          <button
+            onClick={() => setSelectedOS('mac')}
+            style={{
+              background: selectedOS === 'mac' ? 'rgba(0, 242, 254, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+              border: `1px solid ${selectedOS === 'mac' ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.12)'}`,
+              color: selectedOS === 'mac' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              padding: '0.65rem 1.6rem',
+              borderRadius: '8px',
+              fontSize: '0.95rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Laptop size={16} /> macOS (Apple Silicon &amp; Intel)
+          </button>
+
+          <button
+            onClick={() => setSelectedOS('linux')}
+            style={{
+              background: selectedOS === 'linux' ? 'rgba(0, 242, 254, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+              border: `1px solid ${selectedOS === 'linux' ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.12)'}`,
+              color: selectedOS === 'linux' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              padding: '0.65rem 1.6rem',
+              borderRadius: '8px',
+              fontSize: '0.95rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              transition: 'all 0.2s'
+            }}
+          >
+            <Server size={16} /> Linux (Cloud &amp; On-Prem)
           </button>
         </div>
-      </section>
 
-      {/* ========================================================================= */}
-      {/* 5. HOW IT WORKS (#platform / #how-it-works) */}
-      {/* ========================================================================= */}
-      <section id="platform" className="landing-section" style={{
-        padding: '3.5rem 1.5rem',
-        background: 'rgba(12, 17, 34, 0.65)',
-        borderTop: '1px solid var(--line, #26304f)',
-        borderBottom: '1px solid var(--line, #26304f)'
-      }}>
-        <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem' }}>
-          
-          <div style={{ textAlign: 'center' }}>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              color: 'var(--cyan, #22d3ee)',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              marginBottom: '0.5rem'
-            }}>
-              <Layers size={15} />
-              <span>How QuarkShield Works</span>
+        {/* Selected OS Details Panel */}
+        <div className="glass-panel" style={{ padding: '2rem', borderRadius: '12px', background: 'rgba(10, 15, 28, 0.85)', minWidth: 0 }}>
+          {selectedOS === 'windows' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '2rem', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: '#ffffff' }}>
+                  QuarkShield Post-Quantum Guard for Windows
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: '1.5rem', lineHeight: 1.6 }}>
+                  Deeply scans Windows Certificate Store (MY, ROOT, CA), OpenSSH configs, Git credential helpers, Java keystores, and system DLL cryptographic signatures.
+                </p>
+
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                  <a
+                    href="/downloads/pqc-scanner-windows-amd64.exe"
+                    download
+                    className="btn-primary"
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      borderRadius: '7px',
+                      fontSize: '0.95rem',
+                      fontWeight: 700,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    <Download size={16} /> Download .EXE (64-bit)
+                  </a>
+
+                  <a
+                    href="/downloads/pqc-scanner-windows.zip"
+                    download
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.18)',
+                      color: '#ffffff',
+                      padding: '0.75rem 1.5rem',
+                      borderRadius: '7px',
+                      fontSize: '0.95rem',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    <Download size={16} /> Download ZIP Package
+                  </a>
+
+                  <button
+                    onClick={() => setGuideModal('windows')}
+                    style={{
+                      background: 'rgba(0, 242, 254, 0.08)',
+                      border: '1px solid rgba(0, 242, 254, 0.35)',
+                      color: 'var(--accent-cyan)',
+                      padding: '0.75rem 1.35rem',
+                      borderRadius: '7px',
+                      fontSize: '0.92rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <BookOpen size={16} /> Windows User Guide
+                  </button>
+                </div>
+              </div>
+
+              {/* Terminal Instructions */}
+              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>PowerShell One-Liner</span>
+                  <button
+                    onClick={() => copyToClipboard(`Invoke-WebRequest -Uri "https://quarkshield.ai/downloads/pqc-scanner-windows-amd64.exe" -OutFile "pqc-scanner.exe"\n.\\pqc-scanner.exe --server https://quarkshield.ai`, 'win')}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem' }}
+                  >
+                    {copiedScript === 'win' ? <Check size={14} /> : <Copy size={14} />} {copiedScript === 'win' ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{`# 1. Download agent binary
+Invoke-WebRequest -Uri "https://quarkshield.ai/downloads/pqc-scanner-windows-amd64.exe" -OutFile "pqc-scanner.exe"
+
+# 2. Run scan & ingest into QuarkShield Central
+.\\pqc-scanner.exe --server https://quarkshield.ai`}
+                </pre>
+              </div>
             </div>
-            <h2 style={{
-              fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)',
-              fontWeight: 800,
-              margin: '0 0 0.8rem 0',
-              color: '#ffffff',
-              fontFamily: 'var(--font-display, "Sora", sans-serif)'
-            }}>
-              From Cryptographic Sprawl to Certified Post-Quantum Agility
-            </h2>
-            <p style={{ color: 'var(--muted, #9aa6c4)', maxWidth: '720px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6 }}>
-              A non-intrusive four-stage lifecycle designed for complex hybrid-cloud architectures and distributed enterprise endpoints.
+          )}
+
+          {selectedOS === 'mac' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '2rem', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: '#ffffff' }}>
+                  QuarkShield Post-Quantum Guard for Mac
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: '1.5rem', lineHeight: 1.6 }}>
+                  Native universal scanner for macOS. Discovers Apple Keychain items, OpenSSH keys, GPG keys, Homebrew OpenSSL installations, and local developer certificates.
+                </p>
+
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                  <a
+                    href="/downloads/QuarkShield-macOS.dmg"
+                    download
+                    className="btn-primary"
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      borderRadius: '7px',
+                      fontSize: '0.95rem',
+                      fontWeight: 700,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      boxShadow: '0 0 15px rgba(0, 242, 254, 0.4)'
+                    }}
+                  >
+                    <Download size={16} /> Download macOS Installer (.dmg)
+                  </a>
+
+                  <a
+                    href="/downloads/quarkshield-scanner-macos.zip"
+                    download
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.18)',
+                      color: '#ffffff',
+                      padding: '0.75rem 1.25rem',
+                      borderRadius: '7px',
+                      fontSize: '0.92rem',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    <Download size={15} /> Portable App (.zip)
+                  </a>
+
+                  <a
+                    href="/downloads/quarkshield-scanner-darwin-arm64"
+                    download
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      color: 'var(--text-secondary)',
+                      padding: '0.75rem 1.15rem',
+                      borderRadius: '7px',
+                      fontSize: '0.88rem',
+                      fontWeight: 500,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem'
+                    }}
+                  >
+                    <Terminal size={14} /> Apple Silicon CLI
+                  </a>
+
+                  <a
+                    href="/downloads/quarkshield-scanner-darwin-amd64"
+                    download
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.04)',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      color: 'var(--text-secondary)',
+                      padding: '0.75rem 1.15rem',
+                      borderRadius: '7px',
+                      fontSize: '0.88rem',
+                      fontWeight: 500,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem'
+                    }}
+                  >
+                    <Terminal size={14} /> Intel x86_64 CLI
+                  </a>
+
+                  <button
+                    onClick={() => setGuideModal('mac')}
+                    style={{
+                      background: 'rgba(168, 85, 247, 0.1)',
+                      border: '1px solid rgba(168, 85, 247, 0.4)',
+                      color: '#d8b4fe',
+                      padding: '0.75rem 1.25rem',
+                      borderRadius: '7px',
+                      fontSize: '0.92rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <BookOpen size={16} /> macOS User Guide
+                  </button>
+                </div>
+              </div>
+
+              {/* Terminal Instructions */}
+              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Terminal Command</span>
+                  <button
+                    onClick={() => copyToClipboard(`curl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner-darwin-universal -o quarkshield-scanner && chmod +x quarkshield-scanner && ./quarkshield-scanner --server https://quarkshield.ai`, 'mac')}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem' }}
+                  >
+                    {copiedScript === 'mac' ? <Check size={14} /> : <Copy size={14} />} {copiedScript === 'mac' ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{`# 1. Download universal macOS scanner (Apple Silicon & Intel)
+curl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner-darwin-universal -o quarkshield-scanner
+
+# 2. Grant execution permissions
+chmod +x quarkshield-scanner
+
+# 3. Launch interactive GUI or audit host
+./quarkshield-scanner --server https://quarkshield.ai`}
+                </pre>
+              </div>
+            </div>
+          )}
+
+          {selectedOS === 'linux' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '2rem', alignItems: 'center' }}>
+              <div>
+                <h3 style={{ fontSize: '1.4rem', fontWeight: 700, margin: '0 0 0.5rem 0', color: '#ffffff' }}>
+                  QuarkShield Post-Quantum Guard for Linux
+                </h3>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.92rem', marginBottom: '1.5rem', lineHeight: 1.6 }}>
+                  Statically compiled for Debian, Ubuntu, RHEL, CentOS, Rocky, Alpine, and AWS Linux. Audits /etc/ssl, OpenSSL ciphersuites, WireGuard tunnels, and container secret volumes.
+                </p>
+
+                <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                  <a
+                    href="/downloads/pqc-scanner-linux-amd64"
+                    download
+                    className="btn-primary"
+                    style={{
+                      padding: '0.75rem 1.5rem',
+                      borderRadius: '7px',
+                      fontSize: '0.95rem',
+                      fontWeight: 700,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    <Download size={16} /> Linux x86_64
+                  </a>
+
+                  <a
+                    href="/downloads/pqc-scanner-linux-arm64"
+                    download
+                    style={{
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      border: '1px solid rgba(255, 255, 255, 0.18)',
+                      color: '#ffffff',
+                      padding: '0.75rem 1.5rem',
+                      borderRadius: '7px',
+                      fontSize: '0.95rem',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem'
+                    }}
+                  >
+                    <Download size={16} /> Linux ARM64 (Graviton)
+                  </a>
+
+                  <button
+                    onClick={() => setGuideModal('linux')}
+                    style={{
+                      background: 'rgba(245, 158, 11, 0.1)',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      color: '#fbbf24',
+                      padding: '0.75rem 1.35rem',
+                      borderRadius: '7px',
+                      fontSize: '0.92rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <BookOpen size={16} /> Linux User Guide
+                  </button>
+                </div>
+              </div>
+
+              {/* Terminal Instructions */}
+              <div style={{ background: 'rgba(0, 0, 0, 0.6)', padding: '1.25rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.08)', minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>Instant Bash Installer</span>
+                  <button
+                    onClick={() => copyToClipboard(`curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash`, 'nix')}
+                    style={{ background: 'none', border: 'none', color: 'var(--accent-cyan)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.8rem' }}
+                  >
+                    {copiedScript === 'nix' ? <Check size={14} /> : <Copy size={14} />} {copiedScript === 'nix' ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <pre style={{ margin: 0, fontSize: '0.82rem', color: 'var(--accent-cyan)', fontFamily: 'var(--font-mono)', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+{`# 1-Click Installer (Auto-detects architecture & performs local PQC discovery):
+curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash
+
+# Or enroll into your QuarkShield dashboard with your Fleet Token:
+curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | sudo bash -s -- --token YOUR_FLEET_TOKEN`}
+                </pre>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Enterprise Documentation & Architecture Resources Section */}
+        <div style={{ marginTop: '3rem' }}>
+          <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: '#c084fc', fontSize: '0.85rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.4rem' }}>
+              <BookOpen size={16} /> Enterprise Resources &amp; Documentation
+            </div>
+            <h3 style={{ fontSize: 'clamp(1.5rem, 2.5vw, 1.9rem)', fontWeight: 800, margin: '0 0 0.5rem 0', color: '#ffffff' }}>
+              Architectural Blueprints, Features &amp; User Manuals
+            </h3>
+            <p style={{ color: 'var(--text-secondary)', maxWidth: '680px', margin: '0 auto', fontSize: '0.92rem', lineHeight: 1.6 }}>
+              Comprehensive operational documentation, step-by-step setup guides, and compliance specifications for security architects, cryptographers, and system administrators.
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '1.25rem' }}>
-            {[
-              {
-                step: '01',
-                title: 'Discover',
-                badge: 'Zero-Agent / Lightweight',
-                desc: 'Passive socket handshakes and local OS trust store auditing across Windows, macOS, and Linux servers without code refactoring.',
-                icon: Search,
-                accent: '#38bdf8'
-              },
-              {
-                step: '02',
-                title: 'Analyze',
-                badge: 'Cryptanalysis',
-                desc: 'Categorizes algorithms vulnerable to Shor’s algorithm (RSA, ECC, ECDSA, DH), weak keys, and active HNDL exposures in network transit.',
-                icon: AlertTriangle,
-                accent: '#fb5a76'
-              },
-              {
-                step: '03',
-                title: 'Prioritize',
-                badge: 'Mosca Math',
-                desc: 'Applies Mosca’s Theorem ($X+Y>Z$) and NIST SP 800-227 metrics to produce deterministic A–F quantum posture grades and compliance milestones.',
-                icon: Activity,
-                accent: '#f5b544'
-              },
-              {
-                step: '04',
-                title: 'Remediate',
-                badge: 'CycloneDX 1.6',
-                desc: 'Generates standardized Cryptographic Bill of Materials (CBOM), hybrid key encapsulation roadmaps, and verifiable attestation packages.',
-                icon: ShieldCheck,
-                accent: '#34d399'
-              }
-            ].map((col, idx) => {
-              const ColIcon = col.icon;
-              return (
-                <div key={idx} style={{
-                  background: 'var(--surface, #121a30)',
-                  border: '1px solid var(--line, #26304f)',
-                  borderRadius: '12px',
-                  padding: '1.5rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.85rem'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '1.25rem', fontWeight: 800, color: col.accent, fontFamily: 'var(--font-code, monospace)' }}>
-                      {col.step}
-                    </span>
-                    <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '0.15rem 0.45rem', borderRadius: '4px', background: 'rgba(255,255,255,0.06)', color: 'var(--muted, #9aa6c4)' }}>
-                      {col.badge}
-                    </span>
-                  </div>
-                  <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ffffff' }}>
-                    {col.title}
-                  </h3>
-                  <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.55 }}>
-                    {col.desc}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* 6. PERSONAS VALUE STATEMENTS (#personas) */}
-      {/* ========================================================================= */}
-      <section id="personas" className="landing-section" style={{
-        padding: '3.5rem 1.5rem',
-        maxWidth: '1180px',
-        margin: '0 auto',
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2.5rem'
-      }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            color: '#c084fc',
-            fontSize: '0.82rem',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            marginBottom: '0.5rem'
-          }}>
-            <Users size={15} />
-            <span>Built for Enterprise Security Teams</span>
-          </div>
-          <h2 style={{
-            fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)',
-            fontWeight: 800,
-            margin: '0 0 0.8rem 0',
-            color: '#ffffff',
-            fontFamily: 'var(--font-display, "Sora", sans-serif)'
-          }}>
-            Cross-Functional Cryptographic Intelligence
-          </h2>
-          <p style={{ color: 'var(--muted, #9aa6c4)', maxWidth: '720px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6 }}>
-            Designed to bridge executive board reporting, architectural migration, and daily engineering workflows.
-          </p>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.25rem' }}>
-          {[
-            {
-              role: 'CISO & Security Leadership',
-              headline: 'Board-Level Risk Governance & Mandate Defense',
-              points: [
-                'Instant A–F letter grades proving post-quantum posture.',
-                'Defense against White House OMB M-23-02 & NSA CNSA 2.0 deadlines.',
-                'Strict zero-data-exfiltration guarantees & isolated pod workspaces.'
-              ],
-              icon: Award,
-              color: '#c084fc'
-            },
-            {
-              role: 'Security Architects',
-              headline: 'Enterprise-Wide Cryptographic Visibility',
-              points: [
-                'Automated CycloneDX 1.6 CBOM generation without code changes.',
-                'HNDL perimeter mapping for public TLS & VPN tunnels.',
-                'Hybrid key encapsulation migration roadmaps (ML-KEM / FIPS 203).'
-              ],
-              icon: Layers,
-              color: '#38bdf8'
-            },
-            {
-              role: 'Security Engineering & DevOps',
-              headline: 'Automated CI/CD & Multi-OS Discovery',
-              points: [
-                'Signed scanners for Windows (Authenticode), macOS, and Linux.',
-                'REST API & CLI tools for automated pull commands & scanning.',
-                '1-click copy install scripts that integrate with Ansible, Jamf, Intune.'
-              ],
-              icon: Terminal,
-              color: '#34d399'
-            },
-            {
-              role: 'GRC & Compliance Officers',
-              headline: 'Continuous Attestation & Audit Evidence',
-              points: [
-                'Verifiable CycloneDX 1.6 software & cryptographic bills of materials.',
-                'Audit logs tracing legacy algorithm deprecation across quarters.',
-                'Executive DOCX and PDF export ready for auditors and regulators.'
-              ],
-              icon: FileCheck,
-              color: '#f5b544'
-            }
-          ].map((persona, idx) => {
-            const PersonaIcon = persona.icon;
-            return (
-              <div key={idx} style={{
-                background: 'var(--surface, #121a30)',
-                border: '1px solid var(--line, #26304f)',
-                borderRadius: '12px',
-                padding: '1.5rem',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '1rem'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 340px), 1fr))', gap: '1.5rem' }}>
+            {/* Resource Card 1: Features & Operations Guide */}
+            <div style={{
+              background: 'linear-gradient(180deg, rgba(168, 85, 247, 0.08) 0%, rgba(10, 15, 28, 0.95) 100%)',
+              border: '1px solid rgba(168, 85, 247, 0.35)',
+              borderRadius: '12px',
+              padding: '1.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '1.25rem',
+              boxShadow: '0 8px 32px rgba(168, 85, 247, 0.12)'
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.85rem' }}>
                   <div style={{
-                    width: '32px',
-                    height: '32px',
-                    borderRadius: '8px',
-                    background: 'rgba(255, 255, 255, 0.05)',
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.3) 0%, rgba(0, 242, 254, 0.25) 100%)',
+                    border: '1px solid rgba(168, 85, 247, 0.5)',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center'
+                    justifyContent: 'center',
+                    color: '#c084fc'
                   }}>
-                    <PersonaIcon size={17} color={persona.color} />
+                    <Cpu size={22} />
                   </div>
-                  <span style={{ fontSize: '0.82rem', fontWeight: 700, color: persona.color }}>
-                    {persona.role}
+                  <span style={{
+                    fontSize: '0.7rem',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '50px',
+                    background: 'rgba(168, 85, 247, 0.2)',
+                    color: '#c084fc',
+                    border: '1px solid rgba(168, 85, 247, 0.4)',
+                    fontWeight: 700,
+                    letterSpacing: '0.04em'
+                  }}>
+                    3-TIER MODEL
                   </span>
                 </div>
-                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#ffffff', lineHeight: 1.35 }}>
-                  {persona.headline}
+                <h4 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+                  Enterprise Features &amp; Operations Guide
                 </h4>
-                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.82rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.6, display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                  {persona.points.map((pt, pIdx) => (
-                    <li key={pIdx}>{pt}</li>
-                  ))}
-                </ul>
+                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  Detailed operations manual: Purpose, Steps to Connect, Execution Requirements, Results, and CBOM Views across Cloud KMS, Enterprise PKI, Hybrid Proxy, CI/CD Gate, and Workstations.
+                </p>
               </div>
-            );
-          })}
+
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setGuideModal('features')}
+                  style={{
+                    background: 'linear-gradient(135deg, #a855f7 0%, #7c3aed 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    padding: '0.6rem 1.15rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    boxShadow: '0 0 16px rgba(168, 85, 247, 0.35)'
+                  }}
+                >
+                  <BookOpen size={15} /> Read Guide
+                </button>
+                <a
+                  href="/docs/QUARKSHIELD_ENTERPRISE_FEATURES_GUIDE.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    color: 'var(--text-secondary)',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <ExternalLink size={14} /> Markdown (.md)
+                </a>
+              </div>
+            </div>
+
+            {/* Resource Card 2: Agentless PQC Architecture */}
+            <div style={{
+              background: 'linear-gradient(180deg, rgba(0, 242, 254, 0.06) 0%, rgba(10, 15, 28, 0.95) 100%)',
+              border: '1px solid rgba(0, 242, 254, 0.3)',
+              borderRadius: '12px',
+              padding: '1.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '1.25rem'
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.85rem' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'rgba(0, 242, 254, 0.15)',
+                    border: '1px solid rgba(0, 242, 254, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--accent-cyan)'
+                  }}>
+                    <Layers size={22} />
+                  </div>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '50px',
+                    background: 'rgba(0, 242, 254, 0.15)',
+                    color: 'var(--accent-cyan)',
+                    border: '1px solid rgba(0, 242, 254, 0.35)',
+                    fontWeight: 700,
+                    letterSpacing: '0.04em'
+                  }}>
+                    WHITEPAPER
+                  </span>
+                </div>
+                <h4 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+                  Agentless PQC Architecture &amp; Strategy
+                </h4>
+                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  Strategic blueprint: Overcoming enterprise agent fatigue via out-of-band cloud disk snapshots, passive wire TLS inspection, and centralized PKI discovery without host disruption.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setGuideModal('overview')}
+                  style={{
+                    background: 'rgba(0, 242, 254, 0.12)',
+                    color: 'var(--accent-cyan)',
+                    border: '1px solid rgba(0, 242, 254, 0.4)',
+                    padding: '0.6rem 1.15rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem'
+                  }}
+                >
+                  <BookOpen size={15} /> Read Architecture
+                </button>
+                <a
+                  href="/docs/AGENTLESS_PQC_ARCHITECTURE.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    color: 'var(--text-secondary)',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <ExternalLink size={14} /> Markdown (.md)
+                </a>
+              </div>
+            </div>
+
+            {/* Resource Card 3: Enterprise Agent Deployment Guide */}
+            <div style={{
+              background: 'linear-gradient(180deg, rgba(16, 185, 129, 0.06) 0%, rgba(10, 15, 28, 0.95) 100%)',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: '12px',
+              padding: '1.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              gap: '1.25rem'
+            }}>
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.85rem' }}>
+                  <div style={{
+                    width: '42px',
+                    height: '42px',
+                    borderRadius: '10px',
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#10b981'
+                  }}>
+                    <Laptop size={22} />
+                  </div>
+                  <span style={{
+                    fontSize: '0.7rem',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '50px',
+                    background: 'rgba(16, 185, 129, 0.15)',
+                    color: '#10b981',
+                    border: '1px solid rgba(16, 185, 129, 0.35)',
+                    fontWeight: 700,
+                    letterSpacing: '0.04em'
+                  }}>
+                    DEPLOYMENT MANUAL
+                  </span>
+                </div>
+                <h4 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+                  Enterprise Agent Deployment Manual
+                </h4>
+                <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                  Fleet orchestration guide: Mass-rollout scripts, Intune packaging, Jamf configuration profiles, Active Directory GPO setup, and Linux Ansible playbooks.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setGuideModal('windows')}
+                  style={{
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    color: '#10b981',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
+                    padding: '0.6rem 1.15rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem'
+                  }}
+                >
+                  <BookOpen size={15} /> View OS Guides
+                </button>
+                <a
+                  href="/docs/ENTERPRISE_AGENT_DEPLOYMENT_GUIDE.md"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.06)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    color: 'var(--text-secondary)',
+                    padding: '0.6rem 1rem',
+                    borderRadius: '6px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    textDecoration: 'none',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem'
+                  }}
+                >
+                  <ExternalLink size={14} /> Markdown (.md)
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 5. ENTERPRISE ONBOARDING CTA BANNER */}
+      <section style={{
+        padding: '2.25rem 2rem',
+        background: 'linear-gradient(180deg, rgba(6, 8, 13, 1) 0%, rgba(13, 19, 33, 0.8) 100%)',
+        textAlign: 'center',
+        borderTop: '1px solid rgba(255, 255, 255, 0.06)'
+      }}>
+        <div style={{ maxWidth: '800px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '12px', background: 'rgba(0, 242, 254, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-cyan)' }}>
+            <ShieldCheck size={26} />
+          </div>
+          <h2 style={{ fontSize: '2.5rem', fontWeight: 800, margin: 0, color: '#ffffff' }}>
+            Ready to Audit Your Enterprise for Quantum Vulnerabilities?
+          </h2>
+          <p style={{ color: 'var(--text-secondary)', fontSize: '1.1rem', margin: 0, lineHeight: 1.6 }}>
+            Download the officially signed QuarkShield desktop scanner or sign in to your enterprise console to inspect continuous Cryptographic Bill of Materials (CBOM) across your fleet.
+          </p>
+
+          <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <a
+              href="#downloads"
+              className="btn-primary"
+              style={{
+                padding: '0.85rem 2.2rem',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                fontWeight: 700,
+                textDecoration: 'none',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.6rem',
+                boxShadow: '0 0 20px rgba(0, 242, 254, 0.35)'
+              }}
+            >
+              <Download size={18} /> Download Desktop Scanner
+            </a>
+
+            <button
+              onClick={() => setShowSignInModal(true)}
+              style={{
+                background: 'rgba(255, 255, 255, 0.06)',
+                border: '1px solid rgba(255, 255, 255, 0.18)',
+                color: '#ffffff',
+                padding: '0.85rem 2rem',
+                borderRadius: '8px',
+                fontSize: '1rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.6rem'
+              }}
+            >
+              <Lock size={16} color="var(--accent-cyan)" /> Console Sign In
+            </button>
+          </div>
         </div>
       </section>
 
       {/* ========================================================================= */}
-      {/* 7. PRICING (#pricing) */}
+      {/* 4. PRICING & COMMERCIAL PACKAGES SECTION                                  */}
       {/* ========================================================================= */}
       <section id="pricing" className="landing-section" style={{
-        padding: '3.5rem 1.5rem',
-        background: 'rgba(12, 17, 34, 0.65)',
-        borderTop: '1px solid var(--line, #26304f)',
-        borderBottom: '1px solid var(--line, #26304f)'
+        padding: '3rem 1.5rem',
+        background: 'linear-gradient(180deg, rgba(8, 12, 22, 0.95) 0%, rgba(6, 8, 15, 0.98) 100%)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        position: 'relative'
       }}>
-        <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem', width: '100%' }}>
           
-          <div style={{ textAlign: 'center' }}>
+          {/* Section Header */}
+          <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.5rem',
-              color: 'var(--cyan, #22d3ee)',
+              padding: '0.35rem 0.95rem',
+              borderRadius: '50px',
+              background: 'rgba(0, 242, 254, 0.1)',
+              border: '1px solid rgba(0, 242, 254, 0.3)',
+              color: 'var(--accent-cyan)',
               fontSize: '0.82rem',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              marginBottom: '0.5rem'
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
             }}>
-              <CreditCard size={15} />
-              <span>Subscription &amp; Enterprise Tiers</span>
+              <CreditCard size={14} /> Predictable Commercial Licensing
             </div>
+
             <h2 style={{
-              fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)',
+              fontSize: 'clamp(1.9rem, 3.8vw, 2.75rem)',
               fontWeight: 800,
-              margin: '0 0 0.8rem 0',
               color: '#ffffff',
-              fontFamily: 'var(--font-display, "Sora", sans-serif)'
+              margin: 0,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.15,
+              textWrap: 'balance'
             }}>
-              Transparent, Value-Based Enterprise Pricing
+              Pricing &amp; Commercial Packages
             </h2>
-            <p style={{ color: 'var(--muted, #9aa6c4)', maxWidth: '720px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6 }}>
-              Scale your post-quantum readiness from a small security lab to global corporate infrastructure.
+
+            <p style={{
+              fontSize: '1.05rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.6,
+              margin: 0,
+              textWrap: 'balance'
+            }}>
+              Predictable subscription tiers designed for rapid adoption, enterprise expansion, and MSP partners.
             </p>
 
-            {/* Monthly / Annual Toggle (~17% discount) */}
+            {/* Billing Interval Toggle (Monthly / Annual) */}
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
-              background: 'rgba(0, 0, 0, 0.35)',
-              border: '1px solid var(--line, #26304f)',
-              borderRadius: '30px',
-              padding: '3px',
-              marginTop: '1.25rem'
+              justifyContent: 'center',
+              gap: '0.5rem',
+              marginTop: '1.5rem',
+              background: 'rgba(15, 23, 42, 0.6)',
+              padding: '0.35rem',
+              borderRadius: '10px',
+              border: '1px solid rgba(255, 255, 255, 0.1)'
             }}>
               <button
                 type="button"
                 onClick={() => setBillingInterval('monthly')}
                 style={{
-                  padding: '0.45rem 1rem',
-                  borderRadius: '25px',
-                  border: 'none',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
+                  padding: '0.45rem 1.1rem',
+                  borderRadius: '7px',
+                  fontSize: '0.88rem',
+                  fontWeight: 700,
                   cursor: 'pointer',
-                  background: billingInterval === 'monthly' ? 'var(--cyan, #22d3ee)' : 'transparent',
-                  color: billingInterval === 'monthly' ? '#06080d' : 'var(--muted, #9aa6c4)',
-                  transition: 'all 0.15s ease'
+                  border: billingInterval === 'monthly' ? '1px solid #00f2fe' : 'none',
+                  background: billingInterval === 'monthly' ? 'rgba(0, 242, 254, 0.18)' : 'transparent',
+                  color: billingInterval === 'monthly' ? '#00f2fe' : 'var(--text-secondary)',
+                  transition: 'all 0.2s'
                 }}
               >
                 Monthly Billing
@@ -2103,1600 +2879,1632 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                 type="button"
                 onClick={() => setBillingInterval('annual')}
                 style={{
-                  padding: '0.45rem 1rem',
-                  borderRadius: '25px',
-                  border: 'none',
-                  fontSize: '0.82rem',
-                  fontWeight: 600,
+                  padding: '0.45rem 1.1rem',
+                  borderRadius: '7px',
+                  fontSize: '0.88rem',
+                  fontWeight: 700,
                   cursor: 'pointer',
-                  background: billingInterval === 'annual' ? 'var(--cyan, #22d3ee)' : 'transparent',
-                  color: billingInterval === 'annual' ? '#06080d' : 'var(--muted, #9aa6c4)',
-                  transition: 'all 0.15s ease',
-                  display: 'flex',
+                  border: billingInterval === 'annual' ? '1px solid #10b981' : 'none',
+                  background: billingInterval === 'annual' ? 'rgba(16, 185, 129, 0.18)' : 'transparent',
+                  color: billingInterval === 'annual' ? '#10b981' : 'var(--text-secondary)',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.35rem'
+                  gap: '0.5rem',
+                  transition: 'all 0.2s'
                 }}
               >
-                <span>Annual Billing</span>
+                Annual Billing
                 <span style={{
-                  fontSize: '0.65rem',
-                  fontWeight: 700,
-                  padding: '0.1rem 0.4rem',
-                  borderRadius: '10px',
-                  background: billingInterval === 'annual' ? 'rgba(0,0,0,0.2)' : 'rgba(52, 211, 153, 0.2)',
-                  color: billingInterval === 'annual' ? '#06080d' : '#34d399'
+                  background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                  color: '#000000',
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  padding: '0.15rem 0.45rem',
+                  borderRadius: '20px'
                 }}>
-                  Save ~17%
+                  SAVE ~17%
                 </span>
               </button>
             </div>
           </div>
 
-          {/* Pricing Cards Grid */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
-            
-            {/* 1. Entry Tier */}
+          {/* Pricing Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 290px), 1fr))',
+            gap: '1.75rem',
+            alignItems: 'stretch'
+          }}>
+
+            {/* Card 1: ENTRY */}
             <div style={{
-              background: 'var(--surface, #121a30)',
-              border: '1px solid var(--line, #26304f)',
-              borderRadius: '14px',
-              padding: '1.75rem',
+              background: 'rgba(15, 23, 42, 0.75)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: '12px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderLeft: '5px solid #38bdf8',
+              padding: '2rem',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
-              gap: '1.5rem'
+              height: '100%',
+              minWidth: 0,
+              position: 'relative',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              transition: 'transform 0.2s, box-shadow 0.2s'
             }}>
-              <div>
-                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--muted, #9aa6c4)', textTransform: 'uppercase' }}>Entry</div>
-                <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ffffff', margin: '0.5rem 0' }}>
-                  {billingInterval === 'annual' ? '$249' : '$300'}
-                  <span style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--muted, #9aa6c4)' }}> / month</span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.01em' }}>
+                    ENTRY — PQC Assessment
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.6rem', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+                    BASELINE
+                  </span>
                 </div>
-                {billingInterval === 'annual' && (
-                  <div style={{ fontSize: '0.74rem', color: '#34d399', marginBottom: '0.5rem' }}>Billed annually ($2,988/yr)</div>
-                )}
-                <p style={{ fontSize: '0.84rem', color: 'var(--muted, #9aa6c4)', margin: '0 0 1.25rem 0' }}>
-                  Essential desktop scanner and CBOM generator for security labs and compliance pilots.
+
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>
+                      {billingInterval === 'annual' ? '$250' : '$300'}
+                    </span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      {billingInterval === 'annual' ? '/mo ($3,000/yr)' : '/month'}
+                    </span>
+                    <span style={{ fontSize: '0.92rem', color: '#38bdf8', fontWeight: 600, marginLeft: '0.25rem' }}>(5 seats)</span>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                  Five endpoint licenses, unlimited local scans. Executive Quantum Risk Score, migration roadmap, and baseline CBOM JSON. Best for initial baseline audit and board-level reporting.
                 </p>
-                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.82rem', color: '#cbd5e1', lineHeight: 1.8 }}>
-                  <li>Up to <strong>5 Workstation Seats</strong></li>
-                  <li>Windows, macOS, and Linux scanners</li>
-                  <li>Automated CycloneDX 1.6 CBOM export</li>
-                  <li>Standard email support</li>
-                </ul>
+
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1.25rem', marginBottom: '1.75rem', marginTop: 'auto' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '0.85rem' }}>
+                    Package Inclusions
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> 5 Workstation / Server endpoint licenses
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> Unlimited local-first cryptographic audits
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> Executive Quantum Risk Score &amp; letter grade
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> CycloneDX 1.6 baseline CBOM JSON export
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> Board-level PQC migration roadmap
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#38bdf8" /> Zero-exfiltration local audit guarantee
+                    </li>
+                  </ul>
+                </div>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <button
-                  onClick={() => handleOpenAssessment(undefined, 'Entry Tier ($300/mo)')}
-                  style={{
-                    width: '100%',
-                    padding: '0.7rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--line, #26304f)',
-                    background: 'rgba(255, 255, 255, 0.04)',
-                    color: '#ffffff',
-                    fontSize: '0.86rem',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Request Assessment for Entry
-                </button>
-                <button
-                  onClick={() => {
-                    setCheckoutTier('entry');
-                    setShowStripeModal(true);
-                  }}
-                  style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '0.76rem', cursor: 'pointer', textAlign: 'center' }}
-                >
-                  Or buy online via Stripe Checkout &rarr;
-                </button>
-              </div>
+
+              <button
+                onClick={() => {
+                  setCheckoutTier('entry');
+                  setShowStripeModal(true);
+                  setCheckoutError(null);
+                }}
+                style={{
+                  background: 'rgba(56, 189, 248, 0.12)',
+                  border: '1px solid rgba(56, 189, 248, 0.4)',
+                  color: '#ffffff',
+                  padding: '0.85rem',
+                  borderRadius: '8px',
+                  fontSize: '0.95rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  transition: 'all 0.2s',
+                  marginTop: '1rem'
+                }}
+              >
+                Start Assessment <ArrowRight size={16} />
+              </button>
             </div>
 
-            {/* 2. Scale Tier (Most Popular) */}
+            {/* Card 2: SCALE (Most Popular) */}
             <div style={{
-              background: 'linear-gradient(180deg, #151d38 0%, #0e162c 100%)',
-              border: '2px solid #a855f7',
-              borderRadius: '14px',
-              padding: '1.75rem',
+              background: 'linear-gradient(160deg, rgba(30, 27, 75, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: '12px',
+              border: '1.5px solid rgba(245, 158, 11, 0.55)',
+              borderLeft: '5px solid #f59e0b',
+              padding: '2rem',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
-              gap: '1.5rem',
+              height: '100%',
+              minWidth: 0,
               position: 'relative',
-              boxShadow: '0 12px 35px rgba(168, 85, 247, 0.2)'
+              boxShadow: '0 0 30px rgba(245, 158, 11, 0.15)',
+              transition: 'transform 0.2s, box-shadow 0.2s'
             }}>
+              {/* Popular Badge */}
               <div style={{
                 position: 'absolute',
                 top: '-12px',
                 right: '20px',
-                background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
-                color: '#ffffff',
-                padding: '0.2rem 0.65rem',
-                borderRadius: '12px',
-                fontSize: '0.68rem',
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase'
+                background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                color: '#000000',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                padding: '0.25rem 0.75rem',
+                borderRadius: '50px',
+                letterSpacing: '0.04em',
+                boxShadow: '0 2px 10px rgba(245, 158, 11, 0.4)'
               }}>
-                Most Popular
+                ⭐ MOST POPULAR
               </div>
 
-              <div>
-                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#c084fc', textTransform: 'uppercase' }}>Scale</div>
-                <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ffffff', margin: '0.5rem 0' }}>
-                  {billingInterval === 'annual' ? '$2,075' : '$2,500'}
-                  <span style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--muted, #9aa6c4)' }}> / month</span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.01em' }}>
+                    SCALE — Growth Fleet
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.6rem', borderRadius: '4px', background: 'rgba(245, 158, 11, 0.2)', color: '#fbbf24', border: '1px solid rgba(245, 158, 11, 0.4)' }}>
+                    GROWTH
+                  </span>
                 </div>
-                {billingInterval === 'annual' && (
-                  <div style={{ fontSize: '0.74rem', color: '#34d399', marginBottom: '0.5rem' }}>Billed annually ($24,900/yr)</div>
-                )}
-                <p style={{ fontSize: '0.84rem', color: 'var(--muted, #9aa6c4)', margin: '0 0 1.25rem 0' }}>
-                  Full centralized SaaS observability for medium enterprise fleets and hybrid clouds.
+
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>
+                      {billingInterval === 'annual' ? '$2,083' : '$2,500'}
+                    </span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      {billingInterval === 'annual' ? '/mo ($25,000/yr)' : '/Month'}
+                    </span>
+                    <span style={{ fontSize: '0.92rem', color: '#fbbf24', fontWeight: 600, marginLeft: '0.25rem' }}>Up to 50 endpoints</span>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                  Cloud Fleet Central Plane, real-time telemetry, automated drift detection, continuous CycloneDX 1.6 CBOM and CSV export, group enrollment tokens, and email alerts.
                 </p>
-                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.82rem', color: '#cbd5e1', lineHeight: 1.8 }}>
-                  <li>Up to <strong>50 Enrolled Endpoints</strong></li>
-                  <li>Continuous Fleet Telemetry &amp; Ingestion</li>
-                  <li>HNDL Outbound Socket Probe Engine</li>
-                  <li>CycloneDX 1.6 &amp; CDXA Attestation</li>
-                  <li>Priority technical support</li>
-                </ul>
+
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1.25rem', marginBottom: '1.75rem', marginTop: 'auto' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '0.85rem' }}>
+                    Package Inclusions
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Up to 50 monitored fleet endpoints
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Cloud Fleet Central Plane &amp; tenant orchestration
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Automated cryptographic drift detection
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Continuous CycloneDX 1.6 CBOM &amp; CSV export
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Group enrollment tokens for Intune / Jamf MDM
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#fbbf24" /> Real-time email &amp; webhook compliance alerts
+                    </li>
+                  </ul>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <button
-                  onClick={() => handleOpenAssessment(undefined, 'Scale Tier ($2,500/mo)')}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    borderRadius: '8px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
-                    color: '#ffffff',
-                    fontSize: '0.88rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 15px rgba(168, 85, 247, 0.4)'
-                  }}
-                >
-                  Request Assessment for Scale
-                </button>
-                <button
-                  onClick={() => {
-                    setCheckoutTier('scale');
-                    setShowStripeModal(true);
-                  }}
-                  style={{ background: 'none', border: 'none', color: '#c084fc', fontSize: '0.76rem', cursor: 'pointer', textAlign: 'center' }}
-                >
-                  Or buy online via Stripe Checkout &rarr;
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  setCheckoutTier('scale');
+                  setShowStripeModal(true);
+                  setCheckoutError(null);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)',
+                  border: 'none',
+                  color: '#000000',
+                  padding: '0.85rem',
+                  borderRadius: '8px',
+                  fontSize: '0.95rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  boxShadow: '0 4px 15px rgba(245, 158, 11, 0.35)',
+                  transition: 'all 0.2s',
+                  marginTop: '1rem'
+                }}
+              >
+                Deploy Growth Fleet <ArrowRight size={16} />
+              </button>
             </div>
 
-            {/* 3. Enterprise Tier */}
+            {/* Card 3: ENTERPRISE */}
             <div style={{
-              background: 'var(--surface, #121a30)',
-              border: '1px solid var(--line, #26304f)',
-              borderRadius: '14px',
-              padding: '1.75rem',
+              background: 'rgba(15, 23, 42, 0.75)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: '12px',
+              border: '1px solid rgba(255, 255, 255, 0.1)',
+              borderLeft: '5px solid #a855f7',
+              padding: '2rem',
               display: 'flex',
               flexDirection: 'column',
               justifyContent: 'space-between',
-              gap: '1.5rem'
+              height: '100%',
+              minWidth: 0,
+              position: 'relative',
+              boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
+              transition: 'transform 0.2s, box-shadow 0.2s'
             }}>
-              <div>
-                <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--muted, #9aa6c4)', textTransform: 'uppercase' }}>Enterprise</div>
-                <div style={{ fontSize: '2rem', fontWeight: 800, color: '#ffffff', margin: '0.5rem 0' }}>
-                  {billingInterval === 'annual' ? '$8,300' : '$10,000'}
-                  <span style={{ fontSize: '0.9rem', fontWeight: 500, color: 'var(--muted, #9aa6c4)' }}> / month</span>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <h3 style={{ fontSize: '1.2rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.01em' }}>
+                    ENTERPRISE — Enterprise Pro
+                  </h3>
+                  <span style={{ fontSize: '0.75rem', fontWeight: 700, padding: '0.25rem 0.6rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
+                    ENTERPRISE
+                  </span>
                 </div>
-                {billingInterval === 'annual' && (
-                  <div style={{ fontSize: '0.74rem', color: '#34d399', marginBottom: '0.5rem' }}>Billed annually ($99,600/yr)</div>
-                )}
-                <p style={{ fontSize: '0.84rem', color: 'var(--muted, #9aa6c4)', margin: '0 0 1.25rem 0' }}>
-                  Dedicated multi-tenant pod isolation for large enterprises, defense, and healthcare.
+
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '2.2rem', fontWeight: 900, color: '#ffffff' }}>
+                      {billingInterval === 'annual' ? '$8,333' : '$10,000'}
+                    </span>
+                    <span style={{ fontSize: '1rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                      {billingInterval === 'annual' ? '/mo ($100,000/yr)' : '/month'}
+                    </span>
+                    <span style={{ fontSize: '0.92rem', color: '#c084fc', fontWeight: 600, marginLeft: '0.25rem' }}>· Up to 250 endpoints</span>
+                  </div>
+                </div>
+
+                <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, marginBottom: '1.5rem' }}>
+                  Remote Git scanner (GitHub/Bitbucket), full QS Copilot AI with offline/SCIF support, dedicated tenant subdomain, 2FA policies, and senior cryptographic engineering support.
                 </p>
-                <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.82rem', color: '#cbd5e1', lineHeight: 1.8 }}>
-                  <li>Up to <strong>250 Enrolled Endpoints</strong> (custom capacity available)</li>
-                  <li>Dedicated Subdomain: <code>https://&lt;tenant&gt;.quarkshield.ai</code></li>
-                  <li>Enterprise RBAC, TOTP 2FA, and Audit Logs</li>
-                  <li>Executive PDF &amp; DOCX Governance Reports</li>
-                  <li>Dedicated PQC solutions engineer &amp; 99.9% SLA</li>
-                </ul>
+
+                <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '1.25rem', marginBottom: '1.75rem', marginTop: 'auto' }}>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '0.85rem' }}>
+                    Package Inclusions
+                  </div>
+                  <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Up to 250 hybrid enterprise endpoints
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Remote Git scanner (GitHub / GitLab / Bitbucket)
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Full QS Copilot AI with offline &amp; SCIF support
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Dedicated tenant subdomain &amp; isolated container channel
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Enterprise 2FA &amp; role-based access policies
+                    </li>
+                    <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                      <CheckCircle2 size={16} color="#c084fc" /> Senior cryptographic engineering advisory support
+                    </li>
+                  </ul>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                <button
-                  onClick={() => handleOpenAssessment(undefined, 'Enterprise Tier ($10,000/mo)')}
-                  style={{
-                    width: '100%',
-                    padding: '0.7rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--line, #26304f)',
-                    background: 'rgba(255, 255, 255, 0.04)',
-                    color: '#ffffff',
-                    fontSize: '0.86rem',
-                    fontWeight: 600,
-                    cursor: 'pointer'
-                  }}
-                >
-                  Request Assessment for Enterprise
-                </button>
-                <button
-                  onClick={() => {
-                    setCheckoutTier('enterprise');
-                    setShowStripeModal(true);
-                  }}
-                  style={{ background: 'none', border: 'none', color: '#38bdf8', fontSize: '0.76rem', cursor: 'pointer', textAlign: 'center' }}
-                >
-                  Or buy online via Stripe Checkout &rarr;
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  setCheckoutTier('enterprise');
+                  setShowStripeModal(true);
+                  setCheckoutError(null);
+                }}
+                style={{
+                  background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.25) 0%, rgba(127, 0, 255, 0.3) 100%)',
+                  border: '1px solid rgba(168, 85, 247, 0.5)',
+                  color: '#ffffff',
+                  padding: '0.85rem',
+                  borderRadius: '8px',
+                  fontSize: '0.95rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  transition: 'all 0.2s',
+                  marginTop: '1rem'
+                }}
+              >
+                Upgrade to Enterprise Pro <ArrowRight size={16} />
+              </button>
             </div>
+
           </div>
 
-          {/* MSP Partner Strip */}
+          {/* Horizontal Rectangle Card: MSP & MIGRATION PARTNER */}
           <div style={{
-            padding: '1.25rem 1.75rem',
-            borderRadius: '12px',
-            background: 'rgba(168, 85, 247, 0.08)',
-            border: '1px solid rgba(168, 85, 247, 0.3)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '1rem'
+            background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 23, 42, 0.95) 100%)',
+            backdropFilter: 'blur(12px)',
+            borderRadius: '14px',
+            border: '1.5px solid rgba(16, 185, 129, 0.35)',
+            borderLeft: '6px solid #10b981',
+            padding: '2.25rem',
+            boxShadow: '0 10px 35px rgba(0, 0, 0, 0.35)',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))',
+            gap: '2.25rem',
+            alignItems: 'center'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-              <div style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                background: 'rgba(168, 85, 247, 0.2)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}>
-                <Building size={18} color="#c084fc" />
+            {/* Left Col: Title, Pricing, Overview */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 800, padding: '0.25rem 0.65rem', borderRadius: '4px', background: 'rgba(16, 185, 129, 0.18)', color: '#34d399', border: '1px solid rgba(16, 185, 129, 0.35)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  PARTNER ECOSYSTEM
+                </span>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                  For MSPs, MSSPs &amp; Consultancies
+                </span>
               </div>
-              <div>
-                <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#ffffff' }}>
-                  Managed Service Providers (MSP) &amp; MSSP Partners
-                </div>
-                <div style={{ fontSize: '0.82rem', color: 'var(--muted, #9aa6c4)' }}>
-                  Manage multiple isolated client tenants from a single Super Admin console with partner revenue share.
-                </div>
+
+              <h3 style={{ fontSize: '1.45rem', fontWeight: 800, color: '#ffffff', margin: 0, letterSpacing: '-0.02em' }}>
+                MSP &amp; Migration Partner
+              </h3>
+
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.45rem' }}>
+                <span style={{ fontSize: '1.9rem', fontWeight: 900, color: '#ffffff' }}>Custom Volume</span>
+                <span style={{ fontSize: '1.05rem', color: '#34d399', fontWeight: 700 }}>Pricing</span>
               </div>
+
+              <p style={{ fontSize: '0.92rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Multi-tenant partner console, pooled license pools (500–2,500+ seats), white-labeled executive PQC audit reports, and dedicated migration playbooks for customer distribution.
+              </p>
             </div>
-            <button
-              onClick={() => handleOpenAssessment('Enterprise Demo', 'MSP Partner Program')}
-              className="btn-secondary"
-              style={{ padding: '0.55rem 1rem', fontSize: '0.82rem', borderColor: '#c084fc', color: '#c084fc' }}
-            >
-              Contact MSP Partner Team &rarr;
-            </button>
+
+            {/* Middle Col: Inclusions in 2 columns */}
+            <div style={{ borderLeft: '1px solid rgba(255, 255, 255, 0.08)', paddingLeft: '1.75rem' }}>
+              <div style={{ fontSize: '0.8rem', fontWeight: 700, textTransform: 'uppercase', color: 'var(--text-muted)', letterSpacing: '0.05em', marginBottom: '0.85rem' }}>
+                Partner Inclusions &amp; Privileges
+              </div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '0.65rem' }}>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Multi-tenant Partner Management Console
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Pooled license pools (500–2,500+ seats)
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> White-labeled executive audit reports (PDF &amp; DOCX)
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Dedicated migration playbooks for client delivery
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Priority partner API access &amp; SIEM webhooks
+                </li>
+                <li style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  <CheckCircle2 size={16} color="#34d399" /> Wholesale tiering margins &amp; co-selling enablement
+                </li>
+              </ul>
+            </div>
+
+            {/* Right Col: Action & Engagement */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', alignItems: 'stretch', justifyContent: 'center' }}>
+              <a
+                href="mailto:partners@quarkshield.ai?subject=QuarkShield%20MSP%20%26%20Migration%20Partner%20Inquiry"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(16, 185, 129, 0.25) 0%, rgba(5, 150, 105, 0.35) 100%)',
+                  border: '1.5px solid rgba(16, 185, 129, 0.5)',
+                  color: '#ffffff',
+                  padding: '0.95rem 1.5rem',
+                  borderRadius: '8px',
+                  fontSize: '0.98rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
+                  textDecoration: 'none',
+                  boxShadow: '0 4px 18px rgba(16, 185, 129, 0.25)',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Inquire for Partner Licensing <ArrowRight size={16} />
+              </a>
+            </div>
+
+          </div>
+
+          {/* Pricing Note */}
+          <div style={{
+            textAlign: 'center',
+            padding: '1.25rem',
+            borderRadius: '8px',
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid rgba(255, 255, 255, 0.06)',
+            color: 'var(--text-muted)',
+            fontSize: '0.88rem'
+          }}>
+            Need custom air-gapped on-premises licensing, government SCIF clearance, or custom endpoint counts? <a href="#support" style={{ color: 'var(--accent-cyan)', textDecoration: 'none', fontWeight: 600 }}>Contact our Federal &amp; Enterprise Solutions Team</a>.
           </div>
         </div>
       </section>
 
       {/* ========================================================================= */}
-      {/* 8. DOWNLOADS SECTION (#downloads) */}
+      {/* 5. FREQUENTLY ASKED QUESTIONS (FAQ) SECTION                               */}
       {/* ========================================================================= */}
-      <section id="downloads" className="landing-section" style={{
-        padding: '3.5rem 1.5rem',
-        maxWidth: '1180px',
-        margin: '0 auto',
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2.5rem'
+      <section id="faq" className="landing-section" style={{
+        padding: '3rem 1.5rem',
+        background: 'linear-gradient(180deg, rgba(6, 8, 15, 0.98) 0%, rgba(10, 16, 28, 0.95) 100%)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        position: 'relative'
       }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            color: '#34d399',
-            fontSize: '0.82rem',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            marginBottom: '0.5rem'
-          }}>
-            <Download size={15} />
-            <span>Multi-OS Cryptographic Scanner Binaries</span>
-          </div>
-          <h2 style={{
-            fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)',
-            fontWeight: 800,
-            margin: '0 0 0.8rem 0',
-            color: '#ffffff',
-            fontFamily: 'var(--font-display, "Sora", sans-serif)'
-          }}>
-            Deploy in Seconds. Zero External Dependencies.
-          </h2>
-          <p style={{ color: 'var(--muted, #9aa6c4)', maxWidth: '720px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6 }}>
-            Compiled, digitally signed standalone native binaries for Windows, macOS, and Linux. No background daemons required unless scheduled.
-          </p>
-        </div>
-
-        {/* 3 OS Download Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.5rem' }}>
+        <div style={{ maxWidth: '1000px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.5rem', width: '100%' }}>
           
-          {/* Windows */}
-          <div style={{
-            background: 'var(--surface, #121a30)',
-            border: '1px solid var(--line, #26304f)',
-            borderRadius: '14px',
-            padding: '1.75rem',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: '1.25rem'
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Laptop size={24} color="#38bdf8" />
-                <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', fontWeight: 600 }}>
-                  Azure Trusted Signing
-                </span>
-              </div>
-              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ffffff' }}>
-                Windows x64
-              </h3>
-              <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.5 }}>
-                Authenticode-signed by <code>CN=Fedmitigate LLC</code>. Audits Windows Certificate Store, Schannel weak ciphers, and installed crypto libraries.
-              </p>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <a
-                href="/downloads/pqc-scanner-windows-amd64.exe"
-                download
-                style={{
-                  padding: '0.65rem 1rem',
-                  borderRadius: '8px',
-                  background: 'rgba(56, 189, 248, 0.15)',
-                  border: '1px solid rgba(56, 189, 248, 0.4)',
-                  color: '#38bdf8',
-                  fontSize: '0.84rem',
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.45rem'
-                }}
-              >
-                <Download size={14} />
-                <span>Download Windows .exe (64-bit)</span>
-              </a>
-              <a
-                href="/downloads/pqc-scanner-windows.zip"
-                download
-                style={{
-                  padding: '0.45rem',
-                  color: 'var(--muted, #9aa6c4)',
-                  fontSize: '0.75rem',
-                  textDecoration: 'none',
-                  textAlign: 'center'
-                }}
-              >
-                Download Portable .zip &rarr;
-              </a>
-            </div>
-          </div>
-
-          {/* macOS */}
-          <div style={{
-            background: 'var(--surface, #121a30)',
-            border: '1px solid var(--line, #26304f)',
-            borderRadius: '14px',
-            padding: '1.75rem',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: '1.25rem'
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Cpu size={24} color="#34d399" />
-                <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '4px', background: 'rgba(52, 211, 153, 0.15)', color: '#34d399', fontWeight: 600 }}>
-                  Apple Universal Binary
-                </span>
-              </div>
-              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ffffff' }}>
-                macOS Universal
-              </h3>
-              <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.5 }}>
-                Native on Apple Silicon (M1-M4) &amp; Intel. Audits macOS System Keychain, OpenSSL dynamic libraries, and SSH agent credentials.
-              </p>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <a
-                href="/downloads/QuarkShield-macOS.dmg"
-                download
-                style={{
-                  padding: '0.65rem 1rem',
-                  borderRadius: '8px',
-                  background: 'rgba(52, 211, 153, 0.15)',
-                  border: '1px solid rgba(52, 211, 153, 0.4)',
-                  color: '#34d399',
-                  fontSize: '0.84rem',
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.45rem'
-                }}
-              >
-                <Download size={14} />
-                <span>Download macOS .dmg</span>
-              </a>
-              <a
-                href="/downloads/pqc-scanner-macos.zip"
-                download
-                style={{
-                  padding: '0.45rem',
-                  color: 'var(--muted, #9aa6c4)',
-                  fontSize: '0.75rem',
-                  textDecoration: 'none',
-                  textAlign: 'center'
-                }}
-              >
-                Download Universal .zip &rarr;
-              </a>
-            </div>
-          </div>
-
-          {/* Linux */}
-          <div style={{
-            background: 'var(--surface, #121a30)',
-            border: '1px solid var(--line, #26304f)',
-            borderRadius: '14px',
-            padding: '1.75rem',
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between',
-            gap: '1.25rem'
-          }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Server size={24} color="#f5b544" />
-                <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.5rem', borderRadius: '4px', background: 'rgba(245, 181, 68, 0.15)', color: '#f5b544', fontWeight: 600 }}>
-                  Linux Fleet Daemon
-                </span>
-              </div>
-              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ffffff' }}>
-                Linux Server x64 / ARM
-              </h3>
-              <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.5 }}>
-                RPM &amp; DEB package discovery, <code>/proc/crypto</code> kernel driver analysis, and optional systemd service background daemon.
-              </p>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <a
-                href="/downloads/pqc-scanner-linux.tar.gz"
-                download
-                style={{
-                  padding: '0.65rem 1rem',
-                  borderRadius: '8px',
-                  background: 'rgba(245, 181, 68, 0.15)',
-                  border: '1px solid rgba(245, 181, 68, 0.4)',
-                  color: '#f5b544',
-                  fontSize: '0.84rem',
-                  fontWeight: 600,
-                  textDecoration: 'none',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.45rem'
-                }}
-              >
-                <Download size={14} />
-                <span>Download Linux .tar.gz</span>
-              </a>
-              <a
-                href="/downloads/pqc-scanner-linux.zip"
-                download
-                style={{
-                  padding: '0.45rem',
-                  color: 'var(--muted, #9aa6c4)',
-                  fontSize: '0.75rem',
-                  textDecoration: 'none',
-                  textAlign: 'center'
-                }}
-              >
-                Download Linux .zip &rarr;
-              </a>
-            </div>
-          </div>
-        </div>
-
-        {/* 1-Line Copy Install Command */}
-        <div style={{
-          background: 'rgba(0, 0, 0, 0.5)',
-          border: '1px solid var(--line, #26304f)',
-          borderRadius: '12px',
-          padding: '1.25rem 1.5rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '1rem'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <Terminal size={18} color="var(--cyan, #22d3ee)" />
-            <div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--muted, #9aa6c4)', marginBottom: '0.2rem' }}>
-                Automated 1-Click Multi-OS Shell Installer:
-              </div>
-              <code style={{ fontSize: '0.88rem', color: '#ffffff', fontFamily: 'var(--font-code, monospace)' }}>
-                curl -fsSL https://quarkshield.ai/api/scan/agent/install.sh | bash
-              </code>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText('curl -fsSL https://quarkshield.ai/api/scan/agent/install.sh | bash');
-              setCopiedScript('install');
-              setTimeout(() => setCopiedScript(null), 2500);
-            }}
-            className="btn-secondary"
-            style={{ padding: '0.45rem 0.85rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
-          >
-            {copiedScript === 'install' ? <Check size={14} color="#34d399" /> : <Copy size={14} />}
-            <span>{copiedScript === 'install' ? 'Copied Command!' : 'Copy Shell Script'}</span>
-          </button>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* 9. CNSA 2.0 & PQC INTEL FEED (#cnsa-news) */}
-      {/* ========================================================================= */}
-      <section id="cnsa-news" className="landing-section" style={{
-        padding: '3.5rem 1.5rem',
-        background: 'rgba(12, 17, 34, 0.65)',
-        borderTop: '1px solid var(--line, #26304f)',
-        borderBottom: '1px solid var(--line, #26304f)'
-      }}>
-        <div style={{ maxWidth: '1180px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-          <div style={{ textAlign: 'center' }}>
+          {/* Section Header */}
+          <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.5rem',
-              color: '#f472b6',
+              padding: '0.35rem 0.95rem',
+              borderRadius: '50px',
+              background: 'rgba(168, 85, 247, 0.1)',
+              border: '1px solid rgba(168, 85, 247, 0.3)',
+              color: '#c084fc',
               fontSize: '0.82rem',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              marginBottom: '0.5rem'
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
             }}>
-              <Radio size={15} />
-              <span>Federal &amp; International Standards Tracker</span>
+              <HelpCircle size={14} /> Frequently Asked Questions
             </div>
+
             <h2 style={{
-              fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)',
+              fontSize: 'clamp(1.9rem, 3.8vw, 2.75rem)',
               fontWeight: 800,
-              margin: '0 0 0.8rem 0',
               color: '#ffffff',
-              fontFamily: 'var(--font-display, "Sora", sans-serif)'
+              margin: 0,
+              letterSpacing: '-0.02em',
+              lineHeight: 1.15,
+              textWrap: 'balance'
             }}>
-              CNSA 2.0 &amp; PQC Regulatory Intelligence
+              Post-Quantum Cryptography &amp; Platform FAQs
             </h2>
-            <p style={{ color: 'var(--muted, #9aa6c4)', maxWidth: '720px', margin: '0 auto', fontSize: '0.96rem', lineHeight: 1.6 }}>
-              Direct cross-agency feeds tracking transition deadlines for NSA CNSA 2.0, NIST FIPS 203/204/205, and White House OMB M-23-02.
+
+            <p style={{
+              fontSize: '1.05rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.6,
+              margin: 0,
+              textWrap: 'balance'
+            }}>
+              Essential guidance on cryptographic key discovery, zero-exfiltration privacy guarantees, Shor&apos;s algorithm vulnerabilities, and OS-level PQC readiness.
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1.25rem' }}>
+          {/* FAQ Accordion List */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+
+            {/* Q1: What are Keys / Zero-Exfiltration */}
+            <div style={{
+              background: openFaqIndex === 0 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 0 ? '1px solid rgba(0, 242, 254, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(0)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 0 ? 'var(--accent-cyan)' : '#ffffff' }}>
+                  What are &quot;Keys&quot; in QuarkShield, and are my private keys ever uploaded or exfiltrated?
+                </span>
+                {openFaqIndex === 0 ? <ChevronUp size={20} color="var(--accent-cyan)" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 0 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    In QuarkShield, <strong>&quot;Keys&quot;</strong> refers strictly to <strong>Cryptographic Assets</strong> discovered in the Cryptographic Bill of Materials (CBOM) inventory—such as public certificates (X.509), public key parameters (RSA moduli, ECC curve points), SSH public host keys, and TLS cryptographic cipher suites.
+                  </p>
+                  <div style={{ background: 'rgba(0, 242, 254, 0.06)', borderLeft: '4px solid var(--accent-cyan)', padding: '0.85rem 1rem', borderRadius: '4px', margin: '0.85rem 0', color: '#e2e8f0' }}>
+                    <strong>Zero-Exfiltration Guarantee:</strong> Private keys (<code>BEGIN RSA PRIVATE KEY</code>, <code>BEGIN EC PRIVATE KEY</code>, PKCS#8, seed phrases, or passphrases) are <strong>NEVER stored in our cloud, NEVER uploaded, and NEVER exfiltrated</strong>. QuarkShield operates on a local-first volatile memory inspection model. The scanner inspects files and keychains in local RAM, extracts only non-sensitive public metadata (algorithm identifier, bit length, curve name, expiration date, and issuer DN), and immediately discards working buffers.
+                  </div>
+                  <p style={{ margin: 0 }}>
+                    Your private keys never leave your device or network perimeter. Only public cryptographic posture telemetry is structured into standard CycloneDX 1.6 format.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q2: Are current keys quantum certified? */}
+            <div style={{
+              background: openFaqIndex === 1 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 1 ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(1)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 1 ? '#c084fc' : '#ffffff' }}>
+                  Are our current production keys and certificates quantum certified?
+                </span>
+                {openFaqIndex === 1 ? <ChevronUp size={20} color="#c084fc" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 1 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    <strong>Almost certainly not.</strong> Over 99% of digital infrastructure in production today relies on classical asymmetric cryptography: <strong>RSA-2048/4096</strong>, <strong>ECDSA (P-256, secp256k1)</strong>, and <strong>Diffie-Hellman</strong>. None of these classical primitives are quantum certified. They are mathematically vulnerable to complete factorisation and key extraction by Shor&apos;s algorithm on a Cryptanalytically Relevant Quantum Computer (CRQC).
+                  </p>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    True <strong>quantum-certified</strong> algorithms are those newly standardized by NIST in August 2024:
+                  </p>
+                  <ul style={{ margin: '0 0 0.85rem 1.25rem', padding: 0 }}>
+                    <li><strong>FIPS 203 (ML-KEM / Kyber):</strong> Module-Lattice Key Encapsulation for general encryption and TLS key exchange.</li>
+                    <li><strong>FIPS 204 (ML-DSA / Dilithium):</strong> Module-Lattice Digital Signatures for identity certificates and authentication.</li>
+                    <li><strong>FIPS 205 (SLH-DSA / SPHINCS+):</strong> Stateless Hash-Based Signatures for high-assurance root CAs and code signing.</li>
+                  </ul>
+                  <p style={{ margin: 0 }}>
+                    The industry transition path is currently <strong>Hybrid PQC</strong> (e.g., X25519MLKEM768), combining a classical key exchange with a post-quantum lattice algorithm to preserve FIPS 140-3 compliance while resisting future quantum cryptanalysis.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q3: Shor's Algorithm Breakdown */}
+            <div style={{
+              background: openFaqIndex === 2 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 2 ? '1px solid rgba(239, 68, 68, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(2)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 2 ? '#f87171' : '#ffffff' }}>
+                  How does Shor&apos;s Algorithm break RSA and Elliptic Curve Cryptography (ECC)?
+                </span>
+                {openFaqIndex === 2 ? <ChevronUp size={20} color="#f87171" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 2 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    Classical cryptography relies on the assumption that certain mathematical problems are practically impossible for classical computers to compute in reasonable time. Shor&apos;s algorithm provides an exponential quantum speedup that breaks this foundational assumption:
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1rem', margin: '0.85rem 0' }}>
+                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                      <strong style={{ color: '#f87171', display: 'block', marginBottom: '0.4rem' }}>• RSA Prime Factorization</strong>
+                      RSA-2048 and RSA-4096 rely on the difficulty of finding prime factors <em>p</em> and <em>q</em> of a large modulus <em>N = p · q</em>. Shor&apos;s algorithm solves order-finding in polynomial time <em>O((log N)³)</em>, recovering private keys in hours instead of trillions of classical compute years.
+                    </div>
+                    <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
+                      <strong style={{ color: '#fbbf24', display: 'block', marginBottom: '0.4rem' }}>• Elliptic Curve Collapse (~2,300 Qubits)</strong>
+                      ECDSA (P-256, secp256k1) and Diffie-Hellman rely on the discrete logarithm problem over elliptic curves. Because elliptic curve groups are much more compact than RSA moduli, <strong>ECC collapses even faster</strong>—requiring only ~2,330 logical qubits compared to ~4,096 logical qubits for RSA-2048.
+                    </div>
+                  </div>
+                  <p style={{ margin: 0 }}>
+                    Because RSA and ECC underpin 99% of all TLS certificates, SSH keys, VPN gateways, and JWT API tokens, their collapse dismantles identity validation, session confidentiality, and software authenticity across the globe.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q4: Harvest Now, Decrypt Later (HNDL) */}
+            <div style={{
+              background: openFaqIndex === 3 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 3 ? '1px solid rgba(245, 158, 11, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(3)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 3 ? '#fbbf24' : '#ffffff' }}>
+                  What is &quot;Harvest Now, Decrypt Later&quot; (HNDL), and why should we act today?
+                </span>
+                {openFaqIndex === 3 ? <ChevronUp size={20} color="#fbbf24" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 3 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    <strong>Harvest Now, Decrypt Later (HNDL)</strong> is an active, ongoing espionage tactic where nation-states and well-funded threat actors intercept and archive encrypted communications, enterprise backups, Git repositories, and intellectual property traversing the public internet.
+                  </p>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    Even though a Cryptanalytically Relevant Quantum Computer may still be years away, data harvested today remains stored indefinitely. Any data with an operational shelf life exceeding 5 to 15 years—such as health records, proprietary algorithms, financial secrets, legal contracts, or classified defense data—is <strong>already compromised</strong> if secured by classical RSA or ECC.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    Deploying hybrid post-quantum key encapsulation (ML-KEM) immediately eliminates this vulnerability for all future traffic sessions, cutting off the harvesting pipeline today.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q5: Apple & Microsoft OS-level PQC trust roots */}
+            <div style={{
+              background: openFaqIndex === 4 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 4 ? '1px solid rgba(56, 189, 248, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(4)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 4 ? '#38bdf8' : '#ffffff' }}>
+                  What actionable steps can we take to prepare for Apple and Microsoft OS-level PQC trust roots?
+                </span>
+                {openFaqIndex === 4 ? <ChevronUp size={20} color="#38bdf8" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 4 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    Both Apple (macOS/iOS Keychain) and Microsoft (Windows Cryptographic Next Generation &amp; Azure Trusted Signing) are actively rolling out OS-level PQC trust roots adhering to NIST FIPS 203/204/205. To prepare your enterprise:
+                  </p>
+                  <ol style={{ margin: '0 0 0.85rem 1.25rem', padding: 0 }}>
+                    <li style={{ marginBottom: '0.5rem' }}>
+                      <strong>Establish Continuous CBOM Discovery:</strong> Deploy QuarkShield across your workstations, servers, and Git repositories to maintain an up-to-date CycloneDX 1.6 Cryptographic Bill of Materials. You cannot migrate what you do not know you possess.
+                    </li>
+                    <li style={{ marginBottom: '0.5rem' }}>
+                      <strong>Audit Certificate Authorities (CAs):</strong> Evaluate public CAs (DigiCert, Let&apos;s Encrypt, Sectigo) and internal PKI (Active Directory Certificate Services, HashiCorp Vault) to ensure they have planned support for ML-DSA and SLH-DSA certificate issuance.
+                    </li>
+                    <li style={{ marginBottom: '0.5rem' }}>
+                      <strong>Enable Hybrid Key Encapsulation (ML-KEM-768):</strong> Configure web servers, reverse proxies (NGINX, Cloudflare, Envoy), and VPN gateways to negotiate hybrid X25519MLKEM768 for TLS 1.3 handshakes.
+                    </li>
+                    <li style={{ marginBottom: '0.5rem' }}>
+                      <strong>Transition Code Signing Pipelines:</strong> Prepare dual-signature architectures for internal software so binaries pass macOS Gatekeeper and Windows SmartScreen without disruption as OS trust policies enforce CNSA 2.0 timelines.
+                    </li>
+                    <li style={{ marginBottom: '0' }}>
+                      <strong>Enforce Automated Drift Detection:</strong> Use QuarkShield&apos;s Cloud Fleet plane to alert security teams whenever developers or administrators introduce legacy, non-compliant keys into production.
+                    </li>
+                  </ol>
+                </div>
+              )}
+            </div>
+
+            {/* Q6: Mosca's Theorem Engine */}
+            <div style={{
+              background: openFaqIndex === 5 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 5 ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(5)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 5 ? '#34d399' : '#ffffff' }}>
+                  What is Mosca&apos;s Theorem Engine and how does it calculate our migration deadline?
+                </span>
+                {openFaqIndex === 5 ? <ChevronUp size={20} color="#34d399" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 5 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    Formulated by Dr. Michele Mosca of the Institute for Quantum Computing, <strong>Mosca&apos;s Theorem</strong> provides the definitive mathematical rule for cryptographic transition timing:
+                  </p>
+                  <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1rem', borderRadius: '6px', border: '1px solid rgba(16, 185, 129, 0.2)', textAlign: 'center', margin: '0.85rem 0', fontFamily: 'var(--font-mono)', fontSize: '1.05rem', color: '#34d399' }}>
+                    If X + Y &gt; Z, then your organization is in critical danger.
+                  </div>
+                  <ul style={{ margin: '0 0 0.85rem 1.25rem', padding: 0 }}>
+                    <li><strong>X (Shelf-Life):</strong> How many years your confidential data must remain secure (e.g., 10–25 years).</li>
+                    <li><strong>Y (Migration Time):</strong> The years needed to inventory, redesign, and deploy post-quantum algorithms across your entire estate (typically 3–7 years).</li>
+                    <li><strong>Z (Quantum Horizon):</strong> The estimated years until a quantum computer arrives capable of executing Shor&apos;s algorithm against classical keys.</li>
+                  </ul>
+                  <p style={{ margin: 0 }}>
+                    QuarkShield&apos;s built-in Mosca Engine calculates <em>X + Y</em> across your audited asset baseline to determine your exact risk exposure date and prioritize critical migration assets.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q7: Multi-tenant isolation & network ports */}
+            <div style={{
+              background: openFaqIndex === 6 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 6 ? '1px solid rgba(0, 242, 254, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(6)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 6 ? 'var(--accent-cyan)' : '#ffffff' }}>
+                  How does QuarkShield isolate enterprise tenants and container network ports?
+                </span>
+                {openFaqIndex === 6 ? <ChevronUp size={20} color="var(--accent-cyan)" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 6 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    QuarkShield enforces <strong>complete cryptographic and architectural tenant isolation</strong>:
+                  </p>
+                  <ul style={{ margin: '0 0 0.85rem 1.25rem', padding: 0 }}>
+                    <li><strong>Dedicated Reverse-Proxy Ports:</strong> The network ports visible in the Super Admin Tenant Registry are real, dedicated reverse-proxy and orchestration ports assigned to each tenant instance.</li>
+                    <li><strong>Cryptographic Data Partitioning:</strong> Every tenant&apos;s CBOM inventory, endpoint telemetry, and user identities are encrypted with dedicated per-tenant keys.</li>
+                    <li><strong>Zero Cross-Tenant Bleed:</strong> Ingestion channels are authenticated via tenant-specific HMAC tokens, preventing unauthorized telemetry mixing.</li>
+                  </ul>
+                  <p style={{ margin: 0 }}>
+                    Enterprise and MSP customers can also deploy dedicated tenant containers or isolated on-premises instances for strict compliance mandates.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Q8: Offline & SCIF Air-Gapped Support */}
+            <div style={{
+              background: openFaqIndex === 7 ? 'rgba(15, 23, 42, 0.85)' : 'rgba(255, 255, 255, 0.02)',
+              borderRadius: '10px',
+              border: openFaqIndex === 7 ? '1px solid rgba(168, 85, 247, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+              overflow: 'hidden',
+              transition: 'all 0.25s ease'
+            }}>
+              <button
+                onClick={() => toggleFaq(7)}
+                style={{
+                  width: '100%',
+                  padding: '1.25rem 1.5rem',
+                  background: 'none',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '1rem',
+                  textAlign: 'left',
+                  cursor: 'pointer'
+                }}
+              >
+                <span style={{ fontSize: '1.05rem', fontWeight: 700, color: openFaqIndex === 7 ? '#c084fc' : '#ffffff' }}>
+                  Does QuarkShield support offline, air-gapped, or classified SCIF environments?
+                </span>
+                {openFaqIndex === 7 ? <ChevronUp size={20} color="#c084fc" /> : <ChevronDown size={20} color="var(--text-muted)" />}
+              </button>
+              {openFaqIndex === 7 && (
+                <div style={{ padding: '0 1.5rem 1.5rem 1.5rem', color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7 }}>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    <strong>Yes, completely.</strong> The QuarkShield scanner is distributed as a single, statically compiled executable (Mach-O on macOS, PE on Windows, ELF on Linux) with zero runtime dependencies.
+                  </p>
+                  <p style={{ margin: '0 0 0.85rem 0' }}>
+                    All heuristic vulnerability analysis engines, NIST FIPS 203/204/205 compliance checks, and CycloneDX 1.6 CBOM generation logic are embedded locally inside the binary. The scanner operates with 100% fidelity without requiring internet access, DNS lookups, or external cloud calls.
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    In classified environments or Sensitive Compartmented Information Facilities (SCIFs), audit reports can be written directly to local storage and analyzed on-premise without violating security policies.
+                  </p>
+                </div>
+              )}
+            </div>
+
+          </div>
+
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* 6. ABOUT US SECTION                                                       */}
+      {/* ========================================================================= */}
+      <section id="about-us" style={{
+        padding: '2.5rem 2rem 2rem 2rem',
+        background: 'linear-gradient(180deg, rgba(6, 8, 13, 0.95) 0%, rgba(10, 16, 28, 0.9) 100%)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        position: 'relative'
+      }}>
+        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.25rem' }}>
+          
+          {/* Header Badge & Title */}
+          <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.35rem 0.95rem',
+              borderRadius: '50px',
+              background: 'rgba(0, 242, 254, 0.1)',
+              border: '1px solid rgba(0, 242, 254, 0.3)',
+              color: 'var(--accent-cyan)',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
+            }}>
+              <Building size={14} /> About FedMitigate LLC
+            </div>
+            <h2 style={{ fontSize: '2.5rem', fontWeight: 800, margin: 0, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.2 }}>
+              Engineering National-Grade Cryptographic Defense for the Post-Quantum Horizon
+            </h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem', lineHeight: 1.65, margin: 0 }}>
+              QuarkShield is engineered by <strong>FedMitigate LLC</strong>, a specialized defense technology consultancy headquartered in the Washington, D.C. national security corridor. We exist to safeguard sovereign data, critical infrastructure, and distributed enterprise systems against Harvest Now, Decrypt Later (HNDL) state-sponsored adversaries.
+            </p>
+          </div>
+
+          {/* Mission & Heritage Card */}
+          <div className="glass-panel" style={{
+            padding: '2.5rem',
+            borderRadius: '14px',
+            background: 'rgba(13, 19, 33, 0.7)',
+            border: '1px solid rgba(0, 242, 254, 0.25)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.5)',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gap: '2.5rem',
+            alignItems: 'center'
+          }}>
+            <div>
+              <div style={{ color: 'var(--accent-cyan)', fontWeight: 700, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '0.5rem' }}>
+                Our Core Mission
+              </div>
+              <h3 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#ffffff', margin: '0 0 1rem 0', lineHeight: 1.3 }}>
+                Bridging Commercial Agile IT and High-Assurance Defense Cryptography
+              </h3>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7, margin: '0 0 1.2rem 0' }}>
+                With the finalization of NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), and FIPS 205 (SLH-DSA), the global cryptography landscape has reached its greatest turning point since the invention of public-key algorithms. Classical algorithms (RSA, ECDSA, ECDH) are provably insecure against Shor’s algorithm running on cryptanalytically relevant quantum computers.
+              </p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.94rem', lineHeight: 1.7, margin: 0 }}>
+                QuarkShield solves this vulnerability by providing automated discovery, real-time quantum threat modeling, and continuous Cryptographic Bill of Materials (CBOM) orchestration without requiring kernel modifications or exposing private keys.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.25rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--accent-cyan)' }}>100%</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#ffffff', marginTop: '0.25rem' }}>Local Secret Isolation</div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Zero private key exfiltration</div>
+              </div>
+              <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.25rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#a855f7' }}>CNSA 2.0</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#ffffff', marginTop: '0.25rem' }}>NSA Modernization Ready</div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>Full 2025–2033 roadmap</div>
+              </div>
+              <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.25rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#10b981' }}>FIPS 203/4/5</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#ffffff', marginTop: '0.25rem' }}>NIST Standardized</div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>ML-KEM, ML-DSA &amp; SLH-DSA</div>
+              </div>
+              <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '1.25rem', borderRadius: '10px', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#f59e0b' }}>OMB M-23-02</div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600, color: '#ffffff', marginTop: '0.25rem' }}>Annual CBOM Reporting</div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>CycloneDX 1.6 compliant</div>
+              </div>
+            </div>
+          </div>
+
+          {/* 4 Pillars Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1.5rem' }}>
+            <div className="glass-panel" style={{ padding: '1.75rem', borderRadius: '10px', background: 'rgba(10, 15, 28, 0.8)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'rgba(0, 242, 254, 0.12)', border: '1px solid rgba(0, 242, 254, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-cyan)', marginBottom: '1rem' }}>
+                <ShieldCheck size={20} />
+              </div>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>Security Sovereignty</h4>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Guaranteed zero-knowledge operation. Auditing executes strictly in volatile workstation and server RAM without capturing private keys or payload secrets.
+              </p>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.75rem', borderRadius: '10px', background: 'rgba(10, 15, 28, 0.8)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'rgba(168, 85, 247, 0.12)', border: '1px solid rgba(168, 85, 247, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#a855f7', marginBottom: '1rem' }}>
+                <Activity size={20} />
+              </div>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>Algorithm Agility</h4>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Rapidly evaluate hybrid key encapsulations (X25519MLKEM768) and post-quantum digital signatures to stay synchronized with evolving NIST and CNSA revisions.
+              </p>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.75rem', borderRadius: '10px', background: 'rgba(10, 15, 28, 0.8)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'rgba(16, 185, 129, 0.12)', border: '1px solid rgba(16, 185, 129, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#10b981', marginBottom: '1rem' }}>
+                <FileCode size={20} />
+              </div>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>Automated CBOM</h4>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Generates CycloneDX 1.6 compliant Cryptographic Bills of Materials that satisfy federal reporting requirements (OMB M-23-02 and CMMC Level 2/3).
+              </p>
+            </div>
+
+            <div className="glass-panel" style={{ padding: '1.75rem', borderRadius: '10px', background: 'rgba(10, 15, 28, 0.8)', border: '1px solid rgba(255, 255, 255, 0.08)' }}>
+              <div style={{ width: '40px', height: '40px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.12)', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f59e0b', marginBottom: '1rem' }}>
+                <Shield size={20} />
+              </div>
+              <h4 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ffffff', margin: '0 0 0.5rem 0' }}>Hardened Integrity</h4>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Every binary release is Authenticode-signed via Microsoft Azure Trusted Signing, Apple Developer ID notarized, and reproducible across Linux architectures.
+              </p>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* 7. CAREERS SECTION                                                        */}
+      {/* ========================================================================= */}
+      <section id="careers" className="landing-section" style={{
+        padding: '3rem 1.5rem',
+        background: 'linear-gradient(180deg, rgba(10, 16, 28, 0.9) 0%, rgba(6, 8, 13, 0.95) 100%)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        position: 'relative'
+      }}>
+        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.25rem', width: '100%' }}>
+          
+          {/* Header */}
+          <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.35rem 0.95rem',
+              borderRadius: '50px',
+              background: 'rgba(168, 85, 247, 0.1)',
+              border: '1px solid rgba(168, 85, 247, 0.3)',
+              color: '#c084fc',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
+            }}>
+              <Briefcase size={14} /> Join the Post-Quantum Vanguard
+            </div>
+            <h2 style={{ fontSize: 'clamp(1.9rem, 3.8vw, 2.6rem)', fontWeight: 800, margin: 0, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.2, textWrap: 'balance' }}>
+              Build the Cryptographic Defense Infrastructure of Tomorrow
+            </h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem', lineHeight: 1.65, margin: 0, textWrap: 'balance' }}>
+              At QuarkShield, we are solving the defining cybersecurity challenge of the decade: migrating the world’s cryptographic foundations before quantum cryptanalysis renders classical public key systems obsolete.
+            </p>
+          </div>
+
+          {/* Perks Bar */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
+            gap: '1rem',
+            padding: '1.25rem 1.5rem',
+            borderRadius: '12px',
+            background: 'rgba(255, 255, 255, 0.02)',
+            border: '1px solid rgba(255, 255, 255, 0.06)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <Sparkles size={20} color="var(--accent-cyan)" />
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff' }}>High-Impact Defense Mission</div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Defend critical national data</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <Award size={20} color="#a855f7" />
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff' }}>Founder Equity &amp; Top Tier Pay</div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Comprehensive benefits package</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <Globe size={20} color="#10b981" />
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff' }}>Remote-First Culture</div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Work from anywhere in the US</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <Laptop size={20} color="#f59e0b" />
+              <div>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: '#ffffff' }}>Elite Hardware Budget</div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>Apple Silicon &amp; Linux workstations</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Streamlined Open Roles Teaser Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 270px), 1fr))',
+            gap: '1.25rem'
+          }}>
             {[
               {
-                source: 'NSA',
-                badgeColor: '#fb5a76',
-                category: 'CNSA 2.0 Mandate',
-                title: 'NSA CNSA 2.0 Algorithms Required for National Security Systems',
-                date: 'September 2026',
-                deadline: 'Full Adoption: 2030 (Firm cutoff: 2033)',
-                summary: 'Commercial National Security Algorithm Suite 2.0 mandates ML-KEM-1024 for general key establishment and ML-DSA-87 / SLH-DSA for digital signatures.',
-                impact: 'Classical RSA-2048/3072 and ECDSA secp384r1 prohibited on critical edge interfaces past 2030.',
-                link: 'https://media.defense.gov/2022/Sep/07/2003071834/-1/-1/0/CSA_CNSA_2.0_ALGORITHMS_.PDF'
+                title: 'Senior Post-Quantum Cryptographer',
+                tags: 'Rust • Lattice Cryptography • FIPS 203/204',
+                color: 'var(--accent-cyan)',
+                loc: 'Remote / Washington, D.C.'
               },
               {
-                source: 'NIST',
-                badgeColor: '#38bdf8',
-                category: 'FIPS Standards',
-                title: 'NIST Finalizes FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA)',
-                date: 'August 2024 - 2026',
-                deadline: 'Immediate Hybrid Implementation Recommended',
-                summary: 'Federal Information Processing Standards FIPS 203 (Kyber) and FIPS 204 (Dilithium) are published for immediate commercial deployment.',
-                impact: 'Organizations must catalog all asymmetric key pairs and generate standardized CBOM inventories.',
-                link: 'https://csrc.nist.gov/pubs/fips/203/final'
+                title: 'Staff Systems & Kernel Security Engineer',
+                tags: 'CryptoAPI • macOS CryptoKit • Linux eBPF',
+                color: '#c084fc',
+                loc: 'Remote (US)'
               },
               {
-                source: 'White House OMB',
-                badgeColor: '#c084fc',
-                category: 'Federal Policy',
-                title: 'OMB Memorandum M-23-02: Cryptographic Inventory & Readiness',
-                date: 'Executive Mandate',
-                deadline: 'Annual Posture Reporting Required',
-                summary: 'Directs federal agencies and contractors to establish complete, prioritized cryptographic inventories of all vulnerable cryptographic systems.',
-                impact: 'Annual submission of machine-readable CBOM inventories to CISA and OMB.',
-                link: 'https://www.whitehouse.gov/wp-content/uploads/2022/11/M-23-02-M-Memo-on-Migrating-to-Post-Quantum-Cryptography.pdf'
+                title: 'Full-Stack Security Product Engineer',
+                tags: 'TypeScript • React • Node.js • Multi-Tenant',
+                color: '#38bdf8',
+                loc: 'Remote (US)'
+              },
+              {
+                title: 'Defense PQC Compliance & GRC Lead',
+                tags: 'CMMC 2.0 • NIST SP 800-171 • CNSA 2.0',
+                color: '#fbbf24',
+                loc: 'Washington, D.C. / Remote'
               }
-            ].map((news, idx) => (
-              <div key={idx} style={{
-                background: 'var(--surface, #121a30)',
-                border: '1px solid var(--line, #26304f)',
-                borderRadius: '12px',
-                padding: '1.5rem',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                gap: '1rem'
-              }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '0.72rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '4px', background: `${news.badgeColor}20`, color: news.badgeColor }}>
-                      {news.source} &bull; {news.category}
-                    </span>
-                    <span style={{ fontSize: '0.72rem', color: 'var(--muted, #9aa6c4)' }}>{news.date}</span>
-                  </div>
-                  <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#ffffff', lineHeight: 1.4 }}>
-                    {news.title}
-                  </h4>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.5 }}>
-                    {news.summary}
-                  </p>
-                  <div style={{ padding: '0.5rem 0.65rem', borderRadius: '6px', background: 'rgba(0, 0, 0, 0.35)', fontSize: '0.74rem', color: '#cbd5e1' }}>
-                    <strong>Impact: </strong>{news.impact}
-                  </div>
+            ].map((role, idx) => (
+              <div
+                key={idx}
+                className="glass-panel"
+                onClick={() => setShowCareerModal(true)}
+                style={{
+                  padding: '1.35rem',
+                  borderRadius: '10px',
+                  background: 'rgba(10, 15, 28, 0.85)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.65rem',
+                  cursor: 'pointer',
+                  minWidth: 0
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.72rem', padding: '0.2rem 0.55rem', borderRadius: '50px', background: 'rgba(255, 255, 255, 0.06)', color: role.color, fontWeight: 700 }}>
+                    Full-Time
+                  </span>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                    <MapPin size={12} /> {role.loc}
+                  </span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '0.65rem', borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                  <span style={{ fontSize: '0.72rem', color: '#fb5a76', fontWeight: 600 }}>{news.deadline}</span>
-                  <a href={news.link} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--cyan, #22d3ee)', fontSize: '0.78rem', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                    <span>Official Directive</span>
-                    <ExternalLink size={12} />
-                  </a>
+                <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0, lineHeight: 1.3 }}>
+                  {role.title}
+                </h4>
+                <div style={{ fontSize: '0.78rem', color: role.color, fontFamily: 'var(--font-mono)' }}>
+                  {role.tags}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', color: 'var(--accent-cyan)', fontSize: '0.82rem', fontWeight: 600, marginTop: 'auto', paddingTop: '0.5rem' }}>
+                  View Role Details <ArrowRight size={14} />
                 </div>
               </div>
             ))}
           </div>
-        </div>
-      </section>
 
-      {/* ========================================================================= */}
-      {/* 10. POST-QUANTUM FAQS (#faq) */}
-      {/* ========================================================================= */}
-      <section id="faq" className="landing-section" style={{
-        padding: '3.5rem 1.5rem',
-        maxWidth: '960px',
-        margin: '0 auto',
-        width: '100%',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '2rem'
-      }}>
-        <div style={{ textAlign: 'center' }}>
+          {/* Careers Action Banner */}
           <div style={{
-            display: 'inline-flex',
+            display: 'flex',
             alignItems: 'center',
-            gap: '0.5rem',
-            color: 'var(--cyan, #22d3ee)',
-            fontSize: '0.82rem',
-            fontWeight: 700,
-            textTransform: 'uppercase',
-            letterSpacing: '0.06em',
-            marginBottom: '0.5rem'
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1.25rem',
+            padding: '1.5rem 2rem',
+            background: 'rgba(15, 23, 42, 0.65)',
+            borderRadius: '12px',
+            border: '1px solid rgba(168, 85, 247, 0.3)'
           }}>
-            <HelpCircle size={15} />
-            <span>Frequently Asked Questions</span>
-          </div>
-          <h2 style={{
-            fontSize: 'clamp(1.75rem, 3.5vw, 2.3rem)',
-            fontWeight: 800,
-            margin: '0 0 0.8rem 0',
-            color: '#ffffff',
-            fontFamily: 'var(--font-display, "Sora", sans-serif)'
-          }}>
-            Essential Questions on Post-Quantum Migration
-          </h2>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {[
-            {
-              q: 'What is a Cryptographic Bill of Materials (CBOM)?',
-              a: 'A CBOM is a structured, machine-readable inventory of every cryptographic asset in your software and infrastructure. Built upon the CycloneDX 1.6 global standard, QuarkShield catalogs asymmetric key algorithms, certificate chains, key exchange mechanisms, and cryptographic libraries.'
-            },
-            {
-              q: 'What is "Harvest Now, Decrypt Later" (HNDL)?',
-              a: 'Adversaries and nation-states are actively recording encrypted corporate, financial, and government network traffic today. Once a Cryptanalytically Relevant Quantum Computer (CRQC) is deployed, that recorded data will be decrypted retroactively. If your data shelf-life exceeds the time to CRQC, your data is at risk right now.'
-            },
-            {
-              q: 'Does QuarkShield require invasive agents across all machines?',
-              a: 'No. QuarkShield supports both agentless network socket probes (for perimeter TLS listeners and APIs) and lightweight standalone binaries for Windows, macOS, and Linux that run on-demand or as non-intrusive background daemons without code modification.'
-            },
-            {
-              q: 'What does the A–F Risk Grading scale represent?',
-              a: 'Our quantum risk grading formula is based on NIST IR 8413, Mosca’s Theorem ($X+Y>Z$), and ETSI TR 103 619 standards. It weights Shor-algorithm exposure (35%), HNDL data-in-transit risk (35%), cryptographic hygiene/config defects (15%), and PQC adoption deficit (15%).'
-            },
-            {
-              q: 'How does QuarkShield handle data privacy and exfiltration?',
-              a: 'QuarkShield operates on a strict zero-data-exfiltration architecture. Cryptographic discovery parses algorithm types, key lengths, and certificate metadata locally on the host. Private keys, plaintext data, and sensitive operational payloads are never stored, transmitted, or logged.'
-            }
-          ].map((faq, idx) => {
-            const isOpen = openFaqIndex === idx;
-            return (
-              <div key={idx} style={{
-                background: 'var(--surface, #121a30)',
-                border: '1px solid var(--line, #26304f)',
-                borderRadius: '10px',
-                overflow: 'hidden'
-              }}>
-                <button
-                  type="button"
-                  onClick={() => toggleFaq(idx)}
-                  style={{
-                    width: '100%',
-                    padding: '1.1rem 1.25rem',
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#ffffff',
-                    fontSize: '0.94rem',
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: '1rem',
-                    textAlign: 'left'
-                  }}
-                >
-                  <span>{faq.q}</span>
-                  <ChevronDown size={16} style={{
-                    transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                    transition: 'transform 0.2s ease',
-                    color: 'var(--muted, #9aa6c4)'
-                  }} />
-                </button>
-                {isOpen && (
-                  <div style={{
-                    padding: '0 1.25rem 1.1rem',
-                    fontSize: '0.86rem',
-                    color: 'var(--muted, #9aa6c4)',
-                    lineHeight: 1.6,
-                    borderTop: '1px solid rgba(255, 255, 255, 0.05)',
-                    paddingTop: '0.85rem'
-                  }}>
-                    {faq.a}
-                  </div>
-                )}
+            <div>
+              <div style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', marginBottom: '0.25rem' }}>
+                Ready to protect the post-quantum horizon?
               </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* 11. FINAL HIGH-IMPACT CTA BANNER */}
-      {/* ========================================================================= */}
-      <section style={{
-        maxWidth: '1180px',
-        margin: '2rem auto 4rem',
-        padding: '0 1.5rem',
-        width: '100%'
-      }}>
-        <div style={{
-          background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.16) 0%, rgba(34, 211, 238, 0.12) 100%)',
-          border: '1px solid rgba(168, 85, 247, 0.4)',
-          borderRadius: '16px',
-          padding: '3rem 2rem',
-          textAlign: 'center',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: '1.25rem',
-          boxShadow: '0 20px 50px rgba(0, 0, 0, 0.5)'
-        }}>
-          <h2 style={{
-            fontSize: 'clamp(1.9rem, 3.8vw, 2.7rem)',
-            fontWeight: 800,
-            margin: 0,
-            color: '#ffffff',
-            fontFamily: 'var(--font-display, "Sora", sans-serif)'
-          }}>
-            Know where your cryptography is before adversaries do.
-          </h2>
-          <p style={{
-            fontSize: '1rem',
-            color: 'var(--muted, #9aa6c4)',
-            maxWidth: '650px',
-            margin: 0,
-            lineHeight: 1.6
-          }}>
-            Request a personalized, executive-level Post-Quantum Cryptographic Assessment delivered directly to your security leadership team.
-          </p>
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center', marginTop: '0.5rem' }}>
-            <button
-              onClick={() => handleOpenAssessment()}
-              style={{
-                padding: '0.85rem 1.85rem',
-                borderRadius: '10px',
-                border: 'none',
-                background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
-                color: '#ffffff',
-                fontSize: '0.96rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.55rem',
-                boxShadow: '0 6px 25px rgba(168, 85, 247, 0.5)'
-              }}
-            >
-              <ShieldCheck size={18} />
-              <span>Request a PQC Assessment</span>
-              <ArrowRight size={16} />
-            </button>
-            <a
-              href="#prober"
-              style={{
-                padding: '0.85rem 1.5rem',
-                borderRadius: '10px',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                background: 'rgba(255, 255, 255, 0.05)',
-                color: '#ffffff',
-                fontSize: '0.92rem',
-                fontWeight: 600,
-                textDecoration: 'none',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.45rem'
-              }}
-            >
-              <Terminal size={16} color="var(--cyan, #22d3ee)" />
-              <span>Test Public Website</span>
-            </a>
-          </div>
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* 12. FOOTER (FOUR COLUMNS + BRAND BLOCK + LEGAL BAR) */}
-      {/* ========================================================================= */}
-      <footer style={{
-        background: 'var(--bg-2, #0c1122)',
-        borderTop: '1px solid var(--line, #26304f)',
-        padding: '3.5rem 1.5rem 2rem',
-        marginTop: 'auto'
-      }}>
-        <div style={{
-          maxWidth: '1180px',
-          margin: '0 auto',
-          display: 'grid',
-          gridTemplateColumns: 'minmax(240px, 1.3fr) repeat(4, minmax(130px, 1fr))',
-          gap: '2.5rem',
-          paddingBottom: '2.5rem',
-          borderBottom: '1px solid var(--line-soft, #1c2540)'
-        }}>
-          {/* Brand Block */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-              <div style={{
-                width: '30px',
-                height: '30px',
-                borderRadius: '8px',
-                background: 'linear-gradient(135deg, #b76bfb 0%, #7c3aed 100%)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                boxShadow: '0 2px 10px rgba(124, 58, 237, 0.45)'
-              }}>
-                <Shield size={17} color="#ffffff" strokeWidth={2.4} fill="#ffffff" fillOpacity={0.25} />
-              </div>
-              <div style={{
-                fontFamily: 'var(--font-serif, "Playfair Display", Georgia, serif)',
-                fontSize: '1.35rem',
-                fontWeight: 700,
-                color: '#ffffff',
-                letterSpacing: '-0.02em',
-                lineHeight: 1
-              }}>
-                quark<span style={{ fontStyle: 'italic', fontWeight: 400 }}>shield</span>
+              <div style={{ fontSize: '0.86rem', color: 'var(--text-secondary)' }}>
+                Don’t see your exact specialization? We welcome cold research inquiries at <a href="mailto:careers@quarkshield.ai" style={{ color: 'var(--accent-cyan)', textDecoration: 'none', fontWeight: 600 }}>careers@quarkshield.ai</a>.
               </div>
             </div>
-            <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.55 }}>
-              Enterprise Cryptographic Intelligence Platform. Automated CBOM generation, continuous posture grading, and post-quantum migration defense.
+
+            <button
+              onClick={() => setShowCareerModal(true)}
+              style={{
+                background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.3) 0%, rgba(127, 0, 255, 0.4) 100%)',
+                border: '1px solid rgba(168, 85, 247, 0.6)',
+                color: '#ffffff',
+                padding: '0.75rem 1.6rem',
+                borderRadius: '8px',
+                fontSize: '0.94rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 0 16px rgba(168, 85, 247, 0.25)'
+              }}
+            >
+              <Briefcase size={16} /> Explore All Open Positions <ArrowRight size={16} />
+            </button>
+          </div>
+
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* 8. ENTERPRISE SUPPORT & HELP DESK SECTION                                 */}
+      {/* ========================================================================= */}
+      <section id="support" className="landing-section" style={{
+        padding: '3rem 1.5rem',
+        background: 'linear-gradient(180deg, rgba(6, 8, 13, 0.95) 0%, rgba(13, 19, 33, 0.8) 100%)',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        position: 'relative'
+      }}>
+        <div style={{ maxWidth: '1240px', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '2.25rem', width: '100%' }}>
+          
+          {/* Header */}
+          <div style={{ textAlign: 'center', maxWidth: '820px', margin: '0 auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.35rem 0.95rem',
+              borderRadius: '50px',
+              background: 'rgba(56, 189, 248, 0.1)',
+              border: '1px solid rgba(56, 189, 248, 0.3)',
+              color: '#38bdf8',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textTransform: 'uppercase'
+            }}>
+              <LifeBuoy size={14} /> 24/7 Enterprise Support &amp; Assistance
+            </div>
+            <h2 style={{ fontSize: 'clamp(1.9rem, 3.8vw, 2.6rem)', fontWeight: 800, margin: 0, color: '#ffffff', letterSpacing: '-0.02em', lineHeight: 1.2, textWrap: 'balance' }}>
+              Dedicated Cryptographic Engineering Support
+            </h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '1.05rem', lineHeight: 1.65, margin: 0, textWrap: 'balance' }}>
+              Need assistance with your desktop scanner deployment, continuous fleet ingestion, or interpreting post-quantum risk scores? Our technical team is available 24/7.
             </p>
-            <div style={{ marginTop: '0.25rem' }}>
+          </div>
+
+          {/* 3 Support Channels Grid */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: '1.5rem' }}>
+            
+            {/* Channel 1: Floating In-App Widget Callout */}
+            <div className="glass-panel" style={{
+              padding: '1.75rem',
+              borderRadius: '12px',
+              background: 'rgba(37, 99, 235, 0.08)',
+              border: '1px solid rgba(37, 99, 235, 0.35)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              minWidth: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '50%', background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#ffffff', flexShrink: 0 }}>
+                  <HelpCircle size={20} />
+                </div>
+                <div>
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Floating Help &amp; Feedback Widget</h4>
+                  <div style={{ fontSize: '0.78rem', color: '#93c5fd' }}>Instant feedback with screenshot pasting</div>
+                </div>
+              </div>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Have an urgent issue or bug to report? Click the blue circular <strong>Help &amp; Feedback</strong> button located at the bottom-right of your screen anytime. You can paste screenshots directly from your clipboard (<code style={{ color: '#ffffff' }}>Ctrl/Cmd+V</code>) and attach scan logs.
+              </p>
+            </div>
+
+            {/* Channel 2: Enterprise Desk */}
+            <div className="glass-panel" style={{
+              padding: '1.75rem',
+              borderRadius: '12px',
+              background: 'rgba(10, 15, 28, 0.85)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              minWidth: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(0, 242, 254, 0.1)', border: '1px solid rgba(0, 242, 254, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--accent-cyan)', flexShrink: 0 }}>
+                  <Mail size={18} />
+                </div>
+                <div>
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Enterprise Support Desk</h4>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>1-Hour SLA for Enterprise &amp; Defense Customers</div>
+                </div>
+              </div>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                Email our senior engineering escalation queue directly:
+              </p>
+              <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: 'var(--accent-cyan)', wordBreak: 'break-all' }}>
+                support@quarkshield.ai
+              </div>
+            </div>
+
+            {/* Channel 3: Security & Responsible Disclosure */}
+            <div className="glass-panel" style={{
+              padding: '1.75rem',
+              borderRadius: '12px',
+              background: 'rgba(10, 15, 28, 0.85)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.75rem',
+              minWidth: 0
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                <div style={{ width: '36px', height: '36px', borderRadius: '8px', background: 'rgba(245, 158, 11, 0.1)', border: '1px solid rgba(245, 158, 11, 0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#f59e0b', flexShrink: 0 }}>
+                  <ShieldAlert size={18} />
+                </div>
+                <div>
+                  <h4 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ffffff', margin: 0 }}>Security Incident Response</h4>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>Safe Harbor vulnerability reports</div>
+                </div>
+              </div>
+              <p style={{ fontSize: '0.86rem', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
+                For cryptographic vulnerability disclosures, email our Security Operations Response Team:
+              </p>
+              <div style={{ padding: '0.65rem 0.9rem', background: 'rgba(0, 0, 0, 0.4)', borderRadius: '6px', fontFamily: 'var(--font-mono)', fontSize: '0.85rem', color: '#fbbf24', wordBreak: 'break-all' }}>
+                security@quarkshield.ai
+              </div>
+            </div>
+
+          </div>
+
+          {/* Interactive Support Ticket Submission CTA Card */}
+          <div className="glass-panel" style={{
+            padding: '2rem',
+            borderRadius: '14px',
+            background: 'linear-gradient(135deg, rgba(13, 19, 33, 0.9) 0%, rgba(10, 15, 28, 0.95) 100%)',
+            border: '1px solid rgba(0, 242, 254, 0.3)',
+            boxShadow: '0 12px 36px rgba(0, 0, 0, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1.5rem'
+          }}>
+            <div>
+              <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.35rem 0' }}>
+                Open an Enterprise Support Ticket
+              </h3>
+              <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: 0, maxWidth: '650px', lineHeight: 1.6 }}>
+                Need troubleshooting assistance with agent daemons, custom air-gapped PKI, or CBOM export formats? Open an official ticket with our engineering team.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
               <button
-                onClick={() => handleOpenAssessment()}
+                onClick={() => setShowSupportModal(true)}
+                className="btn-primary"
                 style={{
-                  padding: '0.5rem 1rem',
-                  borderRadius: '6px',
-                  border: 'none',
-                  background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
-                  color: '#ffffff',
-                  fontSize: '0.78rem',
-                  fontWeight: 600,
-                  cursor: 'pointer'
+                  padding: '0.85rem 1.85rem',
+                  borderRadius: '8px',
+                  fontSize: '0.96rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  boxShadow: '0 0 20px rgba(0, 242, 254, 0.35)'
                 }}
               >
-                Request a PQC Assessment
+                <LifeBuoy size={16} /> Submit Support Request <ArrowRight size={16} />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setGuideModal('overview')}
+                style={{
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  color: '#ffffff',
+                  padding: '0.85rem 1.35rem',
+                  borderRadius: '8px',
+                  fontSize: '0.92rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem'
+                }}
+              >
+                <BookOpen size={16} color="var(--accent-cyan)" /> Documentation Center
               </button>
             </div>
           </div>
 
-          {/* Column 1: Product */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.82rem' }}>
-            <span style={{ fontWeight: 700, color: '#ffffff', textTransform: 'uppercase', fontSize: '0.74rem', letterSpacing: '0.06em' }}>
-              Product
-            </span>
-            <a href="#platform" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>Platform</a>
-            <a href="#assessment" onClick={(e) => { e.preventDefault(); handleOpenAssessment(); }} style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>PQC Assessment</a>
-            <a href="#prober" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>TLS Probe</a>
-            <a href="#pricing" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>Pricing</a>
-            <a href="#downloads" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>Downloads</a>
-          </div>
-
-          {/* Column 2: Company */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.82rem' }}>
-            <span style={{ fontWeight: 700, color: '#ffffff', textTransform: 'uppercase', fontSize: '0.74rem', letterSpacing: '0.06em' }}>
-              Company
-            </span>
-            <a href="#about-us" onClick={(e) => { e.preventDefault(); const el = document.getElementById('about-us'); if (el) el.scrollIntoView({ behavior: 'smooth' }); }} style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>About Us</a>
-            <button onClick={() => setShowCareerModal(true)} style={{ background: 'none', border: 'none', color: 'var(--muted, #9aa6c4)', textAlign: 'left', padding: 0, fontSize: '0.82rem', cursor: 'pointer' }}>Careers</button>
-            <button onClick={() => setShowSupportModal(true)} style={{ background: 'none', border: 'none', color: 'var(--muted, #9aa6c4)', textAlign: 'left', padding: 0, fontSize: '0.82rem', cursor: 'pointer' }}>Support</button>
-            <a href="mailto:contact@quarkshield.ai" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>Contact</a>
-          </div>
-
-          {/* Column 3: Resources */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.82rem' }}>
-            <span style={{ fontWeight: 700, color: '#ffffff', textTransform: 'uppercase', fontSize: '0.74rem', letterSpacing: '0.06em' }}>
-              Resources
-            </span>
-            <a href="/docs/AGENTLESS_PQC_ARCHITECTURE.md" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>Documentation</a>
-            <a href="/docs/AGENTLESS_PQC_ARCHITECTURE.md" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>Agentless Whitepaper</a>
-            <a href="#cnsa-news" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>Regulatory Radar</a>
-            <a href="/docs/ENTERPRISE_AGENT_DEPLOYMENT_GUIDE.md" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--muted, #9aa6c4)', textDecoration: 'none' }}>Deployment Guides</a>
-          </div>
-
-          {/* Column 4: Legal */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', fontSize: '0.82rem' }}>
-            <span style={{ fontWeight: 700, color: '#ffffff', textTransform: 'uppercase', fontSize: '0.74rem', letterSpacing: '0.06em' }}>
-              Legal
-            </span>
-            <button onClick={() => setPolicyModal('privacy')} style={{ background: 'none', border: 'none', color: 'var(--muted, #9aa6c4)', textAlign: 'left', padding: 0, fontSize: '0.82rem', cursor: 'pointer' }}>Privacy Policy</button>
-            <button onClick={() => setPolicyModal('terms')} style={{ background: 'none', border: 'none', color: 'var(--muted, #9aa6c4)', textAlign: 'left', padding: 0, fontSize: '0.82rem', cursor: 'pointer' }}>Terms of Service</button>
-            <button onClick={() => setPolicyModal('disclosure')} style={{ background: 'none', border: 'none', color: 'var(--muted, #9aa6c4)', textAlign: 'left', padding: 0, fontSize: '0.82rem', cursor: 'pointer' }}>Responsible Disclosure</button>
-          </div>
         </div>
+      </section>
 
-        {/* Legal Bottom Bar */}
+      {/* 9. ENTERPRISE FOOTER */}
+      <footer style={{
+        marginTop: 'auto',
+        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+        background: 'linear-gradient(180deg, rgba(6, 8, 13, 0.96) 0%, rgba(3, 4, 7, 1) 100%)',
+        position: 'relative',
+        overflow: 'hidden'
+      }}>
+        {/* Subtle background glow */}
         <div style={{
-          maxWidth: '1180px',
-          margin: '1.5rem auto 0',
+          position: 'absolute',
+          top: 0,
+          left: '15%',
+          width: '500px',
+          height: '250px',
+          background: 'radial-gradient(ellipse, rgba(0, 242, 254, 0.04) 0%, transparent 70%)',
+          pointerEvents: 'none'
+        }} />
+
+        <div style={{
+          maxWidth: '1360px',
+          margin: '0 auto',
+          padding: '2.5rem 2rem 2rem 2rem',
           display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '1rem',
-          fontSize: '0.76rem',
-          color: 'var(--faint, #6b7699)'
+          flexDirection: 'column',
+          gap: '2rem'
         }}>
-          <div>
-            &copy; 2026 QuarkShield &bull; a FedMitigate product. All rights reserved.
+          {/* Main 3-Column Grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gap: '2.5rem',
+            position: 'relative',
+            zIndex: 1
+          }}>
+            {/* Column 1: Scanners & Platform */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <h4 style={{
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                color: '#ffffff',
+                margin: '0 0 0.5rem 0'
+              }}>
+                Platform &amp; Scanners
+              </h4>
+              <a href="#prober" className="landing-footer-link">Active Outbound TLS Prober</a>
+              <a href="#downloads" className="landing-footer-link">Windows Scanner (Azure Trusted Signed)</a>
+              <a href="#downloads" className="landing-footer-link">macOS Universal App (Apple Silicon &amp; Intel)</a>
+              <a href="#downloads" className="landing-footer-link">Linux AMD64 / ARM64 Fleet Daemon</a>
+              <a href="#prober" className="landing-footer-link">CycloneDX 1.6 CBOM Engine</a>
+              <a href="#downloads" className="landing-footer-link">Automated Fleet Remediation &amp; Inoculation</a>
+            </div>
+
+            {/* Column 2: Standards & Compliance */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <h4 style={{
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                color: '#ffffff',
+                margin: '0 0 0.5rem 0'
+              }}>
+                Standards &amp; Compliance
+              </h4>
+              <a href="https://csrc.nist.gov/pubs/fips/203/final" target="_blank" rel="noreferrer" className="landing-footer-link" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                NIST FIPS 203 (ML-KEM / Kyber) <ExternalLink size={12} />
+              </a>
+              <a href="https://csrc.nist.gov/pubs/fips/204/final" target="_blank" rel="noreferrer" className="landing-footer-link" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                NIST FIPS 204 (ML-DSA / Dilithium) <ExternalLink size={12} />
+              </a>
+              <a href="https://csrc.nist.gov/pubs/fips/205/final" target="_blank" rel="noreferrer" className="landing-footer-link" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                NIST FIPS 205 (SLH-DSA / SPHINCS+) <ExternalLink size={12} />
+              </a>
+              <a href="#cnsa-news" className="landing-footer-link">NSA CNSA 2.0 Modernization Mandates</a>
+              <a href="#cnsa-news" className="landing-footer-link">White House OMB M-23-02 CBOM Guidance</a>
+              <a href="#cnsa-news" className="landing-footer-link">CISA Quantum-Readiness Roadmap</a>
+            </div>
+
+            {/* Column 3: Company & Trust */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <h4 style={{
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.08em',
+                color: '#ffffff',
+                margin: '0 0 0.5rem 0'
+              }}>
+                Company &amp; Support
+              </h4>
+              <a href="#about-us" className="landing-footer-link" style={{ color: 'var(--accent-cyan)' }}>
+                About FedMitigate LLC
+              </a>
+              <a href="#pricing" className="landing-footer-link">
+                Pricing &amp; Commercial Plans
+              </a>
+              <a href="#faq" className="landing-footer-link">
+                Post-Quantum FAQs
+              </a>
+              <a href="#careers" className="landing-footer-link" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                Careers <span style={{ fontSize: '0.65rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.2)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>Hiring</span>
+              </a>
+              <a href="#support" className="landing-footer-link" style={{ color: '#38bdf8' }}>
+                Enterprise Support Desk
+              </a>
+              <span 
+                style={{ cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '0.88rem', display: 'flex', alignItems: 'center', gap: '0.4rem' }}
+                onClick={() => {
+                  setSignInError(null);
+                  setSignInSuccessMsg(null);
+                  setShowSignInModal(true);
+                }}
+              >
+                <Lock size={13} /> Console Sign In
+              </span>
+              <a href="https://learn.microsoft.com/en-us/azure/trusted-signing/" target="_blank" rel="noreferrer" className="landing-footer-link" style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                Azure Trusted Signing <ExternalLink size={12} />
+              </a>
+              <a href="mailto:security@quarkshield.ai" className="landing-footer-link" style={{ color: 'var(--accent-cyan)' }}>
+                security@quarkshield.ai
+              </a>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: '1.25rem' }}>
-            <button onClick={() => setPolicyModal('privacy')} style={{ background: 'none', border: 'none', color: 'var(--faint, #6b7699)', cursor: 'pointer', padding: 0, fontSize: '0.76rem' }}>Privacy</button>
-            <button onClick={() => setPolicyModal('terms')} style={{ background: 'none', border: 'none', color: 'var(--faint, #6b7699)', cursor: 'pointer', padding: 0, fontSize: '0.76rem' }}>Terms</button>
-            <button onClick={() => setPolicyModal('disclosure')} style={{ background: 'none', border: 'none', color: 'var(--faint, #6b7699)', cursor: 'pointer', padding: 0, fontSize: '0.76rem' }}>Disclosure</button>
+
+          {/* Bottom Row */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1.5rem',
+            paddingTop: '1.5rem',
+            borderTop: '1px solid rgba(255, 255, 255, 0.06)',
+            fontSize: '0.84rem',
+            color: 'var(--text-muted)'
+          }}>
+            <div>
+              © 2026 <strong style={{ color: '#ffffff' }}>QuarkShield</strong> by FedMitigate LLC. All rights reserved. Washington, D.C.
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+              <button 
+                type="button"
+                onClick={() => setGuideModal('overview')} 
+                className="landing-footer-sublink"
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', color: 'var(--accent-cyan)' }}
+              >
+                Documentation
+              </button>
+              <button 
+                type="button"
+                onClick={() => setGuideModal('windows')} 
+                className="landing-footer-sublink"
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+              >
+                User Guides
+              </button>
+              <a
+                href="#about-us"
+                className="landing-footer-sublink"
+                style={{ textDecoration: 'none', color: 'inherit' }}
+              >
+                About Us
+              </a>
+              <a
+                href="#careers"
+                className="landing-footer-sublink"
+                style={{ textDecoration: 'none', color: 'inherit' }}
+              >
+                Careers
+              </a>
+              <a
+                href="#support"
+                className="landing-footer-sublink"
+                style={{ textDecoration: 'none', color: 'inherit' }}
+              >
+                Support
+              </a>
+              <button 
+                type="button"
+                onClick={() => setPolicyModal('privacy')} 
+                className="landing-footer-sublink"
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+              >
+                Privacy Policy
+              </button>
+              <button 
+                type="button"
+                onClick={() => setPolicyModal('terms')} 
+                className="landing-footer-sublink"
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+              >
+                Terms of Service
+              </button>
+              <button 
+                type="button"
+                onClick={() => setPolicyModal('disclosure')} 
+                className="landing-footer-sublink"
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit' }}
+              >
+                Responsible Disclosure
+              </button>
+              <span 
+                style={{ color: 'var(--accent-cyan)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              >
+                ↑ Back to Top
+              </span>
+            </div>
           </div>
         </div>
       </footer>
-
-
-
-{showAssessmentModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.82)',
-          backdropFilter: 'blur(10px)',
-          WebkitBackdropFilter: 'blur(10px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2500,
-          padding: '1.25rem'
-        }}>
-          <div style={{
-            background: 'linear-gradient(180deg, #0e1526 0%, #0a0f1d 100%)',
-            border: '1px solid rgba(168, 85, 247, 0.35)',
-            boxShadow: '0 25px 60px rgba(0, 0, 0, 0.85), 0 0 30px rgba(168, 85, 247, 0.15)',
-            borderRadius: '16px',
-            maxWidth: '560px',
-            width: '100%',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column'
-          }}>
-            {/* Modal Header */}
-            <div style={{
-              padding: '1.25rem 1.5rem',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              background: 'rgba(255, 255, 255, 0.02)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                <div style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '6px',
-                  background: 'linear-gradient(135deg, #b76bfb 0%, #7c3aed 100%)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}>
-                  <Shield size={16} color="#ffffff" strokeWidth={2.4} />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#ffffff' }}>
-                    Request an Enterprise PQC Assessment
-                  </h3>
-                  <div style={{ fontSize: '0.74rem', color: 'var(--muted, #9aa6c4)' }}>
-                    Direct routing to <code>PQCA@quarkshield.ai</code>
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowAssessmentModal(false)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--muted, #9aa6c4)',
-                  cursor: 'pointer',
-                  padding: '4px',
-                  borderRadius: '6px'
-                }}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            {/* Step Indicators */}
-            <div style={{
-              display: 'flex',
-              padding: '0.75rem 1.5rem',
-              background: 'rgba(0, 0, 0, 0.25)',
-              borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-              gap: '0.5rem',
-              fontSize: '0.76rem'
-            }}>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                color: assessmentStep === 1 ? '#c084fc' : assessmentStep > 1 ? '#34d399' : 'var(--muted, #9aa6c4)',
-                fontWeight: assessmentStep === 1 ? 700 : 500
-              }}>
-                <span style={{
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '50%',
-                  background: assessmentStep === 1 ? 'rgba(168, 85, 247, 0.25)' : assessmentStep > 1 ? 'rgba(52, 211, 153, 0.2)' : 'rgba(255,255,255,0.06)',
-                  border: assessmentStep === 1 ? '1px solid #c084fc' : assessmentStep > 1 ? '1px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.68rem'
-                }}>
-                  {assessmentStep > 1 ? '✓' : '1'}
-                </span>
-                <span>1. Evaluation Focus</span>
-              </div>
-              <span style={{ color: 'rgba(255,255,255,0.2)' }}>›</span>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                color: assessmentStep === 2 ? '#c084fc' : assessmentStep > 2 ? '#34d399' : 'var(--muted, #9aa6c4)',
-                fontWeight: assessmentStep === 2 ? 700 : 500
-              }}>
-                <span style={{
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '50%',
-                  background: assessmentStep === 2 ? 'rgba(168, 85, 247, 0.25)' : assessmentStep > 2 ? 'rgba(52, 211, 153, 0.2)' : 'rgba(255,255,255,0.06)',
-                  border: assessmentStep === 2 ? '1px solid #c084fc' : assessmentStep > 2 ? '1px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.68rem'
-                }}>
-                  {assessmentStep > 2 ? '✓' : '2'}
-                </span>
-                <span>2. Contact Details</span>
-              </div>
-              <span style={{ color: 'rgba(255,255,255,0.2)' }}>›</span>
-              <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                color: assessmentStep === 3 ? '#34d399' : 'var(--muted, #9aa6c4)',
-                fontWeight: assessmentStep === 3 ? 700 : 500
-              }}>
-                <span style={{
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '50%',
-                  background: assessmentStep === 3 ? 'rgba(52, 211, 153, 0.2)' : 'rgba(255,255,255,0.06)',
-                  border: assessmentStep === 3 ? '1px solid #34d399' : '1px solid rgba(255,255,255,0.1)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.68rem'
-                }}>
-                  3
-                </span>
-                <span>3. Confirmation</span>
-              </div>
-            </div>
-
-            {/* Step 1: Interest Selection */}
-            {assessmentStep === 1 && (
-              <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                <div>
-                  <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>
-                    What areas would you like to evaluate?
-                  </h4>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.5 }}>
-                    Select the cryptographic topics relevant to your architecture. Our engineers use this to tailor your evaluation report.
-                  </p>
-                </div>
-
-                {assessmentTier && (
-                  <div style={{
-                    padding: '0.5rem 0.75rem',
-                    borderRadius: '6px',
-                    background: 'rgba(168, 85, 247, 0.1)',
-                    border: '1px solid rgba(168, 85, 247, 0.3)',
-                    fontSize: '0.78rem',
-                    color: '#c084fc',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}>
-                    <Zap size={14} />
-                    <span>Inquiring about plan: <strong>{assessmentTier}</strong></span>
-                  </div>
-                )}
-
-                {assessmentTarget && (
-                  <div style={{
-                    padding: '0.5rem 0.75rem',
-                    borderRadius: '6px',
-                    background: 'rgba(34, 211, 238, 0.1)',
-                    border: '1px solid rgba(34, 211, 238, 0.3)',
-                    fontSize: '0.78rem',
-                    color: '#38bdf8',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}>
-                    <Globe size={14} />
-                    <span>Target endpoint: <strong>{assessmentTarget}</strong></span>
-                  </div>
-                )}
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.65rem' }}>
-                  {[
-                    { id: 'PQC/Quantum Readiness', label: 'PQC / Quantum Readiness', icon: ShieldCheck },
-                    { id: 'Inventory/CBOM', label: 'Continuous CBOM Inventory', icon: Layers },
-                    { id: 'HNDL Assessment', label: 'HNDL Threat Exposure', icon: Radio },
-                    { id: 'Migration Planning', label: "Mosca's Migration Planning", icon: Activity },
-                    { id: 'Enterprise Demo', label: 'Enterprise Platform Demo', icon: Presentation },
-                    { id: 'Other', label: 'Custom Compliance / GRC', icon: FileCode }
-                  ].map(chip => {
-                    const active = assessmentInterests.includes(chip.id);
-                    const ChipIcon = chip.icon;
-                    return (
-                      <button
-                        key={chip.id}
-                        type="button"
-                        onClick={() => toggleInterest(chip.id)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.55rem',
-                          padding: '0.65rem 0.75rem',
-                          borderRadius: '8px',
-                          border: active ? '1px solid #a855f7' : '1px solid rgba(255, 255, 255, 0.08)',
-                          background: active ? 'rgba(168, 85, 247, 0.18)' : 'rgba(255, 255, 255, 0.02)',
-                          color: active ? '#ffffff' : 'var(--muted, #9aa6c4)',
-                          fontSize: '0.78rem',
-                          fontWeight: active ? 600 : 500,
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <ChipIcon size={14} color={active ? '#c084fc' : 'var(--muted, #9aa6c4)'} />
-                        <span style={{ flex: 1 }}>{chip.label}</span>
-                        {active && <Check size={12} color="#c084fc" />}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div style={{
-                  padding: '0.65rem 0.85rem',
-                  borderRadius: '6px',
-                  background: 'rgba(0, 0, 0, 0.25)',
-                  fontSize: '0.74rem',
-                  color: 'var(--muted, #9aa6c4)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center'
-                }}>
-                  <span>Prefer direct email?</span>
-                  <a href="mailto:PQCA@quarkshield.ai" style={{ color: '#38bdf8', textDecoration: 'none', fontWeight: 600 }}>
-                    PQCA@quarkshield.ai
-                  </a>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => setShowAssessmentModal(false)}
-                    className="btn-secondary"
-                    style={{ padding: '0.6rem 1rem', fontSize: '0.84rem' }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setAssessmentStep(2)}
-                    style={{
-                      padding: '0.6rem 1.25rem',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
-                      color: '#ffffff',
-                      fontSize: '0.84rem',
-                      fontWeight: 600,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.45rem',
-                      boxShadow: '0 4px 15px rgba(168, 85, 247, 0.35)'
-                    }}
-                  >
-                    <span>Continue to Contact</span>
-                    <ArrowRight size={14} />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 2: Contact Details */}
-            {assessmentStep === 2 && (
-              <form onSubmit={handleAssessmentSubmit} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div>
-                  <h4 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem', fontWeight: 700, color: '#ffffff' }}>
-                    Enterprise Contact &amp; Infrastructure
-                  </h4>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.5 }}>
-                    Please enter your corporate contact details. Free webmail providers (e.g. Gmail/Yahoo) are restricted.
-                  </p>
-                </div>
-
-                {assessmentError && (
-                  <div style={{
-                    padding: '0.65rem 0.85rem',
-                    borderRadius: '6px',
-                    background: 'rgba(251, 90, 118, 0.12)',
-                    border: '1px solid rgba(251, 90, 118, 0.35)',
-                    color: '#fb5a76',
-                    fontSize: '0.78rem',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem'
-                  }}>
-                    <AlertTriangle size={14} />
-                    <span>{assessmentError}</span>
-                  </div>
-                )}
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--muted, #9aa6c4)', marginBottom: '0.3rem' }}>
-                      Full Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Jane Doe"
-                      value={assessmentName}
-                      onChange={e => setAssessmentName(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '0.55rem 0.75rem',
-                        borderRadius: '6px',
-                        background: 'rgba(0, 0, 0, 0.35)',
-                        border: '1px solid rgba(255, 255, 255, 0.12)',
-                        color: '#ffffff',
-                        fontSize: '0.82rem',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--muted, #9aa6c4)', marginBottom: '0.3rem' }}>
-                      Corporate Work Email *
-                    </label>
-                    <input
-                      type="email"
-                      required
-                      placeholder="jdoe@enterprise.com"
-                      value={assessmentEmail}
-                      onChange={e => setAssessmentEmail(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '0.55rem 0.75rem',
-                        borderRadius: '6px',
-                        background: 'rgba(0, 0, 0, 0.35)',
-                        border: '1px solid rgba(255, 255, 255, 0.12)',
-                        color: '#ffffff',
-                        fontSize: '0.82rem',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--muted, #9aa6c4)', marginBottom: '0.3rem' }}>
-                      Company / Organization *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="Spinovation Corp"
-                      value={assessmentCompany}
-                      onChange={e => setAssessmentCompany(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '0.55rem 0.75rem',
-                        borderRadius: '6px',
-                        background: 'rgba(0, 0, 0, 0.35)',
-                        border: '1px solid rgba(255, 255, 255, 0.12)',
-                        color: '#ffffff',
-                        fontSize: '0.82rem',
-                        outline: 'none'
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--muted, #9aa6c4)', marginBottom: '0.3rem' }}>
-                      Job Role / Function
-                    </label>
-                    <select
-                      value={assessmentRole}
-                      onChange={e => setAssessmentRole(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '0.55rem 0.75rem',
-                        borderRadius: '6px',
-                        background: 'rgba(10, 15, 28, 0.95)',
-                        border: '1px solid rgba(255, 255, 255, 0.12)',
-                        color: '#ffffff',
-                        fontSize: '0.82rem',
-                        outline: 'none'
-                      }}
-                    >
-                      <option value="CISO / VP Security">CISO / VP Security</option>
-                      <option value="CIO / CTO">CIO / CTO</option>
-                      <option value="Security Architect">Security Architect</option>
-                      <option value="Security Engineer / DevOps">Security Engineer / DevOps</option>
-                      <option value="PKI / Cryptography Lead">PKI / Cryptography Lead</option>
-                      <option value="GRC / Compliance Lead">GRC / Compliance Lead</option>
-                      <option value="Other">Other / Consultant</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.76rem', color: 'var(--muted, #9aa6c4)', marginBottom: '0.3rem' }}>
-                    Fleet / Infrastructure Size
-                  </label>
-                  <select
-                    value={assessmentEnvSize}
-                    onChange={e => setAssessmentEnvSize(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '0.55rem 0.75rem',
-                      borderRadius: '6px',
-                      background: 'rgba(10, 15, 28, 0.95)',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
-                      color: '#ffffff',
-                      fontSize: '0.82rem',
-                      outline: 'none'
-                    }}
-                  >
-                    <option value="Under 50 Workstations (&lt; 50)">Under 50 Workstations (&lt; 50)</option>
-                    <option value="50 - 250 Endpoints (Medium Fleet)">50 - 250 Endpoints (Medium Fleet)</option>
-                    <option value="250 - 1,000 Endpoints (Large Enterprise)">250 - 1,000 Endpoints (Large Enterprise)</option>
-                    <option value="1,000 - 10,000 Endpoints (Global Fleet)">1,000 - 10,000 Endpoints (Global Fleet)</option>
-                    <option value="10,000+ Endpoints (Critical Infrastructure)">10,000+ Endpoints (Critical Infrastructure)</option>
-                    <option value="Perimeter &amp; Web Edge Endpoints Only">Perimeter &amp; Web Edge Endpoints Only</option>
-                  </select>
-                </div>
-
-                {/* Honeypot field */}
-                <input
-                  type="text"
-                  name="user_website_hp"
-                  value={assessmentHoneypot}
-                  onChange={e => setAssessmentHoneypot(e.target.value)}
-                  style={{ display: 'none' }}
-                  tabIndex={-1}
-                  autoComplete="off"
-                />
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => setAssessmentStep(1)}
-                    className="btn-secondary"
-                    style={{ padding: '0.55rem 0.85rem', fontSize: '0.82rem' }}
-                  >
-                    ← Back
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={assessmentSubmitting}
-                    style={{
-                      padding: '0.65rem 1.35rem',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: assessmentSubmitting ? 'rgba(168, 85, 247, 0.5)' : 'linear-gradient(135deg, #b466ff 0%, #9333ea 100%)',
-                      color: '#ffffff',
-                      fontSize: '0.84rem',
-                      fontWeight: 600,
-                      cursor: assessmentSubmitting ? 'not-allowed' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.45rem',
-                      boxShadow: '0 4px 15px rgba(168, 85, 247, 0.35)'
-                    }}
-                  >
-                    {assessmentSubmitting ? (
-                      <>
-                        <RefreshCw size={14} className="animate-spin" />
-                        <span>Transmitting to PQCA...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span>Submit Assessment Request</span>
-                        <ArrowRight size={14} />
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Step 3: Confirmation */}
-            {assessmentStep === 3 && (
-              <div style={{ padding: '2rem 1.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '1rem' }}>
-                <div style={{
-                  width: '54px',
-                  height: '54px',
-                  borderRadius: '50%',
-                  background: 'rgba(52, 211, 153, 0.15)',
-                  border: '1px solid rgba(52, 211, 153, 0.4)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#34d399'
-                }}>
-                  <ShieldCheck size={28} />
-                </div>
-
-                <div>
-                  <h4 style={{ margin: '0 0 0.4rem 0', fontSize: '1.2rem', fontWeight: 800, color: '#ffffff' }}>
-                    Assessment Request Routed Successfully!
-                  </h4>
-                  <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--muted, #9aa6c4)', lineHeight: 1.5, maxWidth: '440px' }}>
-                    Your request has been delivered to the QuarkShield PQC Assessment team at <code>PQCA@quarkshield.ai</code>. An engineer will reach out within 1 business day.
-                  </p>
-                </div>
-
-                {assessmentSuccessRecap && (
-                  <div style={{
-                    width: '100%',
-                    padding: '1rem',
-                    borderRadius: '8px',
-                    background: 'rgba(0, 0, 0, 0.35)',
-                    border: '1px solid rgba(255, 255, 255, 0.08)',
-                    textAlign: 'left',
-                    fontSize: '0.78rem',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.4rem'
-                  }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--muted, #9aa6c4)' }}>Reference ID:</span>
-                      <code style={{ color: '#38bdf8' }}>{assessmentSuccessRecap.assessmentId}</code>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--muted, #9aa6c4)' }}>Organization:</span>
-                      <strong style={{ color: '#ffffff' }}>{assessmentSuccessRecap.company}</strong>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--muted, #9aa6c4)' }}>Contact:</span>
-                      <span style={{ color: '#ffffff' }}>{assessmentSuccessRecap.name} ({assessmentSuccessRecap.email})</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--muted, #9aa6c4)' }}>Scope:</span>
-                      <span style={{ color: '#c084fc' }}>{assessmentSuccessRecap.environmentSize}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--muted, #9aa6c4)' }}>Focus Areas:</span>
-                      <span style={{ color: '#34d399' }}>{assessmentSuccessRecap.interests.join(', ')}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAssessmentModal(false);
-                      const proberEl = document.getElementById('prober');
-                      if (proberEl) proberEl.scrollIntoView({ behavior: 'smooth' });
-                    }}
-                    className="btn-secondary"
-                    style={{ padding: '0.6rem 1.1rem', fontSize: '0.84rem' }}
-                  >
-                    Test Public Website
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowAssessmentModal(false)}
-                    style={{
-                      padding: '0.6rem 1.25rem',
-                      borderRadius: '8px',
-                      border: 'none',
-                      background: 'rgba(56, 189, 248, 0.2)',
-                      color: '#38bdf8',
-                      fontSize: '0.84rem',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-
 
       {/* ========================================================================= */}
       {/* MODAL: SIGN-IN (SUPER ADMIN OR TENANT) */}

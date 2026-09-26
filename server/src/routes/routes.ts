@@ -66,6 +66,7 @@ import {
 } from '../controllers/adminController';
 import { getCnsaNews } from '../controllers/newsController';
 import { submitSupportTicket } from '../controllers/supportController';
+import { submitAssessment } from '../controllers/assessmentController';
 import {
   scanRemoteGitRepo,
   getGitScanHistory,
@@ -145,6 +146,8 @@ router.post('/scan/agent/commands', agentFetchCommands);
 router.post('/scan/adcs/report', reportAdcs);
 router.post('/scan/license/verify', verifyLicenseKey);
 router.post('/probe', probeEndpoint);
+router.post('/assessment', submitAssessment);
+router.post('/support', submitSupportTicket);
 router.post('/support/contact', submitSupportTicket);
 
 // ==========================================

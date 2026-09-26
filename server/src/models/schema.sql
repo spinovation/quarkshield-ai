@@ -630,3 +630,22 @@ CREATE TABLE IF NOT EXISTS custom_checkout_invites (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_custom_invites_session ON custom_checkout_invites(stripe_session_id);
+
+-- Enterprise PQC Assessment Leads
+CREATE TABLE IF NOT EXISTS pqc_assessments (
+  id VARCHAR(100) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  company VARCHAR(255) NOT NULL,
+  role VARCHAR(100),
+  environment_size VARCHAR(100),
+  interests JSONB,
+  tier VARCHAR(50),
+  utm_source VARCHAR(255),
+  utm_medium VARCHAR(255),
+  utm_campaign VARCHAR(255),
+  status VARCHAR(50) DEFAULT 'new',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pqc_assessments_email ON pqc_assessments(email);
+
