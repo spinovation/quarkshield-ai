@@ -1748,7 +1748,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
 
           {/* Export CBOM (CycloneDX) */}
           <button
-            onClick={downloadCBOMJson}
+            onClick={() => downloadCBOMJson(false)}
             style={{
               display: 'flex',
               alignItems: 'center',

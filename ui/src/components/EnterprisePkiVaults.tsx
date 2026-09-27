@@ -52,7 +52,7 @@ interface SyncedAsset {
   expires_at?: string;
 }
 
-export const EnterprisePkiVaults: React.FC = () => {
+export const EnterprisePkiVaults: React.FC<{ tenantName?: string }> = () => {
   const [connectors, setConnectors] = useState<PkiConnector[]>([]);
   const [assets, setAssets] = useState<SyncedAsset[]>([]);
   const [loading, setLoading] = useState(false);

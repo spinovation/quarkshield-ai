@@ -237,7 +237,7 @@ interface UserInfo {
 interface AdminPanelProps {
   currentUserEmail?: string;
   onLogout?: () => void;
-  initialSubTab?: 'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics';
+  initialSubTab?: 'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics' | 'platform_sbom';
   onMirrorTenant?: (tenantSlug: string) => void;
 }
 
@@ -248,7 +248,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [activeSubTab, setActiveSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics'>(initialSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics' | 'platform_sbom'>(initialSubTab);
 
   // Platform Operators (Super Admin User Registry) State
   const [operators, setOperators] = useState<PlatformOperator[]>(() => {
@@ -832,6 +832,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [onboardPostalCode, setOnboardPostalCode] = useState('');
   const [onboardTier, setOnboardTier] = useState<'partner' | 'corporate'>('corporate');
   const [onboardSeats, setOnboardSeats] = useState(100);
+  const [onboardSubdomain, setOnboardSubdomain] = useState('');
   const [onboard2FAPolicy, setOnboard2FAPolicy] = useState<'optional' | 'admins_only' | 'mandatory'>('admins_only');
   const [onboardStripeLink, setOnboardStripeLink] = useState('');
   const [onboardingLoading, setOnboardingLoading] = useState(false);
@@ -839,6 +840,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [onboardError, setOnboardError] = useState<string | null>(null);
   const [copiedStripeLink, setCopiedStripeLink] = useState(false);
   const [stripeEmailSent, setStripeEmailSent] = useState(false);
+
+  // Copy a Stripe payment link to the clipboard (with transient "copied" feedback).
+  const handleCopyStripeLink = (link: string) => {
+    if (!link) return;
+    navigator.clipboard.writeText(link)
+      .then(() => {
+        setCopiedStripeLink(true);
+        setTimeout(() => setCopiedStripeLink(false), 2000);
+      })
+      .catch(() => {});
+  };
+
+  // Send a Stripe payment link to the client. Opens the operator's mail client
+  // pre-filled with the link (no unattended send from the public panel).
+  const handleSendStripeLink = (recipient: string, link: string) => {
+    if (!link) return;
+    const to = recipient && recipient.includes('@') ? recipient : '';
+    const subject = encodeURIComponent('Your QuarkShield subscription payment link');
+    const body = encodeURIComponent(
+      `Hello,\n\nComplete your QuarkShield subscription securely via Stripe:\n${link}\n\nQuarkShield Commercial Operations`
+    );
+    setStripeEmailSent(true);
+    setTimeout(() => setStripeEmailSent(false), 2500);
+    window.location.href = `mailto:${to}?subject=${subject}&body=${body}`;
+  };
 
   // License Generator Selection
   const [selectedOnboardedSlug, setSelectedOnboardedSlug] = useState('');
@@ -2859,7 +2885,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                           </button>
                         ) : (
                           <button
-                            onClick={() => { setActiveTab('licenses'); }}
+                            onClick={() => { setActiveSubTab('licenses'); }}
                             className="btn-secondary"
                             style={{ padding: '0.35rem 0.75rem', fontSize: '0.76rem' }}
                           >
