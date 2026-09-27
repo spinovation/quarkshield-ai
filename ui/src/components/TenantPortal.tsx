@@ -2924,7 +2924,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           {[
             { id: 'overview', label: 'Fleet Overview', icon: Laptop },
             { id: 'cbom', label: 'Cryptographic BOM (CBOM)', icon: FileCode },
-            { id: 'sbom', label: 'Software BOM (SBOM)', icon: Package, badge: 'CycloneDX' },
             { id: 'integrations', label: 'Integrations Hub', icon: Layers, badge: 'Unified Hub' },
             { id: 'proxy', label: 'Hybrid Quantum TLS Proxy', icon: Radio, badge: 'Inline' },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
@@ -2933,11 +2932,9 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             const Icon = tab.icon;
             const isTabActive = tab.id === 'settings' 
               ? isSettingsActive 
-              : tab.id === 'sbom'
-                ? ((activeTab === 'cbom' || (activeTab as any) === 'sbom') && cbomSubTab === 'sbom')
-                : tab.id === 'cbom'
-                  ? ((activeTab === 'cbom' || (activeTab as any) === 'assets') && cbomSubTab !== 'sbom')
-                  : activeTab === tab.id;
+              : tab.id === 'cbom'
+                ? (activeTab === 'cbom' || (activeTab as any) === 'assets' || (activeTab as any) === 'sbom')
+                : activeTab === tab.id;
             return (
               <React.Fragment key={tab.id}>
                 <button
@@ -2950,12 +2947,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         setActiveTab('settings');
                         setIsSettingsMenuOpen(true);
                       }
-                    } else if (tab.id === 'sbom') {
-                      setActiveTab('cbom');
-                      setCbomSubTab('sbom');
                     } else if (tab.id === 'cbom') {
                       setActiveTab('cbom');
-                      if (cbomSubTab === 'sbom') setCbomSubTab('assets');
                     } else {
                       setActiveTab(tab.id as any);
                     }
@@ -3831,7 +3824,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                         <FileCode size={22} color="var(--accent-cyan, #38bdf8)" />
                         <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#ffffff' }}>
-                          CBOM &amp; Software BOM (SBOM)
+                          Cryptographic BOM (CBOM)
                         </h2>
                         <span style={{
                           fontSize: '0.68rem',
@@ -3846,7 +3839,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         </span>
                       </div>
                       <p style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.82rem', margin: '0.35rem 0 0 0' }}>
-                        Comprehensive Cryptographic Bill of Materials (CBOM) and Software Bill of Materials (SBOM) tracking cryptographic keys, certificates, OS packages, software libraries, and CVE correlations across {client.displayName}.
+                        Comprehensive Cryptographic Bill of Materials (CBOM) and integrated Software Bill of Materials (SBOM) tracking cryptographic keys, certificates, OS packages, software libraries, and CVE correlations across {client.displayName}.
                       </p>
                     </div>
 

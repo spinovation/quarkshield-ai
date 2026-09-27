@@ -51,7 +51,7 @@ import SbomInventory from './components/SbomInventory';
 import ResetPasswordPage from './components/ResetPasswordPage';
 import { CryptographicPostureCard, calculatePostureMetrics } from './components/CryptographicPostureCard';
 
-export type TabType = 'dashboard' | 'cbom' | 'tokens' | 'git' | 'pki' | 'proxy' | 'planner' | 'admin';
+export type TabType = 'dashboard' | 'cbom' | 'sbom' | 'tokens' | 'git' | 'pki' | 'proxy' | 'planner' | 'admin';
 
 interface FleetMachine {
   id: string;
@@ -265,7 +265,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab') as TabType;
-    const validTabs: TabType[] = ['dashboard', 'cbom', 'tokens', 'git', 'pki', 'proxy', 'planner', 'admin'];
+    const validTabs: TabType[] = ['dashboard', 'cbom', 'sbom', 'tokens', 'git', 'pki', 'proxy', 'planner', 'admin'];
     if (tabParam && validTabs.includes(tabParam)) {
       return tabParam;
     }
@@ -275,6 +275,7 @@ export default function App() {
     }
     if (window.location.hash === '#admin') return 'admin';
     if (window.location.hash === '#cbom') return 'cbom';
+    if (window.location.hash === '#sbom') return 'sbom';
     if (window.location.hash === '#tokens') return 'tokens';
     if (window.location.hash === '#git') return 'git';
     if (window.location.hash === '#pki') return 'pki';
@@ -1498,20 +1499,52 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
             </span>
           </button>
 
-          {/* CBOM Explorer */}
+          {/* Cryptographic BOM (CBOM) */}
           <button
-            onClick={() => setActiveTab('cbom')}
+            onClick={() => {
+              setActiveTab('cbom');
+              setCbomViewMode('table');
+            }}
             style={{
               display: 'flex',
               alignItems: 'center',
               gap: '0.7rem',
               padding: '0.6rem 0.75rem',
               borderRadius: '6px',
-              background: activeTab === 'cbom' ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
-              border: activeTab === 'cbom' ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
-              color: activeTab === 'cbom' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              background: (activeTab === 'cbom' && cbomViewMode !== 'sbom') ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
+              border: (activeTab === 'cbom' && cbomViewMode !== 'sbom') ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
+              color: (activeTab === 'cbom' && cbomViewMode !== 'sbom') ? 'var(--accent-cyan)' : 'var(--text-secondary)',
               fontSize: '0.85rem',
-              fontWeight: activeTab === 'cbom' ? 600 : 500,
+              fontWeight: (activeTab === 'cbom' && cbomViewMode !== 'sbom') ? 600 : 500,
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              width: '100%'
+            }}
+          >
+            <FileCode size={17} color={(activeTab === 'cbom' && cbomViewMode !== 'sbom') ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              Cryptographic BOM (CBOM)
+            </span>
+          </button>
+
+          {/* Software BOM (SBOM) */}
+          <button
+            onClick={() => {
+              setActiveTab('sbom');
+              setCbomViewMode('sbom');
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.7rem',
+              padding: '0.6rem 0.75rem',
+              borderRadius: '6px',
+              background: (activeTab === 'sbom' || (activeTab === 'cbom' && cbomViewMode === 'sbom')) ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
+              border: (activeTab === 'sbom' || (activeTab === 'cbom' && cbomViewMode === 'sbom')) ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
+              color: (activeTab === 'sbom' || (activeTab === 'cbom' && cbomViewMode === 'sbom')) ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              fontSize: '0.85rem',
+              fontWeight: (activeTab === 'sbom' || (activeTab === 'cbom' && cbomViewMode === 'sbom')) ? 600 : 500,
               textAlign: 'left',
               cursor: 'pointer',
               transition: 'all 0.15s ease',
@@ -1520,13 +1553,13 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem', overflow: 'hidden' }}>
-              <FileCode size={17} color={activeTab === 'cbom' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
+              <Package size={17} color={(activeTab === 'sbom' || (activeTab === 'cbom' && cbomViewMode === 'sbom')) ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
               <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                CBOM &amp; SBOM
+                Software BOM (SBOM)
               </span>
             </div>
             <span style={{ fontSize: '0.62rem', background: 'rgba(0, 242, 254, 0.15)', color: '#38bdf8', padding: '1px 5px', borderRadius: '4px', fontWeight: 700 }}>
-              CBOM+SBOM
+              CycloneDX
             </span>
           </button>
 
@@ -2385,8 +2418,8 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           </div>
         )}
 
-        {/* TAB 2: CBOM EXPLORER */}
-        {activeTab === 'cbom' && (
+        {/* TAB 2 & 3: CBOM & SBOM EXPLORER */}
+        {(activeTab === 'cbom' || activeTab === 'sbom') && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
             {/* Overall Asset Inventory Posture Dashboard (A-F Grading & Industry Risk Formula) */}
             <CryptographicPostureCard
@@ -2813,26 +2846,40 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
                 <div>
                   <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Layers size={18} color="var(--accent-cyan)" /> CBOM &amp; Software BOM (CycloneDX 1.6)
+                    {(activeTab === 'sbom' || cbomViewMode === 'sbom') ? (
+                      <>
+                        <Package size={18} color="var(--accent-cyan)" /> Software BOM (SBOM) — CycloneDX 1.6
+                      </>
+                    ) : (
+                      <>
+                        <FileCode size={18} color="var(--accent-cyan)" /> Cryptographic BOM (CBOM) — CycloneDX 1.6
+                      </>
+                    )}
                   </h3>
                   <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    Standardized inventory adhering to the global CycloneDX 1.6 specification for cryptographic primitives and software dependencies.
+                    {(activeTab === 'sbom' || cbomViewMode === 'sbom')
+                      ? 'Standardized Software Bill of Materials (SBOM) tracking packages, dependencies, CVE vulnerabilities, and 1-click remediation.'
+                      : 'Standardized inventory adhering to the global CycloneDX 1.6 specification for cryptographic primitives and algorithms.'
+                    }
                   </p>
                 </div>
 
                 {/* View Toggle (Table vs SBOM vs JSON) */}
                 <div style={{ display: 'flex', gap: '0.5rem', background: 'rgba(0,0,0,0.25)', padding: '0.2rem', borderRadius: '6px' }}>
                   <button
-                    onClick={() => setCbomViewMode('table')}
+                    onClick={() => {
+                      setActiveTab('cbom');
+                      setCbomViewMode('table');
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '0.4rem',
                       padding: '0.4rem 0.8rem',
-                      background: cbomViewMode === 'table' ? 'rgba(0, 242, 254, 0.2)' : 'transparent',
+                      background: (activeTab === 'cbom' && cbomViewMode === 'table') ? 'rgba(0, 242, 254, 0.2)' : 'transparent',
                       border: 'none',
                       borderRadius: '4px',
-                      color: cbomViewMode === 'table' ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                      color: (activeTab === 'cbom' && cbomViewMode === 'table') ? 'var(--accent-cyan)' : 'var(--text-muted)',
                       fontSize: '0.8rem',
                       fontWeight: 600,
                       cursor: 'pointer'
@@ -2841,16 +2888,19 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                     <FileCode size={14} /> CBOM Assets
                   </button>
                   <button
-                    onClick={() => setCbomViewMode('sbom')}
+                    onClick={() => {
+                      setActiveTab('sbom');
+                      setCbomViewMode('sbom');
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '0.4rem',
                       padding: '0.4rem 0.8rem',
-                      background: cbomViewMode === 'sbom' ? 'rgba(0, 242, 254, 0.2)' : 'transparent',
+                      background: (activeTab === 'sbom' || cbomViewMode === 'sbom') ? 'rgba(0, 242, 254, 0.2)' : 'transparent',
                       border: 'none',
                       borderRadius: '4px',
-                      color: cbomViewMode === 'sbom' ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                      color: (activeTab === 'sbom' || cbomViewMode === 'sbom') ? 'var(--accent-cyan)' : 'var(--text-muted)',
                       fontSize: '0.8rem',
                       fontWeight: 600,
                       cursor: 'pointer'
@@ -2859,16 +2909,19 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                     <Package size={14} /> SBOM Dependencies &amp; Fixes
                   </button>
                   <button
-                    onClick={() => setCbomViewMode('json')}
+                    onClick={() => {
+                      setActiveTab('cbom');
+                      setCbomViewMode('json');
+                    }}
                     style={{
                       display: 'flex',
                       alignItems: 'center',
                       gap: '0.4rem',
                       padding: '0.4rem 0.8rem',
-                      background: cbomViewMode === 'json' ? 'rgba(0, 242, 254, 0.2)' : 'transparent',
+                      background: (activeTab === 'cbom' && cbomViewMode === 'json') ? 'rgba(0, 242, 254, 0.2)' : 'transparent',
                       border: 'none',
                       borderRadius: '4px',
-                      color: cbomViewMode === 'json' ? 'var(--accent-cyan)' : 'var(--text-muted)',
+                      color: (activeTab === 'cbom' && cbomViewMode === 'json') ? 'var(--accent-cyan)' : 'var(--text-muted)',
                       fontSize: '0.8rem',
                       fontWeight: 600,
                       cursor: 'pointer'
