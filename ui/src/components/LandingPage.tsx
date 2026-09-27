@@ -1816,7 +1816,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <h4>Company</h4>
               <ul>
                 <li><a href="#about-us">About Us</a></li>
-                <li><a href="#careers">Careers</a></li>
+                <li><a href="#careers" onClick={() => setShowCareerModal(true)}>Careers</a></li>
                 <li><a href="#" onClick={(e) => { e.preventDefault(); setShowSupportModalState(true); }}>Support</a></li>
                 <li><a href="#" onClick={(e) => { e.preventDefault(); setShowSupportModalState(true); }}>Contact</a></li>
               </ul>
@@ -2390,12 +2390,18 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               )}
 
               <div className="field">
-                <label>Work Email or Account Identifier</label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ margin: 0 }}>Work Email or Account Identifier</label>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--muted)', fontWeight: 500 }}>e.g. superadmin or name@company.com</span>
+                </div>
                 <input
                   type="text"
-                  placeholder="admin@spinovation.com"
+                  placeholder="e.g. name@company.com or superadmin"
                   value={loginIdentifier}
-                  onChange={(e) => setLoginIdentifier(e.target.value)}
+                  onChange={(e) => {
+                    setLoginIdentifier(e.target.value);
+                    if (signInError) setSignInError(null);
+                  }}
                   autoComplete="username"
                   required
                 />

@@ -2563,9 +2563,9 @@ export const unifiedLogin = async (req: Request, res: Response) => {
     const cleanId = rawIdentifier.trim().toLowerCase();
     const INVALID = 'Invalid credentials.'; // uniform message: no account enumeration
 
-    // ---- 1. Platform operator (admin_users) by email or id ----
+    // ---- 1. Platform operator (admin_users) by email, id, or username alias ----
     const adminUserResult = await pool.query(
-      'SELECT id, email, role, company, password_hash, salt, row_locked, must_change_password, two_factor_enabled, two_factor_secret, two_factor_recovery_codes FROM admin_users WHERE LOWER(email) = $1 OR id = $1',
+      'SELECT id, email, role, company, password_hash, salt, row_locked, must_change_password, two_factor_enabled, two_factor_secret, two_factor_recovery_codes FROM admin_users WHERE LOWER(email) = $1 OR id = $1 OR LOWER(email) = $1 || \'@quarkshield.ai\'',
       [cleanId]
     );
     if (adminUserResult.rows.length > 0) {
