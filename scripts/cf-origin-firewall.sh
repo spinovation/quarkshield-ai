@@ -49,9 +49,24 @@ _purge() {
   return 0
 }
 
-# Apply rules for one table ($1=iptables|ip6tables, $2=space-separated CIDR list).
+# Detect the container (post-DNAT) ports that the published web ports map to.
+# CRITICAL: the filter/FORWARD chain (where DOCKER-USER lives) sees the
+# destination port AFTER Docker's nat/DNAT has rewritten it — i.e. the container
+# port, not the published host port. On this stack e.g. host :443 -> container
+# :5443 and host :80/:5050/:5001-5005 -> container :5050. So we must match the
+# container ports here, which also transparently covers every published port
+# that funnels into the app.
+_detect_container_ports() {
+  local cports
+  cports="$(iptables -t nat -S DOCKER 2>/dev/null \
+    | grep -oE 'to-destination [0-9.]+:[0-9]+' \
+    | grep -oE '[0-9]+$' | sort -un | paste -sd, -)"
+  printf '%s' "${cports:-5050,5443}"
+}
+
+# Apply rules for one table ($1=iptables|ip6tables, $2=space-separated CIDR list, $3=container ports csv).
 _apply_table() {
-  local IPT="$1"; local LIST="$2"
+  local IPT="$1"; local LIST="$2"; local CPORTS="$3"
   if ! $IPT -L DOCKER-USER >/dev/null 2>&1; then
     log "$IPT: DOCKER-USER chain not found (is Docker running?) — skipping."
     return 0
@@ -60,25 +75,26 @@ _apply_table() {
 
   # Insert order matters. We -I (insert at top) so the final top-to-bottom order is:
   #   1) allow ESTABLISHED,RELATED   2) allow each Cloudflare CIDR   3) DROP the rest
-  # ...all ABOVE Docker's own trailing RETURN in DOCKER-USER.
+  # ...all ABOVE Docker's own trailing RETURN in DOCKER-USER. Matches are on the
+  # post-DNAT container ports ($CPORTS).
 
-  # 3) DROP everything else to the restricted ports arriving on the WAN interface.
-  $IPT -I DOCKER-USER -i "$WAN_IF" -p tcp -m multiport --dports "$RESTRICTED_PORTS" \
+  # 3) DROP everything else to the app's container ports arriving on the WAN interface.
+  $IPT -I DOCKER-USER -i "$WAN_IF" -p tcp -m multiport --dports "$CPORTS" \
     -m comment --comment "$MARK" -j DROP
 
   # 2) Allow each Cloudflare range (inserted above the DROP).
   local cidr
   for cidr in $LIST; do
     [ -n "$cidr" ] || continue
-    $IPT -I DOCKER-USER -i "$WAN_IF" -s "$cidr" -p tcp -m multiport --dports "$RESTRICTED_PORTS" \
+    $IPT -I DOCKER-USER -i "$WAN_IF" -s "$cidr" -p tcp -m multiport --dports "$CPORTS" \
       -m comment --comment "$MARK" -j RETURN
   done
 
   # 1) Allow already-established connections (inserted at the very top).
-  $IPT -I DOCKER-USER -i "$WAN_IF" -p tcp -m multiport --dports "$RESTRICTED_PORTS" \
+  $IPT -I DOCKER-USER -i "$WAN_IF" -p tcp -m multiport --dports "$CPORTS" \
     -m conntrack --ctstate ESTABLISHED,RELATED -m comment --comment "$MARK" -j RETURN
 
-  log "$IPT: applied $(echo "$LIST" | wc -w) Cloudflare ranges on $WAN_IF for ports $RESTRICTED_PORTS."
+  log "$IPT: applied $(echo "$LIST" | wc -w) Cloudflare ranges on $WAN_IF for container ports $CPORTS."
 }
 
 cmd_apply() {
@@ -91,9 +107,10 @@ cmd_apply() {
   # Sanity-check the payloads look like CIDR lists before we touch the firewall.
   echo "$CF4" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/[0-9]+$' || { echo "CF IPv4 list looks malformed; aborting."; exit 1; }
   echo "$CF6" | grep -qiE '^[0-9a-f:]+/[0-9]+$'                     || { echo "CF IPv6 list looks malformed; aborting."; exit 1; }
-  log "Interface: $WAN_IF   Ports: $RESTRICTED_PORTS"
-  _apply_table iptables  "$CF4"
-  _apply_table ip6tables "$CF6"
+  local CPORTS; CPORTS="$(_detect_container_ports)"
+  log "Interface: $WAN_IF   Container ports (post-DNAT): $CPORTS"
+  _apply_table iptables  "$CF4" "$CPORTS"
+  _apply_table ip6tables "$CF6" "$CPORTS"
   echo
   log "Done. Verify NOW (before closing this session):"
   log "  1) The site still loads via Cloudflare:  https://quarkshield.ai/health"
