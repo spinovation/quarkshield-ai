@@ -12,7 +12,7 @@
 
 ## Table of Contents
 1. [Platform Overview & 3-Tier Enterprise Strategy](#1-platform-overview--3-tier-enterprise-strategy)
-2. [Feature 1: Unified Integrations Hub (Centralized Ingestion Architecture)](#2-feature-1-unified-integrations-hub)
+2. [Feature 1: Integrations & Gateways (Unified Ingestion Container)](#2-feature-1-integrations--gateways)
 3. [Feature 2: Tier 1 Cloud KMS Connectors (AWS KMS & Azure Key Vault)](#3-feature-2-tier-1-cloud-kms-connectors)
 4. [Feature 3: Tier 1 Enterprise PKI & Secret Vaults (AD CS & HashiCorp Vault)](#4-feature-3-tier-1-enterprise-pki--secret-vaults)
 5. [Feature 4: Tier 2 Transparent Hybrid Quantum TLS Reverse Proxy Gateway](#5-feature-4-tier-2-transparent-hybrid-quantum-tls-reverse-proxy-gateway)
@@ -39,23 +39,30 @@ All discoveries flow automatically into a centralized **Cryptographic Bill of Ma
 
 ---
 
-## 2. Feature 1: Unified Integrations Hub
+## 2. Feature 1: Integrations & Gateways
 
 ### Purpose
-The **Unified Integrations Hub** serves as the single-pane command center for managing all ingestion connectors across the enterprise. Modeled after modern enterprise cloud security architectures, it consolidates setup blueprints, IAM permissions, credentials, and live telemetry feeds into one cohesive directory. This eliminates navigation fragmentation and removes duplicated setup screens from administrative menus.
+**Integrations & Gateways** is the single container in the left navigation for managing all ingestion connectors and gateways across the enterprise. It keeps the single-pane spirit of one cohesive command center while organizing every connector into exactly three sub-tabs:
+- **Git & CI/CD Gate** — remote Git repository cryptographic auditor and the CI/CD pull-request security gate.
+- **Enterprise PKI & Vaults** — the AWS KMS, Azure Key Vault, Microsoft AD CS, and HashiCorp Vault connectors all live here.
+- **Hybrid Quantum TLS Proxy** — the transparent reverse-proxy gateway.
+
+This consolidates setup blueprints, IAM permissions, credentials, and live telemetry feeds and removes duplicated setup screens from administrative menus.
 
 ### Steps to Connect
 1. Log into the QuarkShield Portal (`https://quarkshield.ai` or your custom tenant subdomain e.g., `https://[tenant].quarkshield.ai`).
-2. In the left navigation sidebar, click **Integrations Hub**.
-3. Use the filter tabs at the top (`All Integrations`, `Tier 1: Cloud & PKI`, `Tier 2: In-Flight Wire TLS`, `Tier 3: Workstations & Repos`) to locate the desired connector.
-4. Click on any connector card (e.g., **AWS KMS**, **Microsoft AD CS**, **Hybrid TLS Proxy**, **macOS Workstations**) to open the interactive 3-step slide-out configuration drawer.
+2. In the left navigation sidebar, click **Integrations & Gateways**.
+3. Choose the sub-tab for what you want to connect: **Git & CI/CD Gate**, **Enterprise PKI & Vaults**, or **Hybrid Quantum TLS Proxy**.
+4. Within the sub-tab, select the specific connector or provider (e.g., **AWS KMS**, **Microsoft AD CS**, or a new proxy instance) to open the interactive configuration flow.
 
 ### Requirements to Execute / Complete the Process
 - **Access Level:** Corporate Administrator or Cryptographer role.
 - **Authentication Credentials:** 
   - For Cloud/PKI: Cloud IAM Role ARN, Azure Client Secrets, Vault Tokens, or LDAP service accounts.
-  - For Endpoints: Organization Fleet Enrollment Token.
-- **Execution Step:** Complete Step 2 (*Credentials & Ingestion*) in the slide-out drawer, click **Verify & Test Connection**, then click **Save & Sync Connector**.
+  - For Git & CI/CD: Git repository URL plus optional PAT/deploy key, or the `QUARKSHIELD_API_TOKEN` for the pipeline gate.
+- **Execution Step:** Complete the credentials step in the chosen sub-tab, click **Verify & Test Connection**, then click **Save & Sync Connector**.
+
+> **Note on endpoint workstations:** Endpoint fleet scanning is **not** under Integrations & Gateways. Enrolled endpoints are managed under **Fleet Overview**, and admins download the agent / obtain the enrollment token from the console **Settings ➔ Deployment**.
 
 ### Results Produced
 - Activates live connector monitoring with visual status indicators (`Connected`, `Ready to Connect`, or `Active Gateways`).
@@ -63,9 +70,9 @@ The **Unified Integrations Hub** serves as the single-pane command center for ma
 - Discovered keys, certificates, algorithms, and ciphers are tagged with their specific source (`cloud_kms`, `enterprise_pki`, `pqc_proxy`, `endpoint`, or `git_repo`) and ingested into the central database.
 
 ### How to View the Results
-- **Within the Drawer:** Step 3 (*Live Discovered Cryptographic Inventory*) displays a live preview table of synced keys, key types, and risk levels.
-- **Directory Overview:** Each integration card updates with live key counters (e.g., `Discovered Keys: 412`, `Quantum Vulnerable: 398`).
-- **CBOM Inventory Tab:** Click the **Open in CBOM Inventory** shortcut button inside Step 3 to view the findings pre-filtered by that connector.
+- **Within the Sub-tab:** Each connector shows a live discovered cryptographic inventory preview of synced keys, key types, and risk levels.
+- **Connector Overview:** Each connector updates with live key counters (e.g., `Discovered Keys: 412`, `Quantum Vulnerable: 398`).
+- **CBOM Inventory Tab:** Open the **Cryptographic BOM (CBOM)** tab to view the findings pre-filtered by that connector's source.
 
 ---
 
@@ -76,7 +83,7 @@ Discovers and catalogs cryptographic keys, asymmetric certificates, and envelope
 
 ### Steps to Connect
 #### For AWS KMS (`aws_kms`):
-1. Navigate to **Integrations Hub ➔ Tier 1 ➔ AWS KMS**.
+1. Navigate to **Integrations & Gateways ➔ Enterprise PKI & Vaults**, then choose **AWS KMS**.
 2. Copy the provided IAM Policy JSON from the drawer:
    ```json
    {
@@ -100,7 +107,7 @@ Discovers and catalogs cryptographic keys, asymmetric certificates, and envelope
 4. Enter your **Role ARN** (`arn:aws:iam::123456789012:role/QuarkShieldKmsAuditRole`) and **Target AWS Regions** (e.g., `us-east-1, us-west-2`).
 
 #### For Azure Key Vault (`azure_keyvault`):
-1. Navigate to **Integrations Hub ➔ Tier 1 ➔ Azure Key Vault**.
+1. Navigate to **Integrations & Gateways ➔ Enterprise PKI & Vaults**, then choose **Azure Key Vault**.
 2. Register an App Registration in Microsoft Entra ID (formerly Azure AD).
 3. Grant `Key Vault Reader` and `Key Vault Secrets User` permissions on target Key Vaults.
 4. Provide the **Azure Tenant ID**, **Client ID**, and **Client Secret / Certificate**.
@@ -117,7 +124,7 @@ Discovers and catalogs cryptographic keys, asymmetric certificates, and envelope
 - Shor's algorithm vulnerability classification (High/Critical risk for classical RSA and ECC keys).
 
 ### How to View the Results
-- **Settings / Enterprise PKI & Vaults Tab:** View the summary cards: *Total Discovered Keys*, *Quantum Vulnerable Keys*, *PQC-Ready Keys*.
+- **Integrations & Gateways ➔ Enterprise PKI & Vaults:** View the summary cards: *Total Discovered Keys*, *Quantum Vulnerable Keys*, *PQC-Ready Keys*.
 - **CBOM Inventory:** Select `Source: Cloud KMS` from the source filter dropdown to view all cloud keys alongside their Key ID, Cloud Region, Algorithm, and Quantum Risk Score.
 - **Exported CBOM / CDXA:** Present under CycloneDX component type `cryptographic-asset` with `cryptoProperties.assetType = "key"`.
 
@@ -130,7 +137,7 @@ Provides centralized visibility into internal enterprise Public Key Infrastructu
 
 ### Steps to Connect
 #### For Microsoft Active Directory Certificate Services (`ad_cs`):
-1. Navigate to **Integrations Hub ➔ Tier 1 ➔ Microsoft AD CS**.
+1. Navigate to **Integrations & Gateways ➔ Enterprise PKI & Vaults**, then choose **Microsoft AD CS**.
 2. Deploy the provided PowerShell Discovery Script or configure LDAP / Kerberos read-only credentials:
    ```powershell
    # Enumerate AD CS Enterprise CAs & Templates
@@ -140,7 +147,7 @@ Provides centralized visibility into internal enterprise Public Key Infrastructu
 3. Enter the **CA Hostname / URL** (e.g., `ldap://ca01.corp.internal`), **Base DN** (`DC=corp,DC=internal`), and **Service Account Credentials**.
 
 #### For HashiCorp Vault (`hashicorp_vault`):
-1. Navigate to **Integrations Hub ➔ Tier 1 ➔ HashiCorp Vault**.
+1. Navigate to **Integrations & Gateways ➔ Enterprise PKI & Vaults**, then choose **HashiCorp Vault**.
 2. Enable AppRole authentication or generate a read-only Vault Token with access to `/v1/pki*` and `/v1/transit*`.
 3. Enter the **Vault Cluster URL** (e.g., `https://vault.corp.internal:8200`), **Mount Paths** (e.g., `pki/`, `transit/`), and **AppRole Role ID / Secret ID**.
 
@@ -167,7 +174,7 @@ Provides centralized visibility into internal enterprise Public Key Infrastructu
 Enables enterprise applications, legacy web servers, and API backends to communicate over quantum-safe TLS **without modifying a single line of application source code**. The gateway terminates post-quantum hybrid key exchange ciphers (`X25519MLKEM768`, curve `0x11ec`, NIST FIPS 203) at the network edge and forwards traffic to internal HTTP/1.1 or legacy TLS applications. This provides immediate, zero-downtime protection against **"Harvest Now, Decrypt Later" (HNDL)** espionage.
 
 ### Steps to Connect
-1. In the left navigation sidebar, click **Hybrid Quantum TLS Proxy** (or navigate via **Integrations Hub ➔ Tier 2**).
+1. Navigate to **Integrations & Gateways ➔ Hybrid Quantum TLS Proxy**.
 2. Click **+ New Proxy Instance**.
 3. Configure the Gateway Parameters:
    - **Instance Name:** e.g., `Production API Ingress Proxy`
@@ -205,12 +212,13 @@ Enables enterprise applications, legacy web servers, and API backends to communi
 ### Purpose
 Discovers and audits cryptographic protocols across physical, virtual, and cloud networks **out-of-band** without intercepting, decrypting, or adding latency to live production traffic. Identifies deprecated TLS versions (1.0, 1.1), non-forward-secret ciphers, and unencrypted in-flight protocols across corporate data centers and cloud VPCs.
 
+> **Deployment note:** Passive wire probing is a **Tier 2 architectural capability / deployment pattern**, not a clickable console screen in the current build. There is no dedicated UI sub-tab for passive network probing — the only Tier-2 clickable screen is **Integrations & Gateways ➔ Hybrid Quantum TLS Proxy**. You enable passive probing by deploying the wire prober out-of-band as described below; its findings then flow into the CBOM like any other source.
+
 ### Steps to Connect
-1. Navigate to **Integrations Hub ➔ Tier 2 ➔ Passive Wire Mirror**.
-2. Configure network traffic mirroring on your core infrastructure:
+1. Configure network traffic mirroring on your core infrastructure:
    - **Cloud VPCs:** AWS VPC Traffic Mirroring / Azure Virtual Network TAP directed to a QuarkShield collector target.
    - **On-Premises:** SPAN / TAP port on Cisco, Arista, or Palo Alto Firewalls.
-3. Configure the QuarkShield Wire Sniffer:
+2. Configure the QuarkShield Wire Sniffer:
    ```bash
    # Run passive wire prober on mirror interface eth1
    sudo ./pqc-scanner --mode=wire --interface=eth1 --tenant="SPINOVATION"
@@ -237,7 +245,7 @@ Discovers and audits cryptographic protocols across physical, virtual, and cloud
 Discovers cryptographic keys, asymmetric certificates, SSH keys, OpenSSL/GPG configurations, Java KeyStores (JKS), and application crypto libraries installed across enterprise employee workstations, developer laptops, and physical/virtual servers. **Guarantees zero reboots, non-intrusive operations, and 0% idle CPU overhead.**
 
 ### Steps to Connect
-1. Navigate to **Integrations Hub ➔ Tier 3 ➔ Endpoint Workstations** (or console **Settings ➔ Deployment**).
+1. Go to **Fleet Overview** to manage enrolled endpoints, and use the console **Settings ➔ Deployment** to download the agent / obtain the enrollment token. (Endpoint scanning is not under Integrations & Gateways.)
 2. Copy the pre-authenticated, 1-click deployment command for your operating system:
 
 #### macOS (Apple Silicon & Intel):
@@ -287,7 +295,7 @@ curl -fsSL "https://quarkshield.ai/api/fleet/download/linux?token=YOUR_FLEET_TOK
 Prevents quantum-vulnerable cryptography from entering production codebases by embedding automated policy gates into developers' continuous integration workflows. Automatically audits code changes in pull requests and **fails the CI/CD build (Exit Code 1)** if developers introduce deprecated classical algorithms (RSA, ECC, 3DES, MD5, SHA-1).
 
 ### Steps to Connect
-1. Navigate to **Integrations Hub ➔ Tier 3 ➔ CI/CD Pipeline Gate** (or **External Repositories ➔ CI/CD Gate**).
+1. Navigate to **Integrations & Gateways ➔ Git & CI/CD Gate**.
 2. Choose your CI/CD provider (**GitHub Actions**, **GitLab CI**, or **Bitbucket Pipelines**).
 3. Copy the pre-configured workflow file into your repository:
 
@@ -355,7 +363,7 @@ jobs:
 Performs static application cryptographic analysis (SACA) across remote Git repositories (public or private) without requiring developers to check out code or install local scanners. Detects hardcoded private keys, certificates, cryptographic library calls, weak hashing algorithms, and insecure cipher suites.
 
 ### Steps to Connect
-1. Navigate to **Integrations Hub ➔ Tier 3 ➔ Remote Git Repositories** (or click **External Repositories** in the left sidebar).
+1. Navigate to **Integrations & Gateways ➔ Git & CI/CD Gate**.
 2. Enter the **Git Repository URL** (e.g., `https://github.com/spinovation/api-service.git`).
 3. Specify the **Target Branch** (default: `main` or `master`).
 4. (Optional for private repositories): Enter a **Personal Access Token (PAT)** or SSH Deploy Key.
@@ -385,7 +393,8 @@ Performs static application cryptographic analysis (SACA) across remote Git repo
 Provides a consolidated, single-pane inventory of **every cryptographic asset across the entire enterprise** regardless of where it was discovered (cloud HSMs, enterprise PKI, hybrid proxies, workstations, or source code repositories). Formatted in accordance with the **CycloneDX 1.6 Cryptographic BOM specification**.
 
 ### Steps to Connect
-- Automatically populated by all connected Tier 1, Tier 2, and Tier 3 sources. No separate manual connection required.
+- Automatically populated by **all sources uniformly** — endpoint agents (`endpoint`), the Git & CI/CD auditor (`git_repo`), the Enterprise PKI & Vaults connectors (`cloud_kms` / `enterprise_pki`), and the Hybrid Quantum TLS Proxy (`pqc_proxy`). No separate manual connection is required.
+- The inventory **auto-refreshes after any scan or connector sync**, and the CBOM view provides a source filter to slice the inventory by each source.
 
 ### Requirements to Execute / Complete the Process
 - Open the **CBOM Inventory** tab in the tenant portal or administrative console.
@@ -457,8 +466,8 @@ Implements quantitative risk modeling based on **Mosca's Theorem ($X + Y > Z$)**
 - **Risk Condition:** If **$X + Y > Z$**, the organization is ALREADY compromised today due to "Harvest Now, Decrypt Later" (HNDL) attacks.
 
 ### Steps to Connect
-1. In the tenant portal, click **Settings** in the left sidebar.
-2. Select the **Mosca's Migration Planner** sub-tab.
+1. Open the public QuarkShield landing page at **`https://quarkshield.ai`**.
+2. Launch the interactive **Mosca / Y2Q Readiness Assessment** on the landing page.
 
 ### Requirements to Execute / Complete the Process
 - Adjust the interactive input sliders:
@@ -476,7 +485,7 @@ Implements quantitative risk modeling based on **Mosca's Theorem ($X + Y > Z$)**
 - **Critical Path Gap Analysis:** Quantifies exact deficit in months and years.
 
 ### How to View the Results
-- Rendered interactively inside **Settings ➔ Mosca's Migration Planner**.
+- Rendered interactively on the public landing page (**`https://quarkshield.ai`**) as the **Mosca / Y2Q Readiness Assessment**.
 - Summarized on executive PDF/DOCX reports exported for board and audit committee presentations.
 
 ---
@@ -516,7 +525,7 @@ Provides administrators, cryptographers, and auditors with a conversational AI a
 
 | Feature | Primary Tier | Target Environment | Authentication / Protocol | Primary Output / Result |
 | :--- | :--- | :--- | :--- | :--- |
-| **Unified Integrations Hub** | All Tiers | Central Management | RBAC (Corporate Admin / Crypto) | Single-pane connector directory & sync manager |
+| **Integrations & Gateways** | All Tiers | Central Management | RBAC (Corporate Admin / Crypto) | Single container for Git & CI/CD Gate, Enterprise PKI & Vaults, and Hybrid Quantum TLS Proxy sub-tabs |
 | **Cloud KMS Connectors** | Tier 1 | AWS KMS, Azure Key Vault | IAM Role ARN / App Registration | Discovered cloud keys, key rotation, Shor risk |
 | **Enterprise PKI Connectors** | Tier 1 | Microsoft AD CS, HashiCorp Vault | LDAP, Kerberos, Vault AppRole | CA templates, root certs, internal PKI inventory |
 | **Hybrid Quantum TLS Proxy** | Tier 2 | Application Ingress / Edge | OpenSSL 3.2+ / X25519MLKEM768 | Zero-code PQC TLS termination, HNDL defense |
@@ -526,7 +535,7 @@ Provides administrators, cryptographers, and auditors with a conversational AI a
 | **Remote Git Repo Auditor** | Tier 3 | GitHub, GitLab Repositories | Repo URL + Optional Git PAT | Static source code & dependency crypto audit |
 | **Universal CBOM Inventory** | Cross-Tier | Unified PostgreSQL Database | Central Ingestion Engine | CycloneDX 1.6 inventory with multi-source filter |
 | **CycloneDX Attestation (CDXA)**| Cross-Tier | Security Audits & Compliance | ML-DSA-65 (NIST FIPS 204) Signature | Attested, tamper-evident post-quantum CBOM |
-| **Mosca's Migration Planner** | Governance | Executive & Compliance Review | Interactive Mathematical Engine | $X + Y > Z$ timeline risk posture & deadline gap |
+| **Mosca's Migration Planner** | Governance | Public Landing Page (Y2Q Assessment) | Interactive Mathematical Engine | $X + Y > Z$ timeline risk posture & deadline gap |
 | **PQC Copilot** | Advisory | Operational & Remediation AI | Dual LLM + Offline Deterministic Rules | Real-time CLI snippets, guidance, playbooks |
 
 ---
