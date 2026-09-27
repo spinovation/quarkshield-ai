@@ -9,6 +9,7 @@ import {
   getFleetMachines,
   deleteFleetMachine,
   getFleetCBOM,
+  getPublicFleetPosture,
   getInstallerScript,
   getPowerShellInstallerScript,
   ingestTelemetry,
@@ -162,6 +163,7 @@ router.post('/fleet/machines/:machineId/pull', requireAuth, enqueuePullCommand);
 router.get('/tenant/:tenant/daily-snapshots', requireAuth, requireTenantAccess, getTenantDailySnapshots);
 router.get('/fleet/drift', requireAuth, requireTenantAccess, getFleetDrift);
 router.get('/fleet/cbom', requireAuth, requireTenantAccess, getFleetCBOM);
+router.get('/cbom/fleet', getPublicFleetPosture);
 
 // ==========================================
 // ADMIN PANEL ROUTES (super admin only)

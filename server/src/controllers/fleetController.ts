@@ -1200,3 +1200,34 @@ export const getTenantDailySnapshots = async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch snapshots.' });
   }
 };
+
+/**
+ * GET /api/cbom/fleet
+ * Safe public cryptographic posture feed for landing page hero display.
+ */
+export const getPublicFleetPosture = async (req: Request, res: Response) => {
+  try {
+    const assetsRes = await pool.query(`
+      SELECT 
+        a.id, a.type, a.name, a.algorithm, a.key_size as "keySize", a.hash_algorithm as "hashAlgorithm",
+        a.is_vulnerable as "isVulnerable", a.risk_level as "riskLevel", a.status
+      FROM assets a
+      WHERE LOWER(a.tenant_name) LIKE '%spinovation%'
+      ORDER BY a.is_vulnerable DESC, a.created_at DESC
+      LIMIT 100
+    `);
+    const machinesRes = await pool.query(`
+      SELECT m.id, m.hostname, m.status, m.asset_count as "assetCount"
+      FROM fleet_machines m
+      WHERE LOWER(m.tenant_name) LIKE '%spinovation%'
+      LIMIT 10
+    `);
+    res.json({
+      success: true,
+      assets: assetsRes.rows,
+      machines: machinesRes.rows
+    });
+  } catch (err: any) {
+    res.json({ success: true, assets: [], machines: [] });
+  }
+};

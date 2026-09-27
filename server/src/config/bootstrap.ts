@@ -18,14 +18,20 @@ export const bootstrapAdmin = async (): Promise<void> => {
     return;
   }
   try {
+    const force = String(process.env.BOOTSTRAP_ADMIN_FORCE || '').toLowerCase() === 'true';
     const hash = await hashPassword(password);
     await pool.query(
-      `INSERT INTO admin_users (id, email, password_hash, salt, role, email_verified, company)
-       VALUES ($1, $2, $3, NULL, 'superadmin', true, 'QuarkShield Bootstrap')
-       ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, salt = NULL, role = 'superadmin', row_locked = false`,
+      force
+        ? `INSERT INTO admin_users (id, email, password_hash, salt, role, email_verified, company)
+           VALUES ($1, $2, $3, NULL, 'superadmin', true, 'QuarkShield Bootstrap')
+           ON CONFLICT (email) DO UPDATE SET password_hash = EXCLUDED.password_hash, salt = NULL,
+             role = 'superadmin', row_locked = false`
+        : `INSERT INTO admin_users (id, email, password_hash, salt, role, email_verified, company)
+           VALUES ($1, $2, $3, NULL, 'superadmin', true, 'QuarkShield Bootstrap')
+           ON CONFLICT (email) DO NOTHING`,
       ['usr-bootstrap-' + Buffer.from(email).toString('hex').slice(0, 12), email, hash]
     );
-    console.log(`Bootstrap admin ensured for ${email}.`);
+    console.log(`Bootstrap admin ${force ? 'updated (forced)' : 'ensured (create-only)'} for ${email}.`);
   } catch (err) {
     console.error('Bootstrap admin failed:', err);
   }

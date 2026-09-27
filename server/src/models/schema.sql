@@ -197,17 +197,19 @@ CREATE TABLE IF NOT EXISTS admin_licenses (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Seed initial admin users for quarkshield.ai (Completely separate from quarkshield.services)
-INSERT INTO admin_users (id, email, password_hash, salt, role, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, row_locked, company, last_login)
-VALUES 
-  ('usr-super', 'superadmin@quarkshield.ai', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Core', CURRENT_TIMESTAMP),
-  ('usr-sridhar', 'sridhargs@gmail.com', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Security', CURRENT_TIMESTAMP),
-  ('usr-sridhar-spin', 'sridhargs@spinovation.com', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, 'superadmin', true, true, true, true, false, 'Spinovation Corp', CURRENT_TIMESTAMP),
-  ('usr-admin', 'admin@quarkshield.ai', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Operations', CURRENT_TIMESTAMP),
-  ('usr-demo', 'democlient@example.com', NULL, NULL, 'user', true, true, false, false, false, 'Demo Client Workspace', CURRENT_TIMESTAMP - INTERVAL '12 minutes'),
-  ('usr-locked', 'locked_client@example.com', NULL, NULL, 'user', true, false, false, false, true, 'Locked Security Node', CURRENT_TIMESTAMP - INTERVAL '24 minutes'),
-  ('usr-pending', 'pending_client@example.com', NULL, NULL, 'user', true, false, false, false, false, 'Pending Evaluation Node', NULL)
-ON CONFLICT (email) DO NOTHING;  -- seed only, do not overwrite admin edits on restart (DEF-18)
+-- Seed the single platform super admin. No password is committed; it is set via
+-- the break-glass bootstrap (BOOTSTRAP_ADMIN_* env) or the reset email.
+INSERT INTO admin_users
+  (id, email, password_hash, salt, role, email_verified, cmdb_enabled, playbook_enabled,
+   web3_enabled, row_locked, company, must_change_password, last_login)
+VALUES
+  ('usr-super', 'superadmin@quarkshield.ai', NULL, NULL, 'superadmin', true, true, true, true, false,
+   'QuarkShield Core', true, CURRENT_TIMESTAMP),
+  -- non-privileged sample rows (no passwords)
+  ('usr-demo',    'democlient@example.com',     NULL, NULL, 'user', true, true,  false, false, false, 'Demo Client Workspace',   false, CURRENT_TIMESTAMP - INTERVAL '12 minutes'),
+  ('usr-locked',  'locked_client@example.com',  NULL, NULL, 'user', true, false, false, false, true,  'Locked Security Node',    false, CURRENT_TIMESTAMP - INTERVAL '24 minutes'),
+  ('usr-pending', 'pending_client@example.com', NULL, NULL, 'user', true, false, false, false, false, 'Pending Evaluation Node', false, NULL)
+ON CONFLICT (email) DO NOTHING;  -- create-only; never overwrite a real password on restart
 
 -- Seed initial client organizations / tenants for quarkshield.ai
 INSERT INTO admin_clients (id, name, display_name, app_port, db_port, status, subscription_tier, mca_limit, two_factor_policy, user_count, asset_count, account_type, customer_id, admin_email, contact_name)
@@ -220,16 +222,15 @@ VALUES
   ('client-cyber-shield', 'cybershield-partners', 'CyberShield Managed Security', 5051, 5437, 'active', 'growth', 50, 'optional', 1, 4, 'partner', 'PART-8830', 'd.chen@cybershieldsec.com', 'David Chen')
 ON CONFLICT (name) DO NOTHING;  -- seed only, do not overwrite tenant edits on restart (DEF-18)
 
--- Seed initial tenant users for Spinovation Corp and Algomeld
-INSERT INTO tenant_users (id, tenant_name, email, first_name, last_name, role, status, password_hash, salt, must_change_password)
+-- Seed tenant admins WITHOUT passwords. Each sets their own via the reset/invite
+-- email. One canonical row per person; the algomeld .ai/.com alias is resolved in
+-- the controller, so no duplicate rows are needed.
+INSERT INTO tenant_users
+  (id, tenant_name, email, first_name, last_name, role, status, password_hash, salt, must_change_password)
 VALUES
-  ('tu-sridhar-spin', 'spinovationcorp', 'sridhargs@spinovation.com', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false),
-  ('tu-sridhar-spin-gmail', 'spinovationcorp', 'sridhargs@gmail.com', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false),
-  ('tu-sridhar-algo-ai', 'algomeld', 'sridhargs@algomeld.ai', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false),
-  ('tu-sridhar-algo-com', 'algomeld', 'sridhargs@algomeld.com', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false),
-  ('tu-sridhar-algo-gmail', 'algomeld', 'sridhargs@gmail.com', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false)
-ON CONFLICT (tenant_name, email) DO UPDATE
-SET password_hash = EXCLUDED.password_hash, salt = NULL, status = 'active';
+  ('tu-sridhar-spin',    'spinovationcorp', 'sridhargs@spinovation.com', 'Sridhar', 'GS', 'admin', 'active', NULL, NULL, true),
+  ('tu-sridhar-algo-ai', 'algomeld',        'sridhargs@algomeld.ai',     'Sridhar', 'GS', 'admin', 'active', NULL, NULL, true)
+ON CONFLICT (tenant_name, email) DO NOTHING;  -- CRITICAL: create-only. NEVER DO UPDATE the password_hash.
 
 INSERT INTO admin_licenses (id, license_key, tenant_name, customer_id, tier, duration_days, seats, status, expires_at, contact_name, contact_email)
 VALUES
