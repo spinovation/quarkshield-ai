@@ -31,6 +31,7 @@ export interface CbomAssetInput {
   source?: string;
   sourceRef?: string;
   complianceViolations?: any;
+  tenant?: string;
 }
 
 const lc = (s?: string) => (s || '').toLowerCase();
@@ -114,6 +115,7 @@ export const cbomComponent = (i: CbomAssetInput): any => {
     i.source ? { name: 'quarkshield:assetSource', value: String(i.source) } : null,
     i.sourceRef ? { name: 'quarkshield:sourceReference', value: String(i.sourceRef) } : null,
     i.complianceViolations ? { name: 'quarkshield:complianceViolations', value: JSON.stringify(i.complianceViolations) } : null,
+    i.tenant ? { name: 'quarkshield:tenant', value: String(i.tenant) } : null,
   ].filter(Boolean);
 
   return {

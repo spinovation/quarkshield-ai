@@ -1165,10 +1165,18 @@ export default function App() {
 
   const tenantScopedHostnames = useMemo(() => new Set(cbomScopedMachines.map(m => m.hostname)), [cbomScopedMachines]);
 
+  // Server CBOM components carry hostname/path/tenant in the CycloneDX `properties[]`
+  // array (quarkshield:*), while the sample fallback uses cryptoProperties.detectionContext.
+  // Read both shapes so tenant/machine filtering works against live data.
+  const compProp = (comp: any, key: string) => comp?.properties?.find((p: any) => p.name === key)?.value;
+  const compHost = (comp: any) => comp?.cryptoProperties?.detectionContext?.machineHostname || compProp(comp, 'quarkshield:hostname');
+  const compPath = (comp: any) => comp?.cryptoProperties?.detectionContext?.filePath || compProp(comp, 'quarkshield:path');
+  const compTenant = (comp: any) => comp?.tenantName || compProp(comp, 'quarkshield:tenant');
+
   // Filter CBOM components (Scoped by Tenant, Machine, Category, Status, and Search)
   const filteredCBOMComponents = (cbomData?.components || []).filter((comp: any) => {
-    const host = comp.cryptoProperties?.detectionContext?.machineHostname;
-    const tenantComp = comp.tenantName;
+    const host = compHost(comp);
+    const tenantComp = compTenant(comp);
     const tenantCompClean = tenantComp ? tenantComp.toLowerCase().trim() : '';
 
     const tenantMatch = selectedTenantFilter === 'all' 
@@ -1187,7 +1195,7 @@ export default function App() {
       || (selectedStatusFilter === 'secure' && !isVulnerable);
     const searchMatch = !searchQuery 
       || comp.name?.toLowerCase().includes(searchQuery.toLowerCase())
-      || comp.cryptoProperties?.detectionContext?.filePath?.toLowerCase().includes(searchQuery.toLowerCase())
+      || compPath(comp)?.toLowerCase().includes(searchQuery.toLowerCase())
       || comp.cryptoProperties?.algorithmProperties?.name?.toLowerCase().includes(searchQuery.toLowerCase());
 
     return tenantMatch && machineMatch && categoryMatch && statusMatch && searchMatch;
@@ -1219,8 +1227,8 @@ export default function App() {
       keySize: comp.cryptoProperties?.algorithmProperties?.keyLength,
       isVulnerable: comp.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0,
       riskLevel: comp.properties?.find((p: any) => p.name === 'quarkshield:riskLevel')?.value || (comp.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0 ? 'high' : 'low'),
-      path: comp.cryptoProperties?.detectionContext?.filePath,
-      hostname: comp.cryptoProperties?.detectionContext?.machineHostname,
+      path: compPath(comp),
+      hostname: compHost(comp),
       complianceViolations: comp.properties?.find((p: any) => p.name === 'quarkshield:complianceViolations')?.value
     }));
   }, [filteredCBOMComponents]);
@@ -3032,12 +3040,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                               <td>
                                 <div style={{ fontWeight: 600, color: '#ffffff' }}>{c.name}</div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', fontSize: '0.74rem', color: 'var(--accent-cyan)', fontFamily: 'monospace', marginTop: '0.2rem', wordBreak: 'break-all' }}>
-                                  <span style={{ color: 'var(--text-muted)' }}>📂</span> {c.cryptoProperties?.detectionContext?.filePath || c.path || 'Path unrecorded'}
+                                  <span style={{ color: 'var(--text-muted)' }}>📂</span> {compPath(c) || c.path || 'Path unrecorded'}
                                 </div>
                               </td>
                               <td>
                                 <span style={{ color: 'var(--text-secondary)' }}>
-                                  {c.cryptoProperties?.detectionContext?.machineHostname || 'General Endpoint'}
+                                  {compHost(c) || 'General Endpoint'}
                                 </span>
                               </td>
                               <td>
@@ -3616,7 +3624,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                   <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', textTransform: 'uppercase' }}>Asset Identifier</div>
                   <div style={{ fontWeight: 700, color: '#ffffff' }}>{selectedAssetDetail.name}</div>
                   <div style={{ fontFamily: 'monospace', color: 'var(--accent-cyan)', fontSize: '0.78rem' }}>
-                    {selectedAssetDetail.cryptoProperties?.detectionContext?.filePath}
+                    {compPath(selectedAssetDetail)}
                   </div>
                 </div>
 

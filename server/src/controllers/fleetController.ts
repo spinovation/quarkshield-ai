@@ -293,6 +293,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         source: r.source || 'endpoint',
         sourceRef: r.sourceRef || r.hostname || 'Workstation',
         complianceViolations: r.compliance_violations || [],
+        tenant: r.tenantName || tenantName,
       }))
     };
 
