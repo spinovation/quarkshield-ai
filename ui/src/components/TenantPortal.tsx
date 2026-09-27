@@ -59,13 +59,13 @@ import {
   Phone,
   Filter,
   Package,
+  Network,
   CreditCard
 } from 'lucide-react';
-import MoscaMigrationPlanner from './MoscaMigrationPlanner';
 import { TenantUserManagement } from './TenantUserManagement';
 import { EnterprisePkiVaults } from './EnterprisePkiVaults';
 import { PqcProxyGateway } from './PqcProxyGateway';
-import { IntegrationsHub } from './IntegrationsHub';
+import { GitRepoAuditor } from './GitRepoAuditor';
 import SbomInventory from './SbomInventory';
 import { CryptographicPostureCard, calculatePostureMetrics } from './CryptographicPostureCard';
 
@@ -519,12 +519,12 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     vulnerableAssets: 98,
     avgRiskScore: 87
   });
-  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'pki' | 'proxy' | 'copilot' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
     try {
       const p = new URLSearchParams(window.location.search);
       const t = p.get('tab');
       if (t === 'sbom' || t === 'cbom') return 'cbom';
-      if (t && ['overview', 'integrations', 'repositories', 'pki', 'proxy', 'copilot', 'planner', 'settings'].includes(t)) {
+      if (t && ['overview', 'git', 'pki', 'proxy', 'copilot', 'settings'].includes(t)) {
         return t as any;
       }
     } catch (e) {}
@@ -707,6 +707,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   };
 
   const isSettingsActive = activeTab === 'settings' || activeTab === 'profile' || activeTab === 'users' || activeTab === 'license' || activeTab === 'planner';
+  // Integrations & Gateways is a container tab whose content is the Git / PKI / Proxy sub-tabs
+  const isIntegrationsTab = activeTab === 'git' || activeTab === 'pki' || activeTab === 'proxy';
   const effectiveSettingsTab: 'profile' | 'users' | 'license' | 'planner' = 
     activeTab === 'profile' ? 'profile' :
     activeTab === 'users' ? 'users' :
@@ -2924,17 +2926,18 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           {[
             { id: 'overview', label: 'Fleet Overview', icon: Laptop },
             { id: 'cbom', label: 'Cryptographic BOM (CBOM)', icon: FileCode },
-            { id: 'integrations', label: 'Integrations Hub', icon: Layers, badge: 'Unified Hub' },
-            { id: 'proxy', label: 'Hybrid Quantum TLS Proxy', icon: Radio, badge: 'Inline' },
+            { id: 'integrations_gw', label: 'Integrations & Gateways', icon: Network },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
             { id: 'settings', label: 'Settings', icon: Settings }
           ].map(tab => {
             const Icon = tab.icon;
-            const isTabActive = tab.id === 'settings' 
-              ? isSettingsActive 
-              : tab.id === 'cbom'
-                ? (activeTab === 'cbom' || (activeTab as any) === 'assets' || (activeTab as any) === 'sbom')
-                : activeTab === tab.id;
+            const isTabActive = tab.id === 'settings'
+              ? isSettingsActive
+              : tab.id === 'integrations_gw'
+                ? isIntegrationsTab
+                : tab.id === 'cbom'
+                  ? (activeTab === 'cbom' || (activeTab as any) === 'assets' || (activeTab as any) === 'sbom')
+                  : activeTab === tab.id;
             return (
               <React.Fragment key={tab.id}>
                 <button
@@ -2949,6 +2952,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       }
                     } else if (tab.id === 'cbom') {
                       setActiveTab('cbom');
+                    } else if (tab.id === 'integrations_gw') {
+                      setActiveTab('git');
                     } else {
                       setActiveTab(tab.id as any);
                     }
@@ -3034,8 +3039,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     {[
                       { subId: 'profile' as const, label: 'Profile', icon: User },
                       { subId: 'users' as const, label: 'Team & 2FA', icon: Users },
-                      { subId: 'license' as const, label: 'License', icon: Key },
-                      { subId: 'planner' as const, label: "Mosca's Migration Planner", icon: Calendar, badge: 'X+Y>Z' }
+                      { subId: 'license' as const, label: 'License', icon: Key }
                     ].map(sub => {
                       const SubIcon = sub.icon;
                       // Only highlight a sub-item when Settings is the ACTIVE section —
@@ -3071,19 +3075,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                             <SubIcon size={14} color={isSubActive ? '#38bdf8' : 'var(--text-muted, #64748b)'} style={{ flexShrink: 0 }} />
                             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub.label}</span>
                           </div>
-                          {sub.badge && (
-                            <span style={{
-                              fontSize: '0.6rem',
-                              fontWeight: 700,
-                              padding: '0.05rem 0.3rem',
-                              borderRadius: '3px',
-                              background: isSubActive ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255, 255, 255, 0.08)',
-                              color: isSubActive ? '#38bdf8' : 'var(--text-muted, #94a3b8)',
-                              flexShrink: 0
-                            }}>
-                              {sub.badge}
-                            </span>
-                          )}
                         </button>
                       );
                     })}
@@ -3092,89 +3083,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               </React.Fragment>
             );
           })}
-        </div>
-
-        {/* Separator */}
-        <div style={{ margin: '0.85rem 0', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }} />
-
-        {/* Observability & Quick Actions */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted, #64748b)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '0 0.75rem 0.35rem 0.75rem' }}>
-            Observability & Actions
-          </div>
-          <button
-            onClick={fetchTenantData}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.55rem 0.75rem',
-              borderRadius: '6px',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-secondary, #94a3b8)',
-              fontSize: '0.84rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              width: '100%',
-              textAlign: 'left'
-            }}
-            title="Refresh Telemetry"
-          >
-            <RefreshCw size={16} className={loading ? 'spin' : ''} color="var(--text-muted, #64748b)" />
-            <span>Refresh Telemetry</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setActiveTab('integrations');
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.55rem 0.75rem',
-              borderRadius: '6px',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--accent-cyan, #38bdf8)',
-              fontSize: '0.84rem',
-              fontWeight: 500,
-              cursor: 'pointer',
-              width: '100%',
-              textAlign: 'left'
-            }}
-            title="Integrations & Connectors"
-          >
-            <Layers size={16} color="#00f2fe" />
-            <span>Integrations Hub</span>
-          </button>
-
-          <button
-            onClick={() => {
-              setGeneratedTokenData(null);
-              setShowEnrollModal(true);
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.55rem 0.75rem',
-              borderRadius: '6px',
-              background: 'rgba(56, 189, 248, 0.08)',
-              border: '1px solid rgba(56, 189, 248, 0.25)',
-              color: '#38bdf8',
-              fontSize: '0.84rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-              width: '100%',
-              textAlign: 'left'
-            }}
-            title="Generate Fleet Enrollment Token"
-          >
-            <Key size={16} color="#38bdf8" />
-            <span>Fleet Enrollment Token</span>
-          </button>
         </div>
 
         {/* Subscription Scale Card */}
@@ -4901,561 +4809,50 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               </div>
             )}
 
-            {/* UNIFIED INTEGRATIONS HUB TAB */}
-            {activeTab === 'integrations' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <IntegrationsHub
-                  tenantName={client.displayName || tenantSlug}
-                  licenseKey={activeLicenseKey}
-                  customerId={displayCustomerId}
-                  onNavigateToCbom={(src) => {
-                    if (src) setSourceFilter(src);
-                    setActiveTab('cbom');
-                  }}
-                  onNavigateToProxy={() => setActiveTab('proxy')}
-                  onOpenEnrollModal={() => {
-                    setGeneratedTokenData(null);
-                    setShowEnrollModal(true);
-                  }}
-                />
-              </div>
-            )}
-
-            {/* 3. EXTERNAL REPOSITORIES & CLOUD SOURCES TAB */}
-            {activeTab === 'repositories' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                {/* Header & Sub-Tab Navigation */}
-                <div style={{
-                  background: 'rgba(255, 255, 255, 0.025)',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '12px',
-                  padding: '1.5rem'
-                }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
-                    <div>
-                      <h2 style={{ fontSize: '1.25rem', fontWeight: 800, margin: 0, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <GitBranch size={22} color="var(--accent-cyan, #38bdf8)" />
-                        <span>External Repositories &amp; Cloud Sources</span>
-                      </h2>
-                      <p style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.82rem', margin: '0.35rem 0 0 0' }}>
-                        Audit remote code repositories and cloud key vaults for hardcoded asymmetric keys, weak TLS ciphers, and CNSA 2.0 violations.
-                      </p>
-                    </div>
-
-                    <div style={{
-                      display: 'flex',
-                      background: 'rgba(0, 0, 0, 0.35)',
-                      border: '1px solid rgba(255, 255, 255, 0.1)',
-                      borderRadius: '6px',
-                      padding: '2px'
-                    }}>
-                      <button
-                        onClick={() => setRepoSubTab('git')}
-                        style={{
-                          padding: '0.4rem 0.85rem',
-                          borderRadius: '4px',
-                          border: 'none',
-                          fontSize: '0.8rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          background: repoSubTab === 'git' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                          color: repoSubTab === 'git' ? '#38bdf8' : 'var(--text-muted, #94a3b8)'
-                        }}
-                      >
-                        <GitBranch size={14} /> Git Repositories
-                      </button>
-                      <button
-                        onClick={() => setRepoSubTab('cloud')}
-                        style={{
-                          padding: '0.4rem 0.85rem',
-                          borderRadius: '4px',
-                          border: 'none',
-                          fontSize: '0.8rem',
-                          fontWeight: 600,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          background: repoSubTab === 'cloud' ? 'rgba(56, 189, 248, 0.2)' : 'transparent',
-                          color: repoSubTab === 'cloud' ? '#38bdf8' : 'var(--text-muted, #94a3b8)'
-                        }}
-                      >
-                        <Cloud size={14} /> Cloud Sources (API)
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Sub-View A: Git Repositories */}
-                  {repoSubTab === 'git' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                      {/* Provider Selection */}
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.5rem', fontWeight: 600 }}>
-                          Select Git Provider
-                        </label>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.75rem' }}>
-                          {[
-                            { id: 'github', label: 'GitHub', desc: 'PAT or Public' },
-                            { id: 'bitbucket', label: 'Bitbucket', desc: 'App Password' },
-                            { id: 'gitlab', label: 'GitLab', desc: 'Access Token' },
-                            { id: 'generic', label: 'Generic Git', desc: 'HTTPS Clone' }
-                          ].map(p => (
-                            <button
-                              key={p.id}
-                              onClick={() => setGitProvider(p.id as any)}
-                              style={{
-                                padding: '0.75rem',
-                                borderRadius: '8px',
-                                border: '1px solid',
-                                borderColor: gitProvider === p.id ? 'rgba(56, 189, 248, 0.5)' : 'rgba(255, 255, 255, 0.08)',
-                                background: gitProvider === p.id ? 'rgba(56, 189, 248, 0.12)' : 'rgba(0, 0, 0, 0.25)',
-                                color: gitProvider === p.id ? '#ffffff' : 'var(--text-secondary, #94a3b8)',
-                                textAlign: 'left',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>{p.label}</div>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.15rem' }}>{p.desc}</div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* URL & Branch Inputs */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                            Repository URL
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="https://github.com/organization/repository"
-                            value={gitRepoUrl}
-                            onChange={e => setGitRepoUrl(e.target.value)}
-                            style={{
-                              width: '100%',
-                              padding: '0.55rem 0.85rem',
-                              background: 'rgba(0, 0, 0, 0.35)',
-                              border: '1px solid rgba(255, 255, 255, 0.12)',
-                              borderRadius: '6px',
-                              color: '#ffffff',
-                              fontSize: '0.85rem',
-                              outline: 'none',
-                              boxSizing: 'border-box'
-                            }}
-                          />
-                        </div>
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                            Branch / Tag
-                          </label>
-                          <input
-                            type="text"
-                            placeholder="main"
-                            value={gitBranch}
-                            onChange={e => setGitBranch(e.target.value)}
-                            style={{
-                              width: '100%',
-                              padding: '0.55rem 0.85rem',
-                              background: 'rgba(0, 0, 0, 0.35)',
-                              border: '1px solid rgba(255, 255, 255, 0.12)',
-                              borderRadius: '6px',
-                              color: '#ffffff',
-                              fontSize: '0.85rem',
-                              outline: 'none',
-                              boxSizing: 'border-box'
-                            }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Token Auth */}
-                      <div style={{ display: 'grid', gridTemplateColumns: gitProvider === 'bitbucket' ? '1fr 1fr' : '1fr', gap: '1rem' }}>
-                        {gitProvider === 'bitbucket' && (
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              Bitbucket Username
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="e.g. corporate-admin"
-                              value={gitUsername}
-                              onChange={e => setGitUsername(e.target.value)}
-                              style={{
-                                width: '100%',
-                                padding: '0.55rem 0.85rem',
-                                background: 'rgba(0, 0, 0, 0.35)',
-                                border: '1px solid rgba(255, 255, 255, 0.12)',
-                                borderRadius: '6px',
-                                color: '#ffffff',
-                                fontSize: '0.85rem',
-                                outline: 'none',
-                                boxSizing: 'border-box'
-                              }}
-                            />
-                          </div>
-                        )}
-                        <div style={{ position: 'relative' }}>
-                          <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                            Personal Access Token (PAT) / API Key
-                          </label>
-                          <div style={{ position: 'relative' }}>
-                            <input
-                              type={showGitToken ? 'text' : 'password'}
-                              placeholder="ghp_... or Bitbucket app password (leave blank if public)"
-                              value={gitAuthToken}
-                              onChange={e => setGitAuthToken(e.target.value)}
-                              style={{
-                                width: '100%',
-                                padding: '0.55rem 2.2rem 0.55rem 0.85rem',
-                                background: 'rgba(0, 0, 0, 0.35)',
-                                border: '1px solid rgba(255, 255, 255, 0.12)',
-                                borderRadius: '6px',
-                                color: '#ffffff',
-                                fontSize: '0.85rem',
-                                outline: 'none',
-                                boxSizing: 'border-box'
-                              }}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowGitToken(!showGitToken)}
-                              style={{
-                                position: 'absolute',
-                                right: '8px',
-                                top: '50%',
-                                transform: 'translateY(-50%)',
-                                background: 'transparent',
-                                border: 'none',
-                                color: 'var(--text-muted, #94a3b8)',
-                                cursor: 'pointer',
-                                padding: '4px'
-                              }}
-                            >
-                              {showGitToken ? <EyeOff size={14} /> : <Eye size={14} />}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Error Banner */}
-                      {gitScanError && (
-                        <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.3)', color: '#f87171', padding: '0.65rem 1rem', borderRadius: '6px', fontSize: '0.82rem' }}>
-                          {gitScanError}
-                        </div>
-                      )}
-
-                      {/* Action Button */}
-                      <div>
-                        <button
-                          onClick={handleRunGitScan}
-                          disabled={gitScanning}
-                          style={{
-                            background: gitScanning ? 'rgba(56, 189, 248, 0.2)' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                            border: '1px solid rgba(56, 189, 248, 0.5)',
-                            color: '#ffffff',
-                            padding: '0.6rem 1.25rem',
-                            borderRadius: '6px',
-                            fontSize: '0.84rem',
-                            fontWeight: 700,
-                            cursor: gitScanning ? 'not-allowed' : 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                          }}
-                        >
-                          <RefreshCw size={15} className={gitScanning ? 'animate-spin' : ''} />
-                          {gitScanning ? gitScanStep : 'Scan Repository for PQC Vulnerabilities'}
-                        </button>
-                      </div>
-
-                      {/* Scan Results Presentation */}
-                      {gitScanResults && (
-                        <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
-                            <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '0.85rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted, #94a3b8)', textTransform: 'uppercase' }}>Files Scanned</div>
-                              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff' }}>{gitScanResults.totalFilesScanned}</div>
-                            </div>
-                            <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '0.85rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted, #94a3b8)', textTransform: 'uppercase' }}>Crypto Primitives</div>
-                              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#ffffff' }}>{gitScanResults.totalAssets}</div>
-                            </div>
-                            <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '0.85rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted, #94a3b8)', textTransform: 'uppercase' }}>Shor Vulnerable</div>
-                              <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#f87171' }}>{gitScanResults.vulnerableCount}</div>
-                            </div>
-                            <div style={{ background: 'rgba(0, 0, 0, 0.4)', padding: '0.85rem', borderRadius: '8px', border: '1px solid rgba(255, 255, 255, 0.06)' }}>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted, #94a3b8)', textTransform: 'uppercase' }}>CNSA 2.0 Status</div>
-                              <div style={{ fontSize: '1rem', fontWeight: 800, color: '#f87171', marginTop: '0.3rem' }}>{gitScanResults.cnsaStatus}</div>
-                            </div>
-                          </div>
-
-                          {/* Findings Details */}
-                          <div style={{ background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '8px', padding: '1rem' }}>
-                            <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#ffffff', marginBottom: '0.75rem' }}>
-                              Discovered Cryptographic Flaws in Codebase
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                              {(gitScanResults.findings || []).map((f: any) => (
-                                <div key={f.id} style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '6px', padding: '0.85rem' }}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                    <div>
-                                      <span style={{ fontFamily: 'monospace', color: '#38bdf8', fontSize: '0.82rem', fontWeight: 700 }}>
-                                        {f.filePath}:{f.lineNumber || 1}
-                                      </span>
-                                      <div style={{ color: '#ffffff', fontWeight: 600, fontSize: '0.85rem', marginTop: '0.2rem' }}>
-                                        {f.assetName} • <span style={{ color: '#f87171' }}>{f.algorithm}</span>
-                                      </div>
-                                    </div>
-                                    <span style={{ fontSize: '0.68rem', fontWeight: 700, padding: '0.15rem 0.4rem', borderRadius: '3px', background: 'rgba(239, 68, 68, 0.15)', color: '#f87171' }}>
-                                      {f.riskLevel?.toUpperCase()}
-                                    </span>
-                                  </div>
-                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', margin: '0.4rem 0' }}>
-                                    {f.quantumThreat}
-                                  </div>
-                                  {f.remediationSnippet && (
-                                    <div style={{ marginTop: '0.4rem' }}>
-                                      <pre style={{ margin: 0, padding: '0.5rem 0.75rem', background: '#030712', borderRadius: '4px', fontFamily: 'monospace', fontSize: '0.74rem', color: '#4ade80', overflowX: 'auto' }}>
-                                        {f.remediationSnippet}
-                                      </pre>
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Sub-View B: Cloud Sources & Key Vaults */}
-                  {repoSubTab === 'cloud' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.5rem', fontWeight: 600 }}>
-                          Select Cloud Key Management / Secrets Provider
-                        </label>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.75rem' }}>
-                          {[
-                            { id: 'aws', label: 'AWS Secrets & KMS', desc: 'AWS IAM API' },
-                            { id: 'azure', label: 'Azure Key Vault', desc: 'Entra ID Client' },
-                            { id: 'vault', label: 'HashiCorp Vault', desc: 'AppRole / Token' },
-                            { id: 'gcp', label: 'Google Cloud KMS', desc: 'GCP Service Account' }
-                          ].map(c => (
-                            <button
-                              key={c.id}
-                              onClick={() => setCloudProvider(c.id as any)}
-                              style={{
-                                padding: '0.75rem',
-                                borderRadius: '8px',
-                                border: '1px solid',
-                                borderColor: cloudProvider === c.id ? 'rgba(56, 189, 248, 0.5)' : 'rgba(255, 255, 255, 0.08)',
-                                background: cloudProvider === c.id ? 'rgba(56, 189, 248, 0.12)' : 'rgba(0, 0, 0, 0.25)',
-                                color: cloudProvider === c.id ? '#ffffff' : 'var(--text-secondary, #94a3b8)',
-                                textAlign: 'left',
-                                cursor: 'pointer'
-                              }}
-                            >
-                              <div style={{ fontWeight: 700, fontSize: '0.85rem' }}>{c.label}</div>
-                              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.15rem' }}>{c.desc}</div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* AWS Form */}
-                      {cloudProvider === 'aws' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              AWS Access Key ID
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="AKIAIOSFODNN7EXAMPLE"
-                              value={cloudCreds.awsKey}
-                              onChange={e => setCloudCreds({ ...cloudCreds, awsKey: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              AWS Secret Access Key
-                            </label>
-                            <input
-                              type="password"
-                              placeholder="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-                              value={cloudCreds.awsSecret}
-                              onChange={e => setCloudCreds({ ...cloudCreds, awsSecret: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              Target Region
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="us-east-1"
-                              value={cloudCreds.awsRegion}
-                              onChange={e => setCloudCreds({ ...cloudCreds, awsRegion: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Azure Form */}
-                      {cloudProvider === 'azure' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              Azure Key Vault URL
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="https://spinovation-vault.vault.azure.net"
-                              value={cloudCreds.azureVaultUrl}
-                              onChange={e => setCloudCreds({ ...cloudCreds, azureVaultUrl: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              Directory (Tenant) ID
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="00000000-0000-0000-0000-000000000000"
-                              value={cloudCreds.azureTenantId}
-                              onChange={e => setCloudCreds({ ...cloudCreds, azureTenantId: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Vault Form */}
-                      {cloudProvider === 'vault' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              Vault Cluster Address
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="https://vault.internal.corp:8200"
-                              value={cloudCreds.vaultAddress}
-                              onChange={e => setCloudCreds({ ...cloudCreds, vaultAddress: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              API Token / AppRole
-                            </label>
-                            <input
-                              type="password"
-                              placeholder="s.7x8y9z..."
-                              value={cloudCreds.vaultToken}
-                              onChange={e => setCloudCreds({ ...cloudCreds, vaultToken: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* GCP Form */}
-                      {cloudProvider === 'gcp' && (
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              GCP Project ID
-                            </label>
-                            <input
-                              type="text"
-                              placeholder="spinovation-security-prod"
-                              value={cloudCreds.gcpProject}
-                              onChange={e => setCloudCreds({ ...cloudCreds, gcpProject: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', marginBottom: '0.4rem', fontWeight: 600 }}>
-                              Service Account Key (JSON)
-                            </label>
-                            <input
-                              type="password"
-                              placeholder="Paste service-account.json content"
-                              value={cloudCreds.gcpKey}
-                              onChange={e => setCloudCreds({ ...cloudCreds, gcpKey: e.target.value })}
-                              style={{ width: '100%', padding: '0.55rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem', boxSizing: 'border-box' }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      <div>
-                        <button
-                          onClick={handleTestCloudConnection}
-                          disabled={cloudTesting}
-                          style={{
-                            background: cloudTesting ? 'rgba(56, 189, 248, 0.2)' : 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)',
-                            border: '1px solid rgba(56, 189, 248, 0.5)',
-                            color: '#ffffff',
-                            padding: '0.6rem 1.25rem',
-                            borderRadius: '6px',
-                            fontSize: '0.84rem',
-                            fontWeight: 700,
-                            cursor: cloudTesting ? 'not-allowed' : 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.5rem'
-                          }}
-                        >
-                          <Cloud size={15} />
-                          {cloudTesting ? 'Verifying Cloud API Connection...' : 'Connect API & Audit Secrets'}
-                        </button>
-                      </div>
-
-                      {cloudStatus && (
-                        <div style={{ background: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.25)', borderRadius: '8px', padding: '1rem', marginTop: '0.5rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#4ade80', fontWeight: 700, fontSize: '0.9rem' }}>
-                            <CheckCircle2 size={16} /> Connection Successful: {cloudStatus.provider}
-                          </div>
-                          <p style={{ color: 'var(--text-secondary, #94a3b8)', fontSize: '0.82rem', margin: '0.5rem 0' }}>
-                            {cloudStatus.details}
-                          </p>
-                          <div style={{ display: 'flex', gap: '1.5rem', marginTop: '0.75rem', fontSize: '0.8rem' }}>
-                            <div>Total Keys: <strong style={{ color: '#ffffff' }}>{cloudStatus.discoveredKeys}</strong></div>
-                            <div>Shor Vulnerable: <strong style={{ color: '#f87171' }}>{cloudStatus.vulnerableKeys}</strong></div>
-                            <div>Post-Quantum Ready: <strong style={{ color: '#4ade80' }}>{cloudStatus.pqcKeys}</strong></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
+            {/* INTEGRATIONS & GATEWAYS — Git / PKI / Proxy sub-tabs */}
+            {isIntegrationsTab && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                {/* Sub-tab bar */}
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.75rem' }}>
+                  {([
+                    { id: 'git' as const, label: 'Git & CI/CD Gate', Icon: GitBranch },
+                    { id: 'pki' as const, label: 'Enterprise PKI & Vaults', Icon: Database },
+                    { id: 'proxy' as const, label: 'Hybrid Quantum TLS Proxy', Icon: Radio }
+                  ]).map(({ id, label, Icon }) => (
+                    <button
+                      key={id}
+                      onClick={() => setActiveTab(id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 0.9rem',
+                        borderRadius: '7px',
+                        background: activeTab === id ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
+                        border: activeTab === id ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                        color: activeTab === id ? 'var(--accent-cyan, #38bdf8)' : 'var(--text-secondary, #94a3b8)',
+                        fontSize: '0.82rem',
+                        fontWeight: activeTab === id ? 600 : 500,
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      <Icon size={15} color={activeTab === id ? 'var(--accent-cyan, #38bdf8)' : 'var(--text-muted, #64748b)'} />
+                      <span>{label}</span>
+                    </button>
+                  ))}
                 </div>
-              </div>
-            )}
 
-            {/* ENTERPRISE PKI & CLOUD VAULT CONNECTORS */}
-            {activeTab === 'pki' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <EnterprisePkiVaults tenantName={client.displayName || tenantSlug} />
-              </div>
-            )}
-
-            {/* HYBRID QUANTUM TLS REVERSE PROXY GATEWAY */}
-            {activeTab === 'proxy' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <PqcProxyGateway />
+                {/* Sub-tab content */}
+                {activeTab === 'git' && (
+                  <GitRepoAuditor />
+                )}
+                {activeTab === 'pki' && (
+                  <EnterprisePkiVaults tenantName={client.displayName || tenantSlug} />
+                )}
+                {activeTab === 'proxy' && (
+                  <PqcProxyGateway />
+                )}
               </div>
             )}
 
@@ -7416,17 +6813,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               </div>
             )}
 
-            {/* MOSCA'S QUANTUM MIGRATION PLANNER SUB-TAB UNDER SETTINGS */}
-            {effectiveSettingsTab === 'planner' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                <MoscaMigrationPlanner
-                  variant="console"
-                  onNavigateToScan={() => setActiveTab('integrations')}
-                  totalFleetEndpoints={stats.totalMachines || machines.length}
-                  totalVulnerableAssets={stats.vulnerableAssets || assets.filter(a => a.isVulnerable).length}
-                />
-              </div>
-            )}
           </div>
         )}
 
