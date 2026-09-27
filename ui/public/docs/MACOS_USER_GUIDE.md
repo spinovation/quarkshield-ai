@@ -246,9 +246,9 @@ To aggregate telemetry across all organizational Macs into your central QuarkShi
 1. Click **🌐 Connect to Fleet** in the top navigation bar.
 2. Enter:
    - **Central Management URL:** `https://quarkshield.ai`
-   - **Enterprise Fleet Token:** Your tenant token.
+   - **Enterprise Fleet Token:** Your tenant enrollment token, obtained from the console under **Settings ➔ Deployment**.
 3. Click **Transmit & Sync**.
-4. Your Mac's cryptographic inventory will immediately appear under **Fleet Assets** on the cloud console.
+4. Your Mac's cryptographic inventory will immediately appear under **Fleet Overview** and the **Cryptographic BOM (CBOM)** tab on the cloud console.
 
 ### Method 2: Via Terminal
 ```bash

@@ -228,7 +228,9 @@ QuarkShield generates standard **Cryptographic Bill of Materials (CBOM)** compli
 
 ## 8. Connecting & Synchronizing with QuarkShield Cloud Fleet
 
-To stream real-time cryptographic posture data from Linux servers into your centralized QuarkShield dashboard:
+To stream real-time cryptographic posture data from Linux servers into your centralized QuarkShield Console:
+
+> **Getting your fleet enrollment token:** Log in to the QuarkShield Console at [https://quarkshield.ai](https://quarkshield.ai) and open **Settings ➔ Deployment** to download the agent and copy your enrollment token. Once a Linux host registers, its discovered cryptography appears in the Console under **Fleet Overview** and the **Cryptographic BOM (CBOM)** tab (filter the CBOM by the `endpoint` source to isolate fleet scan results).
 
 ### Via Command Line (Ideal for Servers & CI/CD)
 ```bash

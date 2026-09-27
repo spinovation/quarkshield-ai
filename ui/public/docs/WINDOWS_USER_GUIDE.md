@@ -246,7 +246,7 @@ To aggregate cryptographic posture data across hundreds or thousands of enterpri
 1. In the top navigation bar of QuarkShield, click **🌐 Connect to Fleet**.
 2. A synchronization modal will open:
    - **Central Management URL:** `https://quarkshield.ai` (default)
-   - **Enterprise Fleet Token:** Paste the enrollment token provided by your QuarkShield administrator or generated in the Admin Console.
+   - **Enterprise Fleet Token:** Paste the enrollment token provided by your QuarkShield administrator or obtained from **Settings ➔ Deployment** in the console.
 3. Click **Transmit & Sync**.
 4. Telemetry, machine hostname, IP address, and all cryptographic findings will be securely ingested into QuarkShield Central.
 

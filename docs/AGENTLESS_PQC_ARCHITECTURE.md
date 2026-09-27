@@ -2,7 +2,7 @@
 ## Agentless Post-Quantum Cryptographic Visibility & CBOM Synthesis
 
 **Document Version**: 2.0  
-**Date**: September 2026  
+**Date**: September 27, 2026  
 **Audience**: Enterprise CISOs, Cloud Security Architects, Cryptographic Engineers, DevOps & SRE Teams  
 **Compliance Frameworks**: NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), FIPS 205 (SLH-DSA), NSA CNSA 2.0, Executive Order 14028, CycloneDX 1.6+ CBOM  
 
@@ -143,16 +143,13 @@ In this modern architecture, the Go scanner binary (`quarkshield-scanner`) is no
 
 ---
 
-## Roadmap for Standalone VPS (`quarkshield.ai`)
+## The Unified Management Console (`quarkshield.ai`)
 
-When deploying to the dedicated Contabo VPS, QuarkShield will provide a unified **Hybrid Management Console**:
+Deployed at `quarkshield.ai`, QuarkShield provides a unified **Management Console**. The tenant left-hand navigation exposes **Fleet Overview**, **Cryptographic BOM (CBOM)**, **Integrations & Gateways**, **PQC Copilot**, and **Settings**:
 
-1. **Tab 1: Cloud & MDM API Connectors**:
-   - 1-click wizard to connect AWS, Azure, Microsoft Intune, and Jamf Pro.
-   - Automatically synchronizes cloud KMS keys and corporate workstation certificates into the centralized asset graph.
-2. **Tab 2: Remote Active Network Prober**:
-   - Enter IP ranges, subnets, or domain names to launch zero-touch external PQC scans.
-3. **Tab 3: Ephemeral CLI & 1-Click Enrollment**:
-   - For developer laptops and CI/CD pipelines wanting instantaneous local audits.
-4. **Tab 4: Unified CycloneDX 1.6+ CBOM Explorer**:
-   - Aggregates assets from both Agentless APIs and CLI runners into a single cryptographic bill of materials with real-time NIST PQC remediation roadmaps.
+1. **Integrations & Gateways** groups the agentless connectors into three sub-tabs:
+   - **Git & CI/CD Gate** — audits organization repositories and CI/CD pipelines.
+   - **Enterprise PKI & Vaults** — connects AWS KMS, Azure Key Vault, HashiCorp Vault, and Microsoft AD CS.
+   - **Hybrid Quantum TLS Proxy** — performs active TLS key-exchange inspection for hybrid post-quantum support.
+2. **Fleet Overview** manages endpoint fleet scanning; the agent enrollment token is obtained from **Settings ➔ Deployment**, for developer laptops and CI/CD pipelines wanting local audits.
+3. **Cryptographic BOM (CBOM)** aggregates assets uniformly from every source — endpoint agents, the Git & CI/CD auditor, Enterprise PKI & Vault connectors, and the Hybrid Quantum TLS Proxy — into a single CycloneDX 1.6 cryptographic bill of materials with real-time NIST PQC remediation roadmaps. It auto-refreshes after each scan/sync and offers a source filter to slice the inventory by origin.
