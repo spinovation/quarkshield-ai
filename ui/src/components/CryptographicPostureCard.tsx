@@ -218,8 +218,7 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
       flexDirection: 'column',
       gap: '0.85rem',
       position: 'relative',
-      width: '100%',
-      maxWidth: '560px'
+      width: '100%'
     }}>
       {/* Header with Title and Live status */}
       <div style={{
@@ -275,7 +274,14 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
         )}
       </div>
 
-      {/* 3x2 Grid of Posture Metric Cards (Always 3 columns) */}
+      {/* Two-column body: KPI grid (left) + Critical finding (right) — fills the width */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+        gap: '0.9rem',
+        alignItems: 'start'
+      }}>
+      {/* KPI metric tiles */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(3, 1fr)',
@@ -587,6 +593,7 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 };

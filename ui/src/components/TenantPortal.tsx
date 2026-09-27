@@ -3038,7 +3038,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       { subId: 'planner' as const, label: "Mosca's Migration Planner", icon: Calendar, badge: 'X+Y>Z' }
                     ].map(sub => {
                       const SubIcon = sub.icon;
-                      const isSubActive = effectiveSettingsTab === sub.subId;
+                      // Only highlight a sub-item when Settings is the ACTIVE section —
+                      // not merely expanded. Otherwise Profile (the default sub-tab) shows
+                      // selected even while viewing CBOM/other tabs.
+                      const isSubActive = isSettingsActive && effectiveSettingsTab === sub.subId;
                       return (
                         <button
                           key={sub.subId}
