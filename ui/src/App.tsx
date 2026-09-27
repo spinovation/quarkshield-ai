@@ -3,14 +3,12 @@ import {
   Laptop, 
   Server, 
   ShieldAlert, 
-  Terminal, 
   Copy, 
   Check, 
   Download, 
   Search, 
   Plus, 
   Trash2, 
-  RefreshCw, 
   FileCode, 
   Code, 
   Cpu, 
@@ -31,12 +29,12 @@ import {
   ChevronUp,
   Shield,
   UserPlus,
-  Calendar,
   CheckCircle2,
   QrCode,
   AlertTriangle,
   Database,
   Radio,
+  Network,
   Package
 } from 'lucide-react';
 
@@ -44,7 +42,6 @@ import { AdminPanel } from './components/AdminPanel';
 import { LandingPage } from './components/LandingPage';
 import { GitRepoAuditor } from './components/GitRepoAuditor';
 import { TenantPortal } from './components/TenantPortal';
-import MoscaMigrationPlanner from './components/MoscaMigrationPlanner';
 import { EnterprisePkiVaults } from './components/EnterprisePkiVaults';
 import { PqcProxyGateway } from './components/PqcProxyGateway';
 import SbomInventory from './components/SbomInventory';
@@ -283,7 +280,10 @@ export default function App() {
     if (window.location.hash === '#planner') return 'planner';
     return 'dashboard';
   });
-  
+
+  // Integrations & Gateways is a container tab whose content is the Git / PKI / Proxy sub-tabs
+  const isIntegrationsTab = activeTab === 'git' || activeTab === 'pki' || activeTab === 'proxy';
+
   const [currentUserEmail, setCurrentUserEmail] = useState<string>(() => {
     return localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '';
   });
@@ -1571,33 +1571,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
             </span>
           </button>
 
-          {/* Agent Tokens & Deployment */}
-          <button
-            onClick={() => setActiveTab('tokens')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.6rem 0.75rem',
-              borderRadius: '6px',
-              background: activeTab === 'tokens' ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
-              border: activeTab === 'tokens' ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
-              color: activeTab === 'tokens' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-              fontSize: '0.85rem',
-              fontWeight: activeTab === 'tokens' ? 600 : 500,
-              textAlign: 'left',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              width: '100%'
-            }}
-          >
-            <Key size={17} color={activeTab === 'tokens' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
-            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Agent Tokens & Deployment
-            </span>
-          </button>
-
-          {/* Git Repositories */}
+          {/* Integrations & Gateways (container for Git, PKI, Proxy sub-tabs) */}
           <button
             onClick={() => setActiveTab('git')}
             style={{
@@ -1606,202 +1580,21 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               gap: '0.7rem',
               padding: '0.6rem 0.75rem',
               borderRadius: '6px',
-              background: activeTab === 'git' ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
-              border: activeTab === 'git' ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
-              color: activeTab === 'git' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              background: isIntegrationsTab ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
+              border: isIntegrationsTab ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
+              color: isIntegrationsTab ? 'var(--accent-cyan)' : 'var(--text-secondary)',
               fontSize: '0.85rem',
-              fontWeight: activeTab === 'git' ? 600 : 500,
+              fontWeight: isIntegrationsTab ? 600 : 500,
               textAlign: 'left',
               cursor: 'pointer',
               transition: 'all 0.15s ease',
               width: '100%'
             }}
           >
-            <GitBranch size={17} color={activeTab === 'git' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
+            <Network size={17} color={isIntegrationsTab ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Git Repositories &amp; CI/CD Gate
+              Integrations &amp; Gateways
             </span>
-          </button>
-
-          {/* Enterprise PKI & Vaults */}
-          <button
-            onClick={() => setActiveTab('pki')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.6rem 0.75rem',
-              borderRadius: '6px',
-              background: activeTab === 'pki' ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
-              border: activeTab === 'pki' ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
-              color: activeTab === 'pki' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-              fontSize: '0.85rem',
-              fontWeight: activeTab === 'pki' ? 600 : 500,
-              textAlign: 'left',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              width: '100%',
-              justifyContent: 'space-between'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', overflow: 'hidden' }}>
-              <Database size={17} color={activeTab === 'pki' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
-              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                Enterprise PKI &amp; Vaults
-              </span>
-            </div>
-            <span style={{ fontSize: '0.64rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-              Sync
-            </span>
-          </button>
-
-          {/* Hybrid Quantum TLS Proxy */}
-          <button
-            onClick={() => setActiveTab('proxy')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.6rem 0.75rem',
-              borderRadius: '6px',
-              background: activeTab === 'proxy' ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
-              border: activeTab === 'proxy' ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
-              color: activeTab === 'proxy' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-              fontSize: '0.85rem',
-              fontWeight: activeTab === 'proxy' ? 600 : 500,
-              textAlign: 'left',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              width: '100%',
-              justifyContent: 'space-between'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', overflow: 'hidden' }}>
-              <Radio size={17} color={activeTab === 'proxy' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
-              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                Hybrid Quantum TLS Proxy
-              </span>
-            </div>
-            <span style={{ fontSize: '0.64rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(52, 211, 153, 0.15)', color: '#34d399', border: '1px solid rgba(52, 211, 153, 0.3)' }}>
-              Inline
-            </span>
-          </button>
-
-          {/* TAB 5: MOSCA'S QUANTUM MIGRATION PLANNER */}
-          <button
-            onClick={() => setActiveTab('planner')}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.65rem',
-              padding: '0.55rem 0.75rem',
-              borderRadius: '6px',
-              background: activeTab === 'planner' ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
-              border: activeTab === 'planner' ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
-              color: activeTab === 'planner' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
-              fontSize: '0.85rem',
-              fontWeight: activeTab === 'planner' ? 600 : 500,
-              textAlign: 'left',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              width: '100%',
-              justifyContent: 'space-between'
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', overflow: 'hidden' }}>
-              <Calendar size={17} color={activeTab === 'planner' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
-              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                Mosca&apos;s Migration Planner
-              </span>
-            </div>
-            <span style={{ fontSize: '0.64rem', padding: '0.1rem 0.35rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.15)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.3)' }}>
-              X+Y&gt;Z
-            </span>
-          </button>
-        </div>
-
-        {/* Separator */}
-        <div style={{ margin: '0.85rem 0', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }} />
-
-        {/* Observability & Action Links requested by user */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', padding: '0 0.75rem 0.35rem 0.75rem' }}>
-            Observability & Actions
-          </div>
-
-          {/* Refresh Telemetry */}
-          <button
-            onClick={() => { fetchMachines(); fetchCBOM(); fetchTokens(); fetchClients(); }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.55rem 0.75rem',
-              borderRadius: '6px',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-secondary)',
-              fontSize: '0.84rem',
-              fontWeight: 500,
-              textAlign: 'left',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              width: '100%'
-            }}
-            title="Refresh Host & Fleet Telemetry"
-          >
-            <RefreshCw size={16} className={loading ? 'spin' : ''} color="var(--text-muted)" />
-            <span>Refresh Telemetry</span>
-          </button>
-
-          {/* Export CBOM (CycloneDX) */}
-          <button
-            onClick={() => downloadCBOMJson(false)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.55rem 0.75rem',
-              borderRadius: '6px',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-secondary)',
-              fontSize: '0.84rem',
-              fontWeight: 500,
-              textAlign: 'left',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              width: '100%'
-            }}
-            title="Export CycloneDX 1.6 Cryptographic Bill of Materials"
-          >
-            <Download size={16} color="var(--text-muted)" />
-            <span>Export CBOM (CycloneDX)</span>
-          </button>
-
-          {/* Deploy Endpoint Agent */}
-          <button
-            onClick={() => { setActiveTab('tokens'); setShowCreateTokenModal(true); }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.7rem',
-              padding: '0.55rem 0.75rem',
-              borderRadius: '6px',
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--accent-cyan)',
-              fontSize: '0.84rem',
-              fontWeight: 500,
-              textAlign: 'left',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              width: '100%'
-            }}
-            title="Generate Token and Deploy Endpoint Agent"
-          >
-            <Terminal size={16} color="var(--accent-cyan)" />
-            <span>Deploy Endpoint Agent</span>
           </button>
         </div>
 
@@ -3196,300 +2989,54 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           </div>
         )}
 
-        {/* TAB 3: AGENT TOKENS & DEPLOYMENT CENTER */}
-        {activeTab === 'tokens' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-            
-            {/* Active Tokens Panel */}
-            <div className="glass-panel" style={{ padding: '1.5rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '1rem' }}>
-                <div>
-                  <h3 style={{ margin: '0 0 0.25rem 0', fontSize: '1.15rem', fontWeight: 700, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Key size={18} color="var(--accent-cyan)" /> Fleet Enrollment Tokens
-                  </h3>
-                  <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                    Scoped tokens used by native agents to authenticate telemetry back to this tenant.
-                  </p>
-                </div>
-
+        {/* INTEGRATIONS & GATEWAYS — Git / PKI / Proxy sub-tabs */}
+        {isIntegrationsTab && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Sub-tab bar */}
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', borderBottom: '1px solid rgba(255, 255, 255, 0.08)', paddingBottom: '0.75rem' }}>
+              {([
+                { id: 'git' as TabType, label: 'Git & CI/CD Gate', Icon: GitBranch },
+                { id: 'pki' as TabType, label: 'Enterprise PKI & Vaults', Icon: Database },
+                { id: 'proxy' as TabType, label: 'Hybrid Quantum TLS Proxy', Icon: Radio }
+              ]).map(({ id, label, Icon }) => (
                 <button
-                  onClick={() => setShowCreateTokenModal(true)}
-                  className="btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', padding: '0.5rem 0.9rem' }}
+                  key={id}
+                  onClick={() => setActiveTab(id)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    padding: '0.5rem 0.9rem',
+                    borderRadius: '7px',
+                    background: activeTab === id ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
+                    border: activeTab === id ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid rgba(255, 255, 255, 0.1)',
+                    color: activeTab === id ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                    fontSize: '0.82rem',
+                    fontWeight: activeTab === id ? 600 : 500,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
                 >
-                  <Plus size={14} /> Generate Enrollment Token
+                  <Icon size={15} color={activeTab === id ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
+                  <span>{label}</span>
                 </button>
-              </div>
-
-              <div style={{ overflowX: 'auto' }}>
-                <table className="quark-table" style={{ width: '100%', fontSize: '0.85rem' }}>
-                  <thead>
-                    <tr>
-                      <th>Token Group Label</th>
-                      <th>Enrollment Secret</th>
-                      <th>Active Endpoints</th>
-                      <th>Created Date</th>
-                      <th style={{ textAlign: 'right' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tokens.map(t => (
-                      <tr key={t.id}>
-                        <td style={{ fontWeight: 600, color: '#ffffff' }}>
-                          {t.name}
-                        </td>
-                        <td>
-                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'monospace', background: 'rgba(0,0,0,0.3)', padding: '0.2rem 0.6rem', borderRadius: '4px', fontSize: '0.8rem' }}>
-                            <span>{t.token.slice(0, 16)}••••••••</span>
-                            <button
-                              onClick={() => copyToClipboard(t.token, `tok-${t.id}`)}
-                              style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 0 }}
-                              title="Copy full token secret"
-                            >
-                              {copiedCode === `tok-${t.id}` ? <Check size={13} color="var(--status-secure)" /> : <Copy size={13} />}
-                            </button>
-                          </div>
-                        </td>
-                        <td>
-                          <span style={{ fontWeight: 600, color: 'var(--accent-cyan)' }}>
-                            {t.machineCount || 0} machines
-                          </span>
-                        </td>
-                        <td style={{ color: 'var(--text-muted)' }}>
-                          {new Date(t.createdAt).toLocaleDateString()}
-                        </td>
-                        <td style={{ textAlign: 'right' }}>
-                          <button
-                            onClick={() => handleRevokeToken(t.id)}
-                            style={{ background: 'none', border: 'none', color: 'var(--status-vulnerable)', cursor: 'pointer', padding: '0.2rem 0.5rem' }}
-                            title="Revoke Token"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              ))}
             </div>
 
-            {/* 1-Click Deployment Generator Panel */}
-            <div className="glass-panel" style={{ padding: '1.5rem', border: '1px solid rgba(0, 242, 254, 0.2)' }}>
-              <div style={{ marginBottom: '1.25rem' }}>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', color: 'var(--accent-cyan)', fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase', marginBottom: '0.3rem' }}>
-                  <Terminal size={14} /> Enterprise Fleet Automation
-                </div>
-                <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1.2rem', fontWeight: 700, color: '#ffffff' }}>
-                  1-Click Agent Deployment Center
-                </h3>
-                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  Select an enrollment token to generate pre-authenticated rollout commands for Jamf, Intune, Ansible, or shell scripts.
-                </p>
+            {/* Sub-tab content */}
+            {activeTab === 'git' && (
+              <GitRepoAuditor />
+            )}
+            {activeTab === 'pki' && (
+              <div style={{ padding: '0.5rem 0' }}>
+                <EnterprisePkiVaults tenantName={selectedTenantFilter !== 'all' ? selectedTenantFilter : undefined} />
               </div>
-
-              {/* Token Selector & Deployment Method Tabs */}
-              <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Deploy with Token:</label>
-                  <select
-                    value={selectedDeploymentToken}
-                    onChange={e => setSelectedDeploymentToken(e.target.value)}
-                    style={{ padding: '0.4rem 0.75rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '4px', color: '#ffffff', fontSize: '0.82rem' }}
-                  >
-                    {tokens.map(t => (
-                      <option key={t.id} value={t.token} style={{ background: '#0F172A' }}>
-                        {t.name} ({t.token.slice(0, 14)}...)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Deployment Tabs */}
-                <div style={{ display: 'flex', gap: '0.35rem', background: 'rgba(0,0,0,0.25)', padding: '0.2rem', borderRadius: '6px' }}>
-                  {[
-                    { id: 'desktop', label: '🛡️ 1-Click Desktop App (GUI)' },
-                    { id: 'intune', label: 'Windows PowerShell' },
-                    { id: 'curl', label: 'macOS/Linux Shell' },
-                    { id: 'jamf', label: 'Jamf Pro (macOS)' },
-                    { id: 'ansible', label: 'Ansible Playbook' },
-                    { id: 'docker', label: 'Docker Container' }
-                  ].map(m => (
-                    <button
-                      key={m.id}
-                      onClick={() => setDeploymentMethod(m.id as any)}
-                      style={{
-                        padding: '0.35rem 0.75rem',
-                        background: deploymentMethod === m.id ? 'rgba(0, 242, 254, 0.25)' : 'transparent',
-                        border: 'none',
-                        borderRadius: '4px',
-                        color: deploymentMethod === m.id ? 'var(--accent-cyan)' : 'var(--text-muted)',
-                        fontSize: '0.78rem',
-                        fontWeight: 600,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      {m.label}
-                    </button>
-                  ))}
-                </div>
+            )}
+            {activeTab === 'proxy' && (
+              <div style={{ padding: '0.5rem 0' }}>
+                <PqcProxyGateway />
               </div>
-
-              {/* Generated Code Block */}
-              <div style={{ position: 'relative' }}>
-                <div style={{ position: 'absolute', top: '10px', right: '10px', zIndex: 10 }}>
-                  <button
-                    onClick={() => copyToClipboard(getDeploymentSnippet(), 'snippet')}
-                    className="btn-secondary"
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', padding: '0.4rem 0.8rem' }}
-                  >
-                    {copiedCode === 'snippet' ? <Check size={14} color="var(--status-secure)" /> : <Copy size={14} />}
-                    {copiedCode === 'snippet' ? 'Copied to Clipboard!' : 'Copy Script'}
-                  </button>
-                </div>
-
-                <pre style={{
-                  background: '#0B0F17',
-                  padding: '1.25rem',
-                  borderRadius: '8px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  color: '#38BDF8',
-                  fontSize: '0.85rem',
-                  fontFamily: 'Consolas, Monaco, monospace',
-                  overflowX: 'auto',
-                  margin: 0
-                }}>
-                  {getDeploymentSnippet()}
-                </pre>
-              </div>
-
-              {/* Pre-Compiled Binaries Direct Downloads */}
-              <div style={{ marginTop: '1.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <h4 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                    Download Pre-Compiled Native Binaries (Standalone Post-Quantum Guard & CLI)
-                  </h4>
-                  <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', background: 'rgba(0, 242, 254, 0.1)', padding: '0.2rem 0.6rem', borderRadius: '12px', border: '1px solid rgba(0, 242, 254, 0.25)' }}>
-                    ✨ Double-click to launch Post-Quantum Guard
-                  </span>
-                </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.75rem' }}>
-                  <a
-                    href="/downloads/quarkshield-scanner-windows-amd64.exe"
-                    className="glass-panel"
-                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(0, 242, 254, 0.35)', background: 'rgba(0, 242, 254, 0.05)' }}
-                  >
-                    <Laptop size={22} color="var(--accent-cyan)" />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--accent-cyan)' }}>Windows 10 / 11 / Server</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>1-Click Post-Quantum Guard (.exe)</div>
-                    </div>
-                  </a>
-
-                  <a
-                    href="/downloads/quarkshield-scanner-macos.zip"
-                    className="glass-panel"
-                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(0, 242, 254, 0.35)', background: 'rgba(0, 242, 254, 0.06)' }}
-                  >
-                    <Cpu size={22} color="var(--accent-cyan)" />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--accent-cyan)' }}>macOS Application Bundle (.zip)</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>QuarkShield.app (Universal: M1/M2/M3/M4 & Intel)</div>
-                    </div>
-                  </a>
-
-                  <a
-                    href="/downloads/quarkshield-scanner-darwin-arm64"
-                    className="glass-panel"
-                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(255,255,255,0.06)' }}
-                  >
-                    <Cpu size={22} color="var(--accent-cyan)" />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>macOS Apple Silicon (CLI)</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>darwin-arm64 (M1/M2/M3/M4)</div>
-                    </div>
-                  </a>
-
-                  <a
-                    href="/downloads/quarkshield-scanner-darwin-amd64"
-                    className="glass-panel"
-                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(255,255,255,0.06)' }}
-                  >
-                    <Cpu size={22} color="var(--text-secondary)" />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>macOS Intel</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>darwin-amd64 (x86_64)</div>
-                    </div>
-                  </a>
-
-                  <a
-                    href="/downloads/quarkshield-scanner-linux.tar.gz"
-                    className="glass-panel"
-                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(0, 242, 254, 0.35)', background: 'rgba(0, 242, 254, 0.06)' }}
-                  >
-                    <Server size={22} color="var(--accent-cyan)" />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: 'var(--accent-cyan)' }}>Linux Bundle (.tar.gz)</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Installer + Systemd Service + Binaries</div>
-                    </div>
-                  </a>
-
-                  <a
-                    href="/downloads/quarkshield-scanner-linux-amd64"
-                    className="glass-panel"
-                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(255,255,255,0.06)' }}
-                  >
-                    <Server size={22} color="var(--accent-cyan)" />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Linux x86_64</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>Ubuntu/Debian/RHEL (amd64)</div>
-                    </div>
-                  </a>
-
-                  <a
-                    href="/downloads/quarkshield-scanner-linux-arm64"
-                    className="glass-panel"
-                    style={{ padding: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.75rem', textDecoration: 'none', color: '#ffffff', border: '1px solid rgba(255,255,255,0.06)' }}
-                  >
-                    <Server size={22} color="var(--text-secondary)" />
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem' }}>Linux ARM64</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>AWS Graviton / Ampere (aarch64)</div>
-                    </div>
-                  </a>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: REMOTE GIT REPOSITORIES SCANNER & CI/CD GATE */}
-        {activeTab === 'git' && (
-          <GitRepoAuditor />
-        )}
-
-        {/* TAB 5: ENTERPRISE PKI & VAULT CONNECTORS */}
-        {activeTab === 'pki' && (
-          <div style={{ padding: '0.5rem 0' }}>
-            <EnterprisePkiVaults tenantName={selectedTenantFilter !== 'all' ? selectedTenantFilter : undefined} />
-          </div>
-        )}
-
-        {/* TAB 6: HYBRID QUANTUM TLS PROXY GATEWAY */}
-        {activeTab === 'proxy' && (
-          <div style={{ padding: '0.5rem 0' }}>
-            <PqcProxyGateway />
-          </div>
-        )}
-
-        {/* TAB 5: MOSCA'S QUANTUM MIGRATION PLANNER */}
-        {activeTab === 'planner' && (
-          <div style={{ padding: '1rem 0' }}>
-            <MoscaMigrationPlanner 
-              variant="console" 
-              onNavigateToScan={() => setActiveTab('dashboard')} 
-              totalFleetEndpoints={machines.length}
-            />
+            )}
           </div>
         )}
 
