@@ -165,6 +165,122 @@ export const submitAssessment = async (req: Request, res: Response) => {
       html: emailHtml
     }).catch(err => console.warn('[ASSESSMENT] PQCA notification email dispatch failed:', err?.message));
 
+    // Also dispatch confirmation receipt directly to the requesting client
+    const clientSubject = `QuarkShield Enterprise PQC Assessment Confirmation — ${cleanCompany} [${assessmentId}]`;
+    const clientText = [
+      `Dear ${cleanName},`,
+      ``,
+      `Thank you for requesting an Enterprise Post-Quantum Cryptography (PQC) Readiness Assessment for ${cleanCompany}.`,
+      ``,
+      `We have registered your assessment scoping request under Reference ID: ${assessmentId}.`,
+      ``,
+      `Assessment Request Summary:`,
+      `-----------------------------------------`,
+      `Organization:      ${cleanCompany}`,
+      `Contact Name:      ${cleanName}`,
+      `Environment Size:  ${cleanEnvSize}`,
+      `Target Tier:       ${cleanTier || 'Custom / Enterprise'}`,
+      `Focus Areas:       ${cleanInterests.join(', ')}`,
+      `Submitted:         ${new Date().toUTCString()}`,
+      ``,
+      `Next Steps:`,
+      `A Senior Cryptographic Architect from our PQC Assessment team will analyze your infrastructure parameters and contact you within 1 business day with your scoping questionnaire and migration roadmap preview.`,
+      ``,
+      `In the meantime, you can explore our technical whitepapers and documentation:`,
+      `- Documentation Center: https://quarkshield.ai/docs/AGENTLESS_PQC_ARCHITECTURE.md`,
+      `- CNSA 2.0 Compliance: https://quarkshield.ai/#cnsa-news`,
+      ``,
+      `If you have urgent questions, reply directly to this email or reach our operations desk at PQCA@quarkshield.ai.`,
+      ``,
+      `Best regards,`,
+      `QuarkShield PQC Assessment Team`,
+      `FedMitigate LLC`,
+      `https://quarkshield.ai`
+    ].join('\n');
+
+    const clientHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="utf-8"></head>
+      <body style="font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background:#080b16; color:#eef1fa; padding:24px; margin:0;">
+        <div style="max-width:600px; margin:0 auto; background:#0f172a; border:1px solid #1e293b; border-radius:12px; overflow:hidden;">
+          <div style="background:linear-gradient(135deg, #0d1322 0%, #171b34 100%); padding:28px; text-align:center; border-bottom:1px solid #26304f;">
+            <h1 style="margin:0; font-size:24px; color:#ffffff; letter-spacing:0.5px; font-weight:800;">
+              quark<span style="color:#a855f7; font-style:italic;">shield</span>
+            </h1>
+            <p style="margin:6px 0 0 0; font-size:13px; color:#9aa6c4; text-transform:uppercase; letter-spacing:1px; font-weight:600;">
+              Post-Quantum Cryptography Readiness
+            </p>
+          </div>
+          <div style="padding:28px 32px;">
+            <div style="display:inline-block; background:rgba(168,85,247,0.15); border:1px solid rgba(168,85,247,0.35); border-radius:6px; padding:4px 12px; font-size:12px; color:#c084fc; font-weight:600; margin-bottom:16px;">
+              Assessment Request Confirmed
+            </div>
+            <h2 style="margin:0 0 16px 0; font-size:20px; color:#ffffff;">
+              Hello ${cleanName},
+            </h2>
+            <p style="color:#cbd5e1; font-size:14px; line-height:1.6; margin-bottom:20px;">
+              Thank you for requesting an Enterprise PQC Readiness Assessment for <strong style="color:#ffffff;">${cleanCompany}</strong>. We have logged your scoping parameters under reference token <code style="background:#1e293b; color:#22d3ee; padding:2px 6px; border-radius:4px; font-size:13px;">${assessmentId}</code>.
+            </p>
+
+            <div style="background:#131c31; border:1px solid #26304f; border-radius:8px; padding:18px 20px; margin-bottom:24px;">
+              <h3 style="margin:0 0 12px 0; font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:#9aa6c4;">
+                Submission Parameters
+              </h3>
+              <table style="width:100%; border-collapse:collapse; font-size:13px; color:#cbd5e1;">
+                <tr>
+                  <td style="padding:5px 0; color:#94a3b8; width:140px;">Organization:</td>
+                  <td style="padding:5px 0; font-weight:600; color:#f1f5f9;">${cleanCompany}</td>
+                </tr>
+                <tr>
+                  <td style="padding:5px 0; color:#94a3b8;">Environment Size:</td>
+                  <td style="padding:5px 0; font-weight:600; color:#f1f5f9;">${cleanEnvSize}</td>
+                </tr>
+                <tr>
+                  <td style="padding:5px 0; color:#94a3b8;">Target Tier:</td>
+                  <td style="padding:5px 0; font-weight:600; color:#22d3ee;">${cleanTier || 'Custom / Enterprise'}</td>
+                </tr>
+                <tr>
+                  <td style="padding:5px 0; color:#94a3b8; vertical-align:top;">Focus Areas:</td>
+                  <td style="padding:5px 0;">
+                    ${cleanInterests.map(i => `<span style="display:inline-block; background:rgba(34,211,238,0.12); color:#22d3ee; border:1px solid rgba(34,211,238,0.3); border-radius:4px; padding:2px 6px; font-size:11px; margin:2px 4px 2px 0;">${i}</span>`).join('')}
+                  </td>
+                </tr>
+              </table>
+            </div>
+
+            <h3 style="margin:20px 0 10px 0; font-size:15px; color:#ffffff;">What Happens Next</h3>
+            <p style="color:#cbd5e1; font-size:13.5px; line-height:1.6; margin-bottom:20px;">
+              A Senior Cryptographic Architect from our PQC Assessment team (<a href="mailto:PQCA@quarkshield.ai" style="color:#a855f7; text-decoration:none;">PQCA@quarkshield.ai</a>) will analyze your infrastructure profile and contact you within <strong>1 business day</strong> with:
+            </p>
+            <ul style="color:#cbd5e1; font-size:13px; line-height:1.7; padding-left:20px; margin-bottom:24px;">
+              <li>Scoping plan for agentless discovery across your PKI, TLS gateways, and endpoints.</li>
+              <li>Estimated Cryptographic Bill of Materials (CBOM) generation timeline.</li>
+              <li>NIST FIPS 203/204/205 &amp; NSA CNSA 2.0 compliance gap analysis schedule.</li>
+            </ul>
+
+            <div style="text-align:center; margin:28px 0 12px 0;">
+              <a href="https://quarkshield.ai/docs/AGENTLESS_PQC_ARCHITECTURE.md" style="background:linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color:#ffffff; text-decoration:none; padding:12px 24px; border-radius:6px; font-weight:600; font-size:13px; display:inline-block;">
+                Explore Agentless Architecture Whitepaper →
+              </a>
+            </div>
+          </div>
+
+          <div style="background:#080b16; padding:18px; text-align:center; font-size:11.5px; color:#64748b; border-top:1px solid #1e293b;">
+            QuarkShield PQC Operations Desk • FedMitigate LLC • <a href="mailto:PQCA@quarkshield.ai" style="color:#94a3b8; text-decoration:none;">PQCA@quarkshield.ai</a>
+          </div>
+        </div>
+      </body>
+      </html>
+    `;
+
+    sendSupportEmail({
+      to: cleanEmail,
+      subject: clientSubject,
+      text: clientText,
+      html: clientHtml
+    }).catch(err => console.warn('[ASSESSMENT] Client confirmation email dispatch failed:', err?.message));
+
     console.log(`[ASSESSMENT] ${assessmentId} created for ${cleanEmail} (${cleanCompany})`);
 
     return res.status(200).json({

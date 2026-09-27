@@ -200,9 +200,10 @@ CREATE TABLE IF NOT EXISTS admin_licenses (
 -- Seed initial admin users for quarkshield.ai (Completely separate from quarkshield.services)
 INSERT INTO admin_users (id, email, password_hash, salt, role, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, row_locked, company, last_login)
 VALUES 
-  ('usr-super', 'superadmin@quarkshield.ai', '$2b$12$SiF0VPqxJ7ovEcluxeSoReO7qwXi50.bfeiE3Ux5oe5aofR0StDWm', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Core', CURRENT_TIMESTAMP),
-  ('usr-sridhar', 'sridhargs@gmail.com', '$2b$12$SiF0VPqxJ7ovEcluxeSoReO7qwXi50.bfeiE3Ux5oe5aofR0StDWm', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Security', CURRENT_TIMESTAMP),
-  ('usr-admin', 'admin@quarkshield.ai', '$2b$12$SiF0VPqxJ7ovEcluxeSoReO7qwXi50.bfeiE3Ux5oe5aofR0StDWm', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Operations', CURRENT_TIMESTAMP),
+  ('usr-super', 'superadmin@quarkshield.ai', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Core', CURRENT_TIMESTAMP),
+  ('usr-sridhar', 'sridhargs@gmail.com', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Security', CURRENT_TIMESTAMP),
+  ('usr-sridhar-spin', 'sridhargs@spinovation.com', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, 'superadmin', true, true, true, true, false, 'Spinovation Corp', CURRENT_TIMESTAMP),
+  ('usr-admin', 'admin@quarkshield.ai', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Operations', CURRENT_TIMESTAMP),
   ('usr-demo', 'democlient@example.com', NULL, NULL, 'user', true, true, false, false, false, 'Demo Client Workspace', CURRENT_TIMESTAMP - INTERVAL '12 minutes'),
   ('usr-locked', 'locked_client@example.com', NULL, NULL, 'user', true, false, false, false, true, 'Locked Security Node', CURRENT_TIMESTAMP - INTERVAL '24 minutes'),
   ('usr-pending', 'pending_client@example.com', NULL, NULL, 'user', true, false, false, false, false, 'Pending Evaluation Node', NULL)
@@ -213,10 +214,22 @@ INSERT INTO admin_clients (id, name, display_name, app_port, db_port, status, su
 VALUES 
   ('client-demo', 'democlient', 'Demo Client Workspace', 5001, 5433, 'active', 'growth', 250, 'optional', 1, 6, 'corporate', 'CORP-5120', 'democlient@example.com', 'Demo Administrator'),
   ('client-090e8814', 'spinovationcorp', 'Spinovation Corp', 5002, 5434, 'active', 'growth', 100, 'optional', 1, 10, 'corporate', 'CORP-9812', 'sridhargs@spinovation.com', 'GS Sridhar'),
+  ('client-8518769e', 'algomeld', 'Algomeld', 5004, 5438, 'active', 'growth', 100, 'optional', 1, 10, 'partner', 'PART-4421', 'sridhargs@algomeld.ai', 'GS Sridhar'),
   ('client-vanguard-corp', 'vanguard-logistics', 'Vanguard Global Logistics', 5003, 5435, 'active', 'growth', 500, 'optional', 1, 8, 'corporate', 'CORP-4821', 's.jenkins@vanguardlogistics.com', 'Sarah Jenkins'),
   ('client-apex-msp', 'apex-cyber', 'Apex Cyber Defense MSP', 5050, 5436, 'active', 'growth', 300, 'optional', 1, 12, 'partner', 'PART-9148', 'm.vance@apexcyberdefense.io', 'Marcus Vance'),
   ('client-cyber-shield', 'cybershield-partners', 'CyberShield Managed Security', 5051, 5437, 'active', 'growth', 50, 'optional', 1, 4, 'partner', 'PART-8830', 'd.chen@cybershieldsec.com', 'David Chen')
 ON CONFLICT (name) DO NOTHING;  -- seed only, do not overwrite tenant edits on restart (DEF-18)
+
+-- Seed initial tenant users for Spinovation Corp and Algomeld
+INSERT INTO tenant_users (id, tenant_name, email, first_name, last_name, role, status, password_hash, salt, must_change_password)
+VALUES
+  ('tu-sridhar-spin', 'spinovationcorp', 'sridhargs@spinovation.com', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false),
+  ('tu-sridhar-spin-gmail', 'spinovationcorp', 'sridhargs@gmail.com', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false),
+  ('tu-sridhar-algo-ai', 'algomeld', 'sridhargs@algomeld.ai', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false),
+  ('tu-sridhar-algo-com', 'algomeld', 'sridhargs@algomeld.com', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false),
+  ('tu-sridhar-algo-gmail', 'algomeld', 'sridhargs@gmail.com', 'Sridhar', 'GS', 'admin', 'active', '$2b$12$B9p/cp3iF0wW0byTQqomIONaykiJh1mlP3qFTWqIfw/MusqWKBjyG', NULL, false)
+ON CONFLICT (tenant_name, email) DO UPDATE
+SET password_hash = EXCLUDED.password_hash, salt = NULL, status = 'active';
 
 INSERT INTO admin_licenses (id, license_key, tenant_name, customer_id, tier, duration_days, seats, status, expires_at, contact_name, contact_email)
 VALUES

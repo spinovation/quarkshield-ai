@@ -2722,8 +2722,20 @@ export const forgotPassword = async (req: Request, res: Response) => {
     const cleanEmail = email.toLowerCase().trim();
 
     // Does an account exist? (Do NOT create one as a side effect.)
-    const adminRes = await pool.query('SELECT id FROM admin_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
-    const tenantRes = await pool.query('SELECT id FROM tenant_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
+    const adminRes = await pool.query(
+      `SELECT id FROM admin_users 
+       WHERE LOWER(email) = LOWER($1) 
+          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.com', '@algomeld.ai')) 
+          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.ai', '@algomeld.com'))`,
+      [cleanEmail]
+    );
+    const tenantRes = await pool.query(
+      `SELECT id FROM tenant_users 
+       WHERE LOWER(email) = LOWER($1) 
+          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.com', '@algomeld.ai')) 
+          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.ai', '@algomeld.com'))`,
+      [cleanEmail]
+    );
     if (adminRes.rowCount === 0 && tenantRes.rowCount === 0) {
       return res.json(NEUTRAL); // silent: no account, no email, no enumeration
     }
@@ -2816,7 +2828,13 @@ export const resetPassword = async (req: Request, res: Response) => {
     }
     const newHash = await hashPassword(String(newPassword));
     await pool.query('UPDATE admin_users SET password_hash = $1, salt = NULL, must_change_password = false WHERE LOWER(email) = LOWER($2)', [newHash, row.email]);
-    await pool.query('UPDATE tenant_users SET password_hash = $1, salt = NULL, must_change_password = false WHERE LOWER(email) = LOWER($2)', [newHash, row.email]);
+    await pool.query(
+      `UPDATE tenant_users SET password_hash = $1, salt = NULL, must_change_password = false 
+       WHERE LOWER(email) = LOWER($2) 
+          OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.com', '@algomeld.ai')) 
+          OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.ai', '@algomeld.com'))`,
+      [newHash, row.email]
+    );
     await pool.query('UPDATE password_reset_tokens SET used = true WHERE id = $1', [row.id]);
     return res.json({ success: true, message: 'Password updated. You can now sign in.' });
   } catch (err: any) {

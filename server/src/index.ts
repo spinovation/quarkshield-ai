@@ -14,6 +14,7 @@ import { attachUser } from './middleware/auth';
 dotenv.config();
 
 const app = express();
+app.set('trust proxy', 1);
 const port = process.env.PORT || 5050;
 
 // Restrict CORS to configured origins when provided; credentials enabled so the
