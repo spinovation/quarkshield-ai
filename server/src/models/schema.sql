@@ -200,9 +200,9 @@ CREATE TABLE IF NOT EXISTS admin_licenses (
 -- Seed initial admin users for quarkshield.ai (Completely separate from quarkshield.services)
 INSERT INTO admin_users (id, email, password_hash, salt, role, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, row_locked, company, last_login)
 VALUES 
-  ('usr-super', 'superadmin@quarkshield.ai', '46700cb75574341aa57053e1476d0e372f2766e4170e28e16f88255748259a4f', 'a1b2c3d4e5f6', 'superadmin', true, true, true, true, false, 'QuarkShield Core', CURRENT_TIMESTAMP),
-  ('usr-sridhar', 'sridhargs@gmail.com', '46700cb75574341aa57053e1476d0e372f2766e4170e28e16f88255748259a4f', 'a1b2c3d4e5f6', 'superadmin', true, true, true, true, false, 'QuarkShield Security', CURRENT_TIMESTAMP),
-  ('usr-admin', 'admin@quarkshield.ai', '46700cb75574341aa57053e1476d0e372f2766e4170e28e16f88255748259a4f', 'a1b2c3d4e5f6', 'superadmin', true, true, true, true, false, 'QuarkShield Operations', CURRENT_TIMESTAMP),
+  ('usr-super', 'superadmin@quarkshield.ai', '$2b$12$SiF0VPqxJ7ovEcluxeSoReO7qwXi50.bfeiE3Ux5oe5aofR0StDWm', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Core', CURRENT_TIMESTAMP),
+  ('usr-sridhar', 'sridhargs@gmail.com', '$2b$12$SiF0VPqxJ7ovEcluxeSoReO7qwXi50.bfeiE3Ux5oe5aofR0StDWm', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Security', CURRENT_TIMESTAMP),
+  ('usr-admin', 'admin@quarkshield.ai', '$2b$12$SiF0VPqxJ7ovEcluxeSoReO7qwXi50.bfeiE3Ux5oe5aofR0StDWm', NULL, 'superadmin', true, true, true, true, false, 'QuarkShield Operations', CURRENT_TIMESTAMP),
   ('usr-demo', 'democlient@example.com', NULL, NULL, 'user', true, true, false, false, false, 'Demo Client Workspace', CURRENT_TIMESTAMP - INTERVAL '12 minutes'),
   ('usr-locked', 'locked_client@example.com', NULL, NULL, 'user', true, false, false, false, true, 'Locked Security Node', CURRENT_TIMESTAMP - INTERVAL '24 minutes'),
   ('usr-pending', 'pending_client@example.com', NULL, NULL, 'user', true, false, false, false, false, 'Pending Evaluation Node', NULL)

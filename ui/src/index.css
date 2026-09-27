@@ -68,11 +68,33 @@
 a,
 a:link,
 a:visited,
-a:hover,
-a:active,
-a:focus {
+a:active {
   text-decoration: none !important;
   color: inherit;
+}
+
+.btn,
+.btn:hover,
+.btn:focus,
+.btn:active,
+a.btn,
+a.btn:hover,
+a.btn:focus,
+a.btn:active {
+  text-decoration: none !important;
+}
+
+input[type="range"] {
+  width: 100% !important;
+  accent-color: var(--purple);
+  cursor: pointer;
+  display: block;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgba(148, 163, 184, 0.45) !important;
+  font-style: italic;
 }
 
 html {
@@ -1726,10 +1748,11 @@ section.band { padding-block: 46px; border-top: 1px solid var(--line-soft); }
   font-family: var(--font-body);
 }
 .sector:hover { border-color: var(--purple-line); }
-.sector[aria-pressed=	rue] { border-color: var(--purple); background: var(--purple-soft); box-shadow: inset 0 0 0 1px var(--purple); }
+.sector[aria-pressed="true"] { border-color: var(--purple); background: var(--purple-soft); box-shadow: inset 0 0 0 1px var(--purple); }
 .sector .s-name { font-weight: 600; font-size: 0.9rem; }
 .sector .s-meta { font-family: var(--font-mono); font-size: 0.68rem; color: var(--faint); margin-top: 4px; letter-spacing: 0.02em; }
 .sliders { margin-top: 20px; display: grid; gap: 16px; }
+.slider-row input[type="range"] { width: 100% !important; margin-top: 6px; }
 .slider-row .sl-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
 .slider-row .sl-name { font-size: 0.86rem; color: var(--muted); }
 .slider-row .sl-val { font-family: var(--font-mono); font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
@@ -1757,7 +1780,7 @@ section.band { padding-block: 46px; border-top: 1px solid var(--line-soft); }
 /* ---------- Pricing ---------- */
 .bill-toggle { display: inline-flex; background: var(--surface); border: 1px solid var(--line); border-radius: 100px; padding: 4px; margin-top: 22px; gap: 4px; }
 .bill-toggle button { font-family: var(--font-body); font-size: 0.86rem; font-weight: 600; color: var(--muted); background: none; border: 0; border-radius: 100px; padding: 8px 16px; cursor: pointer; transition: background 0.15s, color 0.15s; display: inline-flex; align-items: center; gap: 7px; }
-.bill-toggle button[aria-pressed=	rue] { background: var(--purple-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--purple-line); }
+.bill-toggle button[aria-pressed="true"] { background: var(--purple-soft); color: var(--text); box-shadow: inset 0 0 0 1px var(--purple-line); }
 .save-pill { font-family: var(--font-mono); font-size: 0.64rem; color: var(--good); background: rgba(52,211,153,0.14); border: 1px solid rgba(52,211,153,0.32); padding: 2px 7px; border-radius: 100px; }
 .price-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; align-items: start; }
 .price-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; display: flex; flex-direction: column; height: 100%; }

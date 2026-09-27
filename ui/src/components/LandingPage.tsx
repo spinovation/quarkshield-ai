@@ -397,6 +397,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const [loginWorkspace, setLoginWorkspace] = useState('');
   const [login2FACode, setLogin2FACode] = useState('');
   const [showCareerModal, setShowCareerModal] = useState(false);
+  const [openFaqIndex, setOpenFaqIndex] = useState<number | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [signInError, setSignInError] = useState<string | null>(null);
@@ -720,7 +721,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     <span className="mt"><b>Linux User Guide</b></span>
                   </span>
                 </a>
-                <a className="mega-item" role="menuitem" href="#probe" onClick={() => setResDropdownOpen(false)} style={{ textDecoration: 'none' }}>
+                <a className="mega-item" role="menuitem" href="#cnsa-news" onClick={() => setResDropdownOpen(false)} style={{ textDecoration: 'none' }}>
                   <span className="mega-ic">📡</span>
                   <span className="mega-tx">
                     <span className="mt"><b>CNSA 2.0 &amp; PQC Intel</b></span>
@@ -732,7 +733,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     <span className="mt"><b>Mosca's Migration Planner</b><span className="mega-badge xyz">X+Y&gt;Z</span></span>
                   </span>
                 </a>
-                <a className="mega-item" role="menuitem" href="#how" onClick={() => setResDropdownOpen(false)} style={{ textDecoration: 'none' }}>
+                <a className="mega-item" role="menuitem" href="#faq" onClick={() => setResDropdownOpen(false)} style={{ textDecoration: 'none' }}>
                   <span className="mega-ic">❓</span>
                   <span className="mega-tx">
                     <span className="mt"><b>Post-Quantum FAQs</b></span>
@@ -992,6 +993,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     value={sx}
                     onChange={(e) => setSx(+e.target.value)}
                     aria-label="Data secrecy shelf-life in years"
+                    style={{ width: '100%' }}
                   />
                 </div>
                 <div className="slider-row">
@@ -1006,6 +1008,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     value={sy}
                     onChange={(e) => setSy(+e.target.value)}
                     aria-label="Migration time in years"
+                    style={{ width: '100%' }}
                   />
                 </div>
                 <div className="slider-row">
@@ -1020,6 +1023,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     value={sz}
                     onChange={(e) => setSz(+e.target.value)}
                     aria-label="Quantum horizon in years"
+                    style={{ width: '100%' }}
                   />
                 </div>
               </div>
@@ -1299,12 +1303,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
               <p className="dl-desc">Authenticode-signed scanner. Audits Schannel ciphers, the certificate store, registry-installed crypto tooling, OpenSSH and PKI.</p>
               <div className="dl-actions">
-                <a className="btn btn-primary btn-sm" href="/downloads/pqc-scanner-windows-amd64.exe" download>
-                  Download .msi
+                <a className="btn btn-primary btn-sm" href="/downloads/pqc-scanner-windows-amd64.exe" download style={{ textDecoration: 'none' }}>
+                  Download .exe (Installer)
                 </a>
               </div>
               <div className="dl-alt">
-                <a href="/downloads/pqc-scanner-windows.zip" style={{ color: 'inherit' }} download>Portable .zip · CLI (x64)</a>
+                <a href="/downloads/pqc-scanner-windows.zip" style={{ color: 'inherit', textDecoration: 'none' }} download>Portable .zip · CLI (x64)</a>
               </div>
             </div>
 
@@ -1318,12 +1322,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
               <p className="dl-desc">Notarized universal build. Discovers Keychain items, OpenSSH &amp; GPG keys, Homebrew OpenSSL and local developer certificates.</p>
               <div className="dl-actions">
-                <a className="btn btn-primary btn-sm" href="/downloads/QuarkShield-macOS.dmg" download>
-                  Download .dmg
+                <a className="btn btn-primary btn-sm" href="/downloads/QuarkShield-macOS.dmg" download style={{ textDecoration: 'none' }}>
+                  Download .dmg (Universal)
                 </a>
               </div>
               <div className="dl-alt">
-                <a href="/downloads/quarkshield-scanner-macos.zip" style={{ color: 'inherit' }} download>Portable .zip · universal CLI</a>
+                <a href="/downloads/quarkshield-scanner-macos.zip" style={{ color: 'inherit', textDecoration: 'none' }} download>Portable .zip · universal CLI</a>
               </div>
             </div>
 
@@ -1337,12 +1341,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
               <p className="dl-desc">Multi-distro SBOM via dpkg / rpm / apk / pacman. Audits trust stores, OpenSSL &amp; SSH config, and the kernel crypto drivers.</p>
               <div className="dl-actions">
-                <a className="btn btn-primary btn-sm" href="/downloads/pqc-scanner-linux-amd64" download>
-                  Download .tar.gz
+                <a className="btn btn-primary btn-sm" href="/downloads/pqc-scanner-linux.tar.gz" download style={{ textDecoration: 'none' }}>
+                  Download .tar.gz (Full Bundle)
                 </a>
               </div>
-              <div className="dl-alt">
-                <a href="/downloads/pqc-scanner-linux-arm64" style={{ color: 'inherit' }} download>.zip · systemd unit · install.sh</a>
+              <div className="dl-alt" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <a href="/downloads/pqc-scanner-linux.zip" style={{ color: 'inherit', textDecoration: 'none' }} download>.zip · systemd unit · install.sh</a>
+                <span style={{ fontSize: '0.76rem', color: 'var(--faint)' }}>
+                  Raw binaries: <a href="/downloads/pqc-scanner-linux-amd64" style={{ color: 'var(--cyan)', textDecoration: 'none' }} download>amd64</a> · <a href="/downloads/pqc-scanner-linux-arm64" style={{ color: 'var(--cyan)', textDecoration: 'none' }} download>arm64</a>
+                </span>
               </div>
             </div>
           </div>
@@ -1362,6 +1369,392 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <span className="c"># 3. Launch the interactive dashboard (local-first, no data leaves the host)</span>{'\n'}
               ./quarkshield-scanner --server https://quarkshield.ai
             </pre>
+          </div>
+        </div>
+      </section>
+
+      {/* ===================== CNSA 2.0 & REGULATORY RADAR ===================== */}
+      <section className="band" id="cnsa-news">
+        <div className="wrap">
+          <span className="band-eyebrow">Live Regulatory Radar • NIST • NSA • White House OMB</span>
+          <h2>Post-Quantum Regulatory Horizons &amp; CNSA 2.0 Intelligence</h2>
+          <p className="lead">
+            Direct federal policy tracking, NIST FIPS releases, and enforcement deadlines for CISOs, defense suppliers, and enterprise cryptographers.
+          </p>
+
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--radius)',
+            padding: '24px',
+            marginTop: '28px'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.8rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ color: 'var(--cyan)', fontSize: '1.2rem' }}>🛡️</span>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: 'var(--text)' }}>
+                  NSA CNSA 2.0 &amp; OMB Migration Horizon
+                </h3>
+              </div>
+              <span style={{ fontSize: '0.78rem', color: 'var(--muted)', background: 'var(--surface-2)', border: '1px solid var(--line-soft)', padding: '0.25rem 0.65rem', borderRadius: '6px', fontFamily: 'var(--font-mono)' }}>
+                NSM-10 &amp; OMB M-23-02 Compliance
+              </span>
+            </div>
+
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+              gap: '14px'
+            }}>
+              {[
+                {
+                  year: '2025',
+                  title: 'Software & Firmware Code Signing',
+                  desc: 'NSA mandates CNSA 2.0 algorithms for all newly released software and firmware signing. Transition begins immediately.',
+                  status: 'Active Enforcement',
+                  color: 'var(--warning)'
+                },
+                {
+                  year: '2030',
+                  title: 'Cloud Gateways & Web TLS',
+                  desc: 'Web browsers, edge reverse proxies, cloud endpoints, and network appliances must deploy ML-KEM/ML-DSA.',
+                  status: 'Mandatory Transition',
+                  color: 'var(--cyan)'
+                },
+                {
+                  year: '2033',
+                  title: 'Legacy Cryptography Phaseout',
+                  desc: 'Complete elimination of traditional asymmetric algorithms (RSA-2048/4096, Diffie-Hellman, ECDSA) in National Security Systems.',
+                  status: 'Full Prohibition',
+                  color: 'var(--critical)'
+                },
+                {
+                  year: '2035',
+                  title: 'Complete Quantum Resilience',
+                  desc: '100% of all national security assets, critical infrastructure protocols, and enterprise data encrypted with PQC standards.',
+                  status: 'Permanent Benchmark',
+                  color: 'var(--good)'
+                }
+              ].map((m, idx) => (
+                <div key={idx} style={{
+                  background: 'var(--surface-2)',
+                  padding: '18px',
+                  borderRadius: '10px',
+                  border: '1px solid var(--line-soft)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '10px'
+                }}>
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '1.6rem', fontWeight: 800, color: m.color, letterSpacing: '-0.02em', fontFamily: 'var(--font-display)' }}>
+                        {m.year}
+                      </span>
+                      <span style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', color: m.color, background: 'rgba(255,255,255,0.04)', border: '1px solid currentColor', padding: '2px 6px', borderRadius: '4px', fontFamily: 'var(--font-mono)' }}>
+                        {m.status}
+                      </span>
+                    </div>
+                    <h4 style={{ margin: '0 0 6px 0', fontSize: '0.94rem', fontWeight: 700, color: 'var(--text)' }}>
+                      {m.title}
+                    </h4>
+                    <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--muted)', lineHeight: 1.5 }}>
+                      {m.desc}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gap: '16px',
+            marginTop: '20px'
+          }}>
+            {[
+              {
+                source: 'NIST',
+                tag: 'FIPS Standards',
+                date: 'Aug 2024 · Active Enforcement',
+                title: 'NIST Finalizes FIPS 203, 204, and 205: Global Post-Quantum Standards Released',
+                summary: 'NIST has officially published the final cryptographic standards for post-quantum defense: FIPS 203 (ML-KEM / Kyber), FIPS 204 (ML-DSA / Dilithium), and FIPS 205 (SLH-DSA / SPHINCS+). Federal and enterprise IT architectures must begin transitioning legacy RSA/ECC public key algorithms immediately.',
+                color: 'var(--cyan)'
+              },
+              {
+                source: 'NSA',
+                tag: 'CNSA 2.0 Mandate',
+                date: 'Updated Quarterly',
+                title: 'NSA CNSA 2.0 Cybersecurity Advisory: Mandatory Software & Firmware Signing Deadlines',
+                summary: 'The National Security Agency (NSA) Commercial National Security Algorithm Suite 2.0 (CNSA 2.0) designates post-quantum algorithms for National Security Systems (NSS). Software and firmware code signing migration begins in 2025. Web browsers, cloud endpoints, and network boundary devices must deploy ML-KEM/ML-DSA by 2030.',
+                color: 'var(--purple)'
+              },
+              {
+                source: 'White House OMB',
+                tag: 'Federal Policy',
+                date: 'M-23-02 Compliance',
+                title: 'White House OMB M-23-02 Mandate: Annual Cryptographic Bill of Materials (CBOM) Reporting',
+                summary: 'Office of Management and Budget (OMB) Memorandum M-23-02 requires federal agencies and commercial suppliers to discover, catalog, and submit an annual inventory of all cryptographic assets (CBOM). Critical vulnerabilities exposed to "Harvest Now, Decrypt Later" (HNDL) attacks must be prioritized for immediate remediation.',
+                color: 'var(--good)'
+              },
+              {
+                source: 'CISA',
+                tag: 'Threat Intel',
+                date: 'Active Threat Guidance',
+                title: 'CISA, NSA & NIST Joint Advisory: Mitigating "Harvest Now, Decrypt Later" (HNDL) Across TLS Endpoints',
+                summary: 'Hostile nation-states are actively harvesting encrypted enterprise network communications, intellectual property, and government records over public internet circuits to decrypt once cryptanalytically relevant quantum computers arrive. Organizations are urged to deploy hybrid post-quantum key encapsulation (X25519MLKEM768) immediately.',
+                color: 'var(--critical)'
+              }
+            ].map((advisory, idx) => (
+              <div key={idx} style={{
+                background: 'var(--surface)',
+                border: '1px solid var(--line)',
+                borderRadius: 'var(--radius)',
+                padding: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                gap: '12px'
+              }}>
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', flexWrap: 'wrap', gap: '6px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', color: advisory.color, background: 'rgba(255,255,255,0.04)', padding: '2px 6px', borderRadius: '4px', border: '1px solid currentColor', fontFamily: 'var(--font-mono)' }}>
+                        {advisory.source}
+                      </span>
+                      <span style={{ fontSize: '0.74rem', color: 'var(--faint)' }}>
+                        • {advisory.tag}
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--faint)', fontFamily: 'var(--font-mono)' }}>
+                      {advisory.date}
+                    </span>
+                  </div>
+                  <h4 style={{ margin: '0 0 8px 0', fontSize: '1rem', fontWeight: 700, color: 'var(--text)', lineHeight: 1.4 }}>
+                    {advisory.title}
+                  </h4>
+                  <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--muted)', lineHeight: 1.55 }}>
+                    {advisory.summary}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ===================== POST-QUANTUM FAQS ===================== */}
+      <section className="band" id="faq">
+        <div className="wrap">
+          <span className="band-eyebrow">Frequently Asked Questions</span>
+          <h2>Post-Quantum Cryptography &amp; Platform FAQs</h2>
+          <p className="lead">
+            Essential guidance on cryptographic key discovery, zero-exfiltration privacy guarantees, Shor's algorithm vulnerabilities, and OS-level PQC readiness.
+          </p>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '28px' }}>
+            {[
+              {
+                q: 'What are "Keys" in QuarkShield, and are my private keys ever uploaded or exfiltrated?',
+                a: 'In QuarkShield, "Keys" refers strictly to Cryptographic Assets discovered in the Cryptographic Bill of Materials (CBOM) inventory—such as public certificates (X.509), public key parameters (RSA moduli, ECC curve points), SSH public host keys, and TLS cryptographic cipher suites.\n\nZero-Exfiltration Guarantee: Private keys (BEGIN RSA PRIVATE KEY, BEGIN EC PRIVATE KEY, PKCS#8, seed phrases, or passphrases) are NEVER stored in our cloud, NEVER uploaded, and NEVER exfiltrated. QuarkShield operates on a local-first volatile memory inspection model. The scanner inspects files and keychains in local RAM, extracts only non-sensitive public metadata (algorithm identifier, bit length, curve name, expiration date, and issuer DN), and immediately discards working buffers. Your private keys never leave your device or network perimeter.'
+              },
+              {
+                q: 'Are our current production keys and certificates quantum certified?',
+                a: 'Almost certainly not. Over 99% of digital infrastructure in production today relies on classical asymmetric cryptography: RSA-2048/4096, ECDSA (P-256, secp256k1), and Diffie-Hellman. None of these classical primitives are quantum certified. They are mathematically vulnerable to complete factorisation and key extraction by Shor\'s algorithm on a Cryptanalytically Relevant Quantum Computer (CRQC).\n\nTrue quantum-certified algorithms are those newly standardized by NIST in August 2024: FIPS 203 (ML-KEM / Kyber) for general encryption and TLS key exchange, FIPS 204 (ML-DSA / Dilithium) for digital signatures and certificates, and FIPS 205 (SLH-DSA / SPHINCS+) for stateless hash-based signatures. The recommended industry path is Hybrid PQC (e.g., X25519MLKEM768), preserving classical FIPS 140-3 validation while resisting quantum attacks.'
+              },
+              {
+                q: 'What is Harvest Now, Decrypt Later (HNDL) and why is it an urgent threat today?',
+                a: 'Harvest Now, Decrypt Later (HNDL) is an active surveillance operation wherein adversarial nation-states intercept and record petabytes of encrypted internet and enterprise communications today. While they cannot decrypt it with classical supercomputers, they will decrypt it retroactively once a quantum computer with sufficient logical qubits comes online.\n\nIf your organization produces data with a secrecy shelf-life (X) of 10–30 years (such as healthcare records, defense IP, financial ledgers, or citizen identities), any data harvested today will be compromised before its secrecy requirement expires. This makes immediate quantum readiness an urgent operational priority.'
+              },
+              {
+                q: 'What is a Cryptographic Bill of Materials (CBOM) and why do NIST and NSA mandate it?',
+                a: 'A Cryptographic Bill of Materials (CBOM) is a standardized, machine-readable inventory of every cryptographic algorithm, key length, certificate, protocol, and trust root operating across software, firmware, and infrastructure. Similar to an SBOM for software packages, a CBOM defines cryptographic lineage and posture (CycloneDX 1.6 format).\n\nWhite House OMB M-23-02, NSM-10, and NIST SP 800-227 mandate CBOM inventories because organizations cannot migrate what they cannot see. Automated CBOM generation is now required for federal contractors and public sector defense suppliers.'
+              },
+              {
+                q: 'Can QuarkShield run completely air-gapped in SCIF or classified defense environments?',
+                a: 'Yes. QuarkShield provides a fully self-contained offline scanner binary that requires zero outbound internet access and zero connection to external telemetry. It outputs a local JSON or CycloneDX CBOM report directly to disk, allowing defense analysts to ingest reports into isolated enclaves, SIEMs, or offline compliance auditors without touching external networks.'
+              },
+              {
+                q: 'How does Mosca\'s Theorem (X + Y > Z) determine if an organization is already compromised?',
+                a: 'Dr. Michele Mosca established the mathematical benchmark for quantum cryptographic risk: X = how many years your sensitive data must remain secret; Y = how many years it will take your organization to fully transition its systems to quantum-safe cryptography; Z = how many years until a quantum computer capable of breaking classical public-key cryptography exists.\n\nIf X + Y > Z, your organization is already in a state of compromised security because data harvested today will still be secret when quantum decryption becomes feasible. QuarkShield\'s interactive migration planner models this exact inequality for your enterprise.'
+              }
+            ].map((faq, idx) => {
+              const isOpen = openFaqIndex === idx;
+              return (
+                <div key={idx} style={{
+                  background: 'var(--surface)',
+                  border: isOpen ? '1px solid var(--purple)' : '1px solid var(--line)',
+                  borderRadius: '12px',
+                  overflow: 'hidden',
+                  transition: 'all 0.2s ease'
+                }}>
+                  <button
+                    onClick={() => setOpenFaqIndex(isOpen ? null : idx)}
+                    style={{
+                      width: '100%',
+                      padding: '16px 20px',
+                      background: 'none',
+                      border: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                      textAlign: 'left',
+                      cursor: 'pointer',
+                      color: 'var(--text)'
+                    }}
+                  >
+                    <span style={{ fontSize: '0.98rem', fontWeight: 600, color: isOpen ? 'var(--cyan)' : 'var(--text)' }}>
+                      {faq.q}
+                    </span>
+                    <span style={{ color: isOpen ? 'var(--cyan)' : 'var(--muted)', fontSize: '0.8rem' }}>
+                      {isOpen ? '▲' : '▼'}
+                    </span>
+                  </button>
+                  {isOpen && (
+                    <div style={{
+                      padding: '0 20px 20px 20px',
+                      color: 'var(--muted)',
+                      fontSize: '0.88rem',
+                      lineHeight: 1.65,
+                      borderTop: '1px solid var(--line-soft)',
+                      paddingTop: '14px',
+                      whiteSpace: 'pre-line'
+                    }}>
+                      {faq.a}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* ===================== ABOUT FEDMITIGATE LLC ===================== */}
+      <section className="band" id="about-us">
+        <div className="wrap">
+          <span className="band-eyebrow">About FedMitigate LLC</span>
+          <h2>Engineering National-Grade Cryptographic Defense for the Post-Quantum Horizon</h2>
+          <p className="lead">
+            QuarkShield is engineered by <strong>FedMitigate LLC</strong>, a specialized defense technology consultancy headquartered in the Washington, D.C. national security corridor. We exist to safeguard sovereign data, critical infrastructure, and distributed enterprise systems against Harvest Now, Decrypt Later (HNDL) state-sponsored adversaries.
+          </p>
+
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--radius)',
+            padding: '28px',
+            marginTop: '28px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gap: '28px',
+            alignItems: 'center'
+          }}>
+            <div>
+              <div style={{ color: 'var(--cyan)', fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '8px', fontFamily: 'var(--font-mono)' }}>
+                Our Core Mission
+              </div>
+              <h3 style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--text)', margin: '0 0 12px 0', lineHeight: 1.3 }}>
+                Bridging Commercial Agile IT and High-Assurance Defense Cryptography
+              </h3>
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1.65, margin: '0 0 12px 0' }}>
+                With the finalization of NIST FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), and FIPS 205 (SLH-DSA), global public-key cryptography has reached its greatest turning point since the invention of RSA. Classical algorithms are provably insecure against Shor's algorithm on cryptanalytically relevant quantum computers.
+              </p>
+              <p style={{ color: 'var(--muted)', fontSize: '0.9rem', lineHeight: 1.65, margin: 0 }}>
+                QuarkShield solves this vulnerability by providing automated discovery, real-time quantum threat modeling, and continuous Cryptographic Bill of Materials (CBOM) orchestration without requiring kernel modifications or exposing private keys.
+              </p>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
+              <div style={{ background: 'var(--surface-2)', padding: '18px', borderRadius: '10px', border: '1px solid var(--line-soft)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--cyan)', fontFamily: 'var(--font-display)' }}>100%</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', marginTop: '4px' }}>Local Secret Isolation</div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--faint)', marginTop: '4px' }}>Zero private key exfiltration</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '18px', borderRadius: '10px', border: '1px solid var(--line-soft)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--purple)', fontFamily: 'var(--font-display)' }}>CNSA 2.0</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', marginTop: '4px' }}>NSA Modernization Ready</div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--faint)', marginTop: '4px' }}>Full 2025–2033 roadmap</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '18px', borderRadius: '10px', border: '1px solid var(--line-soft)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--good)', fontFamily: 'var(--font-display)' }}>3-Tier</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', marginTop: '4px' }}>Agentless to Enclave</div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--faint)', marginTop: '4px' }}>Probe, host, and enterprise</div>
+              </div>
+              <div style={{ background: 'var(--surface-2)', padding: '18px', borderRadius: '10px', border: '1px solid var(--line-soft)' }}>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#f59e0b', fontFamily: 'var(--font-display)' }}>Zero Trust</div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text)', marginTop: '4px' }}>Air-Gapped Ready</div>
+                <div style={{ fontSize: '0.76rem', color: 'var(--faint)', marginTop: '4px' }}>SCIF and offline deployments</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ===================== CAREERS & APPLIED RESEARCH ===================== */}
+      <section className="band" id="careers">
+        <div className="wrap">
+          <span className="band-eyebrow">Applied Cryptography Careers</span>
+          <h2>Join Our Team Protecting Global Infrastructure Against Quantum Threats</h2>
+          <p className="lead">
+            We are cryptographers, kernel security engineers, and distributed systems architects defending national security systems and global enterprises.
+          </p>
+
+          <div style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 'var(--radius)',
+            padding: '28px',
+            marginTop: '28px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '20px'
+          }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px' }}>
+              {[
+                { title: 'Senior Post-Quantum Cryptographer', loc: 'Remote / D.C.', type: 'Full-Time', badge: 'Lattice Algorithms' },
+                { title: 'Staff Systems & Kernel Security Engineer', loc: 'Remote (US)', type: 'Full-Time', badge: 'eBPF & Native OS' },
+                { title: 'Full-Stack Security Product Engineer', loc: 'Remote (US)', type: 'Full-Time', badge: 'CBOM Analytics' },
+                { title: 'Defense PQC Compliance & GRC Lead', loc: 'Washington, D.C.', type: 'Full-Time', badge: 'NSA CNSA 2.0' }
+              ].map((role, rIdx) => (
+                <div key={rIdx} style={{
+                  background: 'var(--surface-2)',
+                  border: '1px solid var(--line-soft)',
+                  borderRadius: '10px',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '8px'
+                }}>
+                  <div>
+                    <span style={{ fontSize: '0.7rem', color: 'var(--purple)', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                      {role.badge}
+                    </span>
+                    <h4 style={{ margin: '4px 0', fontSize: '0.96rem', fontWeight: 700, color: 'var(--text)' }}>
+                      {role.title}
+                    </h4>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--faint)' }}>
+                      {role.loc} · {role.type}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px', paddingTop: '10px', borderTop: '1px solid var(--line-soft)' }}>
+              <div style={{ fontSize: '0.88rem', color: 'var(--muted)' }}>
+                Explore full job descriptions, algorithm requirements, and security clearances.
+              </div>
+              <button
+                className="btn btn-primary btn-sm"
+                onClick={() => setShowCareerModal(true)}
+              >
+                View All Open Roles &amp; Research Positions →
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -1422,8 +1815,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
             <div className="foot-col">
               <h4>Company</h4>
               <ul>
-                <li><a href="https://quarkshield.ai/#about-us" target="_blank" rel="noopener">About Us</a></li>
-                <li><a href="#careers" onClick={(e) => { e.preventDefault(); setShowCareerModal(true); }}>Careers</a></li>
+                <li><a href="#about-us">About Us</a></li>
+                <li><a href="#careers">Careers</a></li>
                 <li><a href="#" onClick={(e) => { e.preventDefault(); setShowSupportModalState(true); }}>Support</a></li>
                 <li><a href="#" onClick={(e) => { e.preventDefault(); setShowSupportModalState(true); }}>Contact</a></li>
               </ul>
@@ -1434,7 +1827,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <ul>
                 <li><a href="https://quarkshield.ai/docs/QUARKSHIELD_ENTERPRISE_FEATURES_GUIDE.md" target="_blank" rel="noopener">Documentation</a></li>
                 <li><a href="https://quarkshield.ai/docs/AGENTLESS_PQC_ARCHITECTURE.md" target="_blank" rel="noopener">Agentless PQC Whitepaper</a></li>
-                <li><a href="#probe">Regulatory Radar</a></li>
+                <li><a href="#cnsa-news">Regulatory Radar</a></li>
                 <li><a href="https://quarkshield.ai/docs/ENTERPRISE_AGENT_DEPLOYMENT_GUIDE.md" target="_blank" rel="noopener">Deployment Guides</a></li>
               </ul>
             </div>
