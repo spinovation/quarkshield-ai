@@ -5,53 +5,103 @@ import tls from 'tls';
 import net from 'net';
 import { assertPublicHost } from '../utils/ssrf';
 
-// Helper to syndicate proxy gateway primitives into CBOM assets inventory
-export const syndicateProxyToAssets = async (id: string, name: string, listenPort: number, upstreamUrl: string, tlsCurve: string, tenantName: string) => {
+/**
+ * Derive real KEM crypto metadata from the gateway's CONFIGURED tls curve.
+ * A hybrid ML-KEM curve is quantum-safe; a classical-only curve is flagged
+ * vulnerable so a mis-configured gateway surfaces correctly in the CBOM.
+ */
+const parseHybridCurve = (tlsCurve: string): {
+  algorithm: string; keySize: number; isVulnerable: boolean; riskLevel: string; recommendation: string;
+} => {
+  const c = (tlsCurve || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (c.includes('MLKEM1024')) return { algorithm: 'ML-KEM-1024 + X25519 (Hybrid)', keySize: 1024, isVulnerable: false, riskLevel: 'secure', recommendation: 'NIST FIPS 203 (ML-KEM) hybrid key exchange. Quantum-safe; no remediation needed.' };
+  if (c.includes('MLKEM768')) return { algorithm: 'ML-KEM-768 + X25519 (Hybrid)', keySize: 768, isVulnerable: false, riskLevel: 'secure', recommendation: 'NIST FIPS 203 (ML-KEM) hybrid key exchange. Quantum-safe; no remediation needed.' };
+  if (c.includes('MLKEM512')) return { algorithm: 'ML-KEM-512 + X25519 (Hybrid)', keySize: 512, isVulnerable: false, riskLevel: 'secure', recommendation: 'NIST FIPS 203 (ML-KEM) hybrid key exchange. Quantum-safe; no remediation needed.' };
+  if (c.includes('MLKEM')) return { algorithm: 'ML-KEM + X25519 (Hybrid)', keySize: 768, isVulnerable: false, riskLevel: 'secure', recommendation: 'NIST FIPS 203 (ML-KEM) hybrid key exchange. Quantum-safe; no remediation needed.' };
+  // Classical-only key exchange — vulnerable to Harvest-Now-Decrypt-Later.
+  const keySize = c.includes('SECP384') || c.includes('P384') ? 384 : c.includes('SECP521') || c.includes('P521') ? 521 : c.includes('SECP256') || c.includes('P256') ? 256 : 256;
+  return { algorithm: `${tlsCurve || 'X25519'} (classical)`, keySize, isVulnerable: true, riskLevel: 'high', recommendation: 'Gateway is configured with a classical-only key-exchange curve. Switch to a hybrid X25519MLKEM768 curve (OpenSSL 3.2+) to be quantum-safe.' };
+};
+
+/**
+ * Syndicate a proxy gateway's crypto into the CBOM `assets` inventory.
+ * Values are derived from the gateway's real configured curve (not hardcoded).
+ * When `measured` is supplied (from an actual upstream TLS handshake in
+ * testProxyHandshake), an additional measured "upstream TLS" asset is recorded
+ * reflecting the legacy backend traffic the gateway fronts.
+ */
+export const syndicateProxyToAssets = async (
+  id: string, name: string, listenPort: number, upstreamUrl: string, tlsCurve: string, tenantName: string,
+  measured?: { protocol?: string; cipher?: string }
+) => {
   try {
     const kemId = ('ast-prx-kem-' + id).substring(0, 64);
-    const crtId = ('ast-prx-crt-' + id).substring(0, 64);
+    const kem = parseHybridCurve(tlsCurve);
 
-    // 1. Upsert KEM Protocol Asset (FIPS 203 Quantum Safe)
+    // 1. KEM / ingress key-exchange asset, derived from the configured curve.
     await pool.query(`
       INSERT INTO assets (
         id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name
-      ) VALUES ($1, 'protocol', $2, $3, $4, 768, false, 'secure', 'active', $5, $6, 'pqc_proxy', $7, $8)
-      ON CONFLICT (id) DO UPDATE SET 
+      ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, $7, 'active', $8, $9, 'pqc_proxy', $10, $11)
+      ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         path = EXCLUDED.path,
         algorithm = EXCLUDED.algorithm,
+        key_size = EXCLUDED.key_size,
+        is_vulnerable = EXCLUDED.is_vulnerable,
+        risk_level = EXCLUDED.risk_level,
+        description = EXCLUDED.description,
+        recommendation = EXCLUDED.recommendation,
         tenant_name = EXCLUDED.tenant_name,
         updated_at = NOW()
     `, [
       kemId,
-      `${name} (Hybrid TLS 1.3 KEM)`,
+      `${name} (Ingress TLS 1.3 Key Exchange)`,
       `Ingress Port :${listenPort} -> ${upstreamUrl}`,
-      tlsCurve || 'ML-KEM-768 + X25519',
-      `QuarkShield Transparent Hybrid Post-Quantum Key Encapsulation Mechanism protecting ${name} against HNDL attacks.`,
-      `NIST FIPS 203 compliant. Zero further remediation needed.`,
+      kem.algorithm,
+      kem.keySize,
+      kem.isVulnerable,
+      kem.riskLevel,
+      `QuarkShield transparent hybrid TLS gateway configured with curve "${tlsCurve || 'X25519MLKEM768'}", protecting ${name} against HNDL attacks.`,
+      kem.recommendation,
       name,
       tenantName
     ]);
 
-    // 2. Upsert Gateway Certificate Asset
-    await pool.query(`
-      INSERT INTO assets (
-        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name
-      ) VALUES ($1, 'certificate', $2, $3, 'ECDSA-P384 / ML-DSA-65 Fallback', 384, false, 'secure', 'active', $4, $5, 'pqc_proxy', $6, $7)
-      ON CONFLICT (id) DO UPDATE SET 
-        name = EXCLUDED.name,
-        path = EXCLUDED.path,
-        tenant_name = EXCLUDED.tenant_name,
-        updated_at = NOW()
-    `, [
-      crtId,
-      `${name} Gateway Server Certificate`,
-      `/etc/quarkshield/certs/gateway-${listenPort}.crt`,
-      `Dual-key/fallback edge certificate terminating incoming HTTPS requests.`,
-      `Active perimeter protection. Certificate rotation scheduled annually.`,
-      name,
-      tenantName
-    ]);
+    // 2. Measured upstream TLS asset — only when we actually probed the upstream.
+    if (measured && (measured.cipher || measured.protocol)) {
+      const upId = ('ast-prx-up-' + id).substring(0, 64);
+      const proto = measured.protocol || 'unknown';
+      const isModern = proto === 'TLSv1.3';
+      await pool.query(`
+        INSERT INTO assets (
+          id, type, name, path, algorithm, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name
+        ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, 'active', $7, $8, 'pqc_proxy', $9, $10)
+        ON CONFLICT (id) DO UPDATE SET
+          name = EXCLUDED.name,
+          path = EXCLUDED.path,
+          algorithm = EXCLUDED.algorithm,
+          is_vulnerable = EXCLUDED.is_vulnerable,
+          risk_level = EXCLUDED.risk_level,
+          description = EXCLUDED.description,
+          recommendation = EXCLUDED.recommendation,
+          tenant_name = EXCLUDED.tenant_name,
+          updated_at = NOW()
+      `, [
+        upId,
+        `${name} Upstream TLS (measured)`,
+        upstreamUrl,
+        measured.cipher ? `${measured.cipher}${proto !== 'unknown' ? ' / ' + proto : ''}` : proto,
+        !isModern,
+        isModern ? 'medium' : 'high',
+        `Measured upstream negotiation for ${upstreamUrl}: ${proto}${measured.cipher ? ' / ' + measured.cipher : ''}. This is the legacy backend traffic the hybrid gateway fronts.`,
+        isModern
+          ? 'Upstream negotiates TLS 1.3. Confirm the key-exchange group is hybrid (X25519MLKEM768) for full quantum safety.'
+          : 'Upstream negotiates a pre-TLS 1.3 / classical protocol. Terminate hybrid PQC TLS at the QuarkShield gateway to protect this traffic.',
+        name,
+        tenantName
+      ]);
+    }
   } catch (e) {
     console.warn('Failed to syndicate proxy to assets:', e);
   }
@@ -155,10 +205,11 @@ export const deleteProxy = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Proxy instance not found.' });
     }
 
-    // Clean up syndicated CBOM assets
+    // Clean up syndicated CBOM assets (KEM, measured upstream, and legacy cert row).
     const kemId = ('ast-prx-kem-' + id).substring(0, 64);
+    const upId = ('ast-prx-up-' + id).substring(0, 64);
     const crtId = ('ast-prx-crt-' + id).substring(0, 64);
-    await pool.query("DELETE FROM assets WHERE source = 'pqc_proxy' AND (id = $1 OR id = $2)", [kemId, crtId]).catch(() => {});
+    await pool.query("DELETE FROM assets WHERE source = 'pqc_proxy' AND id IN ($1, $2, $3)", [kemId, upId, crtId]).catch(() => {});
 
     res.json({ success: true, message: 'Proxy gateway successfully deleted.' });
   } catch (err: any) {
@@ -212,6 +263,15 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
     const started = Date.now();
     const result = await probeUpstream(upstream.hostname, port, upstream.protocol === 'https:');
     await pool.query('UPDATE pqc_proxies SET handshake_count = handshake_count + 1 WHERE id = $1', [id]);
+
+    // Record the real measured upstream negotiation into the CBOM inventory.
+    if (result.reachable && (result.cipher || result.protocol)) {
+      await syndicateProxyToAssets(
+        p.id, p.name, p.listen_port, p.upstream_url, p.tls_curve, p.tenant_name,
+        { protocol: result.protocol, cipher: result.cipher }
+      );
+    }
+
     return res.json({
       success: true, proxyId: id, name: p.name, listenPort: p.listen_port, upstreamUrl: p.upstream_url,
       validation: 'target-reachable',

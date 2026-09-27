@@ -3025,16 +3025,16 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
 
             {/* Sub-tab content */}
             {activeTab === 'git' && (
-              <GitRepoAuditor />
+              <GitRepoAuditor onAssetsChanged={() => fetchCBOM()} />
             )}
             {activeTab === 'pki' && (
               <div style={{ padding: '0.5rem 0' }}>
-                <EnterprisePkiVaults tenantName={selectedTenantFilter !== 'all' ? selectedTenantFilter : undefined} />
+                <EnterprisePkiVaults tenantName={selectedTenantFilter !== 'all' ? selectedTenantFilter : undefined} onAssetsChanged={() => fetchCBOM()} />
               </div>
             )}
             {activeTab === 'proxy' && (
               <div style={{ padding: '0.5rem 0' }}>
-                <PqcProxyGateway />
+                <PqcProxyGateway onAssetsChanged={() => fetchCBOM()} />
               </div>
             )}
           </div>

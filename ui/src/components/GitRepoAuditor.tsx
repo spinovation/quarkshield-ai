@@ -87,7 +87,7 @@ interface ScanHistoryItem {
   scannedAt: string;
 }
 
-export const GitRepoAuditor: React.FC = () => {
+export const GitRepoAuditor: React.FC<{ onAssetsChanged?: () => void }> = ({ onAssetsChanged }) => {
   // Form State
   const [provider, setProvider] = useState<'github' | 'bitbucket' | 'gitlab' | 'generic'>('github');
   const [repoUrl, setRepoUrl] = useState('');
@@ -258,6 +258,7 @@ export const GitRepoAuditor: React.FC = () => {
 
       setActiveScan(data.summary);
       fetchHistory(); // Refresh history
+      onAssetsChanged?.(); // Refresh the parent CBOM inventory (findings persisted with source='git_repo')
     } catch (err: any) {
       setErrorMsg(err.message || 'An unexpected error occurred during repository audit.');
     } finally {

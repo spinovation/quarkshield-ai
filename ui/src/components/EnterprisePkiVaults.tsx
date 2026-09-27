@@ -52,7 +52,7 @@ interface SyncedAsset {
   expires_at?: string;
 }
 
-export const EnterprisePkiVaults: React.FC<{ tenantName?: string }> = () => {
+export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChanged?: () => void }> = ({ onAssetsChanged }) => {
   const [connectors, setConnectors] = useState<PkiConnector[]>([]);
   const [assets, setAssets] = useState<SyncedAsset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -115,6 +115,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string }> = () => {
         setNotification({ msg: `Synchronized ${name}: Discovered ${data.totalKeysDiscovered} keys (${data.vulnerableKeys} vulnerable).`, type: 'success' });
         fetchConnectors();
         fetchAssets();
+        onAssetsChanged?.(); // Refresh parent CBOM (synced keys/certs persisted with source='enterprise_pki'/'cloud_kms')
       } else {
         throw new Error(data.error || 'Sync failed');
       }
@@ -134,6 +135,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string }> = () => {
         setNotification({ msg: `Connector '${name}' deleted.`, type: 'success' });
         fetchConnectors();
         fetchAssets();
+        onAssetsChanged?.(); // Connector delete removes its inventory assets from CBOM too
       }
     } catch (err: any) {
       setNotification({ msg: err.message, type: 'error' });

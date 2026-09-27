@@ -33,7 +33,7 @@ interface ProxyInstance {
   last_active_at?: string;
 }
 
-export const PqcProxyGateway: React.FC = () => {
+export const PqcProxyGateway: React.FC<{ onAssetsChanged?: () => void }> = ({ onAssetsChanged }) => {
   const [proxies, setProxies] = useState<ProxyInstance[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeSubTab, setActiveSubTab] = useState<'gateways' | 'templates'>('gateways');
@@ -106,7 +106,7 @@ export const PqcProxyGateway: React.FC = () => {
     if (!window.confirm('Are you sure you want to delete this proxy gateway?')) return;
     try {
       const res = await fetch(`/api/proxy/instances/${id}`, { method: 'DELETE' });
-      if (res.ok) fetchProxies();
+      if (res.ok) { fetchProxies(); onAssetsChanged?.(); }
     } catch (err) {
       console.error('Error deleting proxy:', err);
     }
@@ -119,6 +119,7 @@ export const PqcProxyGateway: React.FC = () => {
         const data = await res.json();
         setDiagnosticResult(data);
         fetchProxies();
+        onAssetsChanged?.(); // A real handshake test records a measured upstream-TLS asset into CBOM
       }
     } catch (err) {
       console.error('Error testing handshake:', err);
@@ -138,6 +139,7 @@ export const PqcProxyGateway: React.FC = () => {
         setShowAddModal(false);
         setName('');
         fetchProxies();
+        onAssetsChanged?.(); // New gateway syndicates a KEM asset into CBOM
       }
     } catch (err) {
       console.error('Error creating proxy:', err);

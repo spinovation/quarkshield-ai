@@ -4630,13 +4630,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
                 {/* Sub-tab content */}
                 {activeTab === 'git' && (
-                  <GitRepoAuditor />
+                  <GitRepoAuditor onAssetsChanged={fetchTenantData} />
                 )}
                 {activeTab === 'pki' && (
-                  <EnterprisePkiVaults tenantName={client.displayName || tenantSlug} />
+                  <EnterprisePkiVaults tenantName={client.displayName || tenantSlug} onAssetsChanged={fetchTenantData} />
                 )}
                 {activeTab === 'proxy' && (
-                  <PqcProxyGateway />
+                  <PqcProxyGateway onAssetsChanged={fetchTenantData} />
                 )}
               </div>
             )}
