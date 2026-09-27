@@ -587,21 +587,6 @@ export const CryptographicPostureCard: React.FC<CryptographicPostureCardProps> =
           </div>
         </div>
       )}
-
-      {/* Prototype View Note */}
-      <div style={{
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-        fontSize: '0.7rem',
-        color: '#64748b',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.4rem',
-        paddingLeft: '0.2rem',
-        marginTop: '0.1rem'
-      }}>
-        <span>✦</span>
-        <span>Prototype view &mdash; wires to the live Spinovation Corp CBOM feed (in build)</span>
-      </div>
     </div>
   );
 };
