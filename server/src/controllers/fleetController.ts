@@ -1205,29 +1205,32 @@ export const getTenantDailySnapshots = async (req: Request, res: Response) => {
  * GET /api/cbom/fleet
  * Safe public cryptographic posture feed for landing page hero display.
  */
-export const getPublicFleetPosture = async (req: Request, res: Response) => {
-  try {
-    const assetsRes = await pool.query(`
-      SELECT 
-        a.id, a.type, a.name, a.algorithm, a.key_size as "keySize", a.hash_algorithm as "hashAlgorithm",
-        a.is_vulnerable as "isVulnerable", a.risk_level as "riskLevel", a.status
-      FROM assets a
-      WHERE LOWER(a.tenant_name) LIKE '%spinovation%'
-      ORDER BY a.is_vulnerable DESC, a.created_at DESC
-      LIMIT 100
-    `);
-    const machinesRes = await pool.query(`
-      SELECT m.id, m.hostname, m.status, m.asset_count as "assetCount"
-      FROM fleet_machines m
-      WHERE LOWER(m.tenant_name) LIKE '%spinovation%'
-      LIMIT 10
-    `);
-    res.json({
-      success: true,
-      assets: assetsRes.rows,
-      machines: machinesRes.rows
-    });
-  } catch (err: any) {
-    res.json({ success: true, assets: [], machines: [] });
-  }
+export const getPublicFleetPosture = async (_req: Request, res: Response) => {
+  // PUBLIC marketing endpoint (no auth). It must NEVER return a real tenant's
+  // live cryptographic inventory — doing so would publish a customer's security
+  // weaknesses to anyone on the internet. Instead it returns an anonymized,
+  // representative "sample enterprise" posture that demonstrates the product.
+  const summary = {
+    totalAssets: 1284,
+    quantumVuln: 517,
+    hndlExposed: 143,
+    configFindings: 38,
+    pqcReady: 226,
+    riskScore: 57 // -> grade C+ (see calculatePostureMetrics mapping)
+  };
+  // Small anonymized sample for API consumers / the critical-finding drill-down.
+  const assets = [
+    { id: 'sample-edge-lb-01', type: 'tls_endpoint', name: 'edge-lb-01 · TLS cert', algorithm: 'RSA-2048', keySize: 2048, hashAlgorithm: 'SHA-256', isVulnerable: true, riskLevel: 'high', status: 'active' },
+    { id: 'sample-api-gw-02', type: 'certificate', name: 'api-gateway-02 · leaf cert', algorithm: 'ECDSA-256', keySize: 256, hashAlgorithm: 'SHA-256', isVulnerable: true, riskLevel: 'high', status: 'active' },
+    { id: 'sample-vpn-01', type: 'key_exchange', name: 'vpn-ipsec-01 · IKEv2', algorithm: 'ECDH secp256r1', keySize: 256, hashAlgorithm: 'SHA-256', isVulnerable: true, riskLevel: 'medium', status: 'active' },
+    { id: 'sample-mtls-mesh', type: 'certificate', name: 'mtls-mesh · service identity', algorithm: 'X25519MLKEM768 (hybrid)', keySize: 768, hashAlgorithm: 'SHA-384', isVulnerable: false, riskLevel: 'low', status: 'active' },
+    { id: 'sample-code-sign', type: 'signature', name: 'code-signing · release', algorithm: 'ML-DSA (Dilithium)', keySize: 0, hashAlgorithm: 'SHA-512', isVulnerable: false, riskLevel: 'low', status: 'active' },
+    { id: 'sample-bastion-01', type: 'ssh_key', name: 'bastion-01 · host key', algorithm: 'RSA-4096', keySize: 4096, hashAlgorithm: 'SHA-256', isVulnerable: true, riskLevel: 'medium', status: 'active' }
+  ];
+  const machines = [
+    { id: 'm-edge-lb-01', hostname: 'edge-lb-01', status: 'online', assetCount: 214 },
+    { id: 'm-api-gw-02', hostname: 'api-gateway-02', status: 'online', assetCount: 187 },
+    { id: 'm-vpn-01', hostname: 'vpn-ipsec-01', status: 'online', assetCount: 96 }
+  ];
+  res.json({ success: true, label: 'Sample Enterprise Fleet', summary, assets, machines });
 };

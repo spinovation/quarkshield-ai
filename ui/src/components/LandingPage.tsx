@@ -97,16 +97,18 @@ const SECTOR_BENCHMARKS = [
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => {
   // ---------------------------------------------------------
-  // Live Fleet Posture Metrics for Spinovation Corp
+  // Public hero: anonymized "Sample Enterprise Fleet" posture (no real tenant data)
   // ---------------------------------------------------------
+  // Anonymized "sample enterprise" posture for the public hero panel. The public
+  // /api/cbom/fleet endpoint returns representative (not real-tenant) data.
   const [spinovationPosture, setSpinovationPosture] = useState<PostureMetrics>(() =>
     calculatePostureMetrics([], [], {
-      totalAssets: 4812,
-      quantumVuln: 1367,
-      hndlExposed: 214,
-      configFindings: 89,
-      pqcReady: 642,
-      riskScore: 86
+      totalAssets: 1284,
+      quantumVuln: 517,
+      hndlExposed: 143,
+      configFindings: 38,
+      pqcReady: 226,
+      riskScore: 57
     })
   );
 
@@ -114,7 +116,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
     fetch('/api/cbom/fleet')
       .then(res => res.ok ? res.json() : null)
       .then(data => {
-        if (data && data.assets && data.assets.length > 0) {
+        if (data && data.summary) {
+          // Authoritative aggregate counts come from the endpoint's summary.
+          setSpinovationPosture(calculatePostureMetrics([], data.machines || [], data.summary));
+        } else if (data && data.assets && data.assets.length > 0) {
           setSpinovationPosture(calculatePostureMetrics(data.assets, data.machines || []));
         }
       })
@@ -811,9 +816,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
           </div>
 
           {/* Product Mock: Square 3x2 Grid */}
-          <div className="mock" aria-label="QuarkShield live CBOM feed — Spinovation Corp">
+          <div className="mock" aria-label="QuarkShield sample CBOM posture — Sample Enterprise Fleet">
             <div className="mock-top">
-              <span className="mock-title">Cryptographic Posture — spinovation&#8209;corp</span>
+              <span className="mock-title">Cryptographic Posture — Sample Enterprise Fleet</span>
               <span className="live-pill"><span className="dot"></span>LIVE</span>
             </div>
             <div className="kpis">
@@ -868,7 +873,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
             </div>
 
-            <div className="mock-caption">◆ Prototype view — wires to the live Spinovation Corp CBOM feed (in build)</div>
           </div>
         </div>
       </header>
