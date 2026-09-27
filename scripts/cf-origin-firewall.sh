@@ -36,12 +36,17 @@ log() { printf '  %s\n' "$*"; }
 require_root() { [ "$(id -u)" -eq 0 ] || { echo "Must run as root (use sudo)."; exit 1; }; }
 
 # Remove any rules we previously added (matched by our comment marker), for one table.
+# Tolerant of "no existing rules" (grep exits non-zero) under `set -o pipefail`.
 _purge() {
-  local IPT="$1"
-  $IPT -S DOCKER-USER 2>/dev/null | grep -- "$MARK" | sed 's/^-A/-D/' | while read -r rule; do
+  local IPT="$1" rules
+  rules="$($IPT -S DOCKER-USER 2>/dev/null | grep -- "$MARK" || true)"
+  [ -n "$rules" ] || return 0
+  printf '%s\n' "$rules" | sed 's/^-A/-D/' | while read -r rule; do
+    [ -n "$rule" ] || continue
     # shellcheck disable=SC2086
     $IPT $rule 2>/dev/null || true
   done
+  return 0
 }
 
 # Apply rules for one table ($1=iptables|ip6tables, $2=space-separated CIDR list).
