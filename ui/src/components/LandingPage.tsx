@@ -417,6 +417,15 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       }
     };
     window.addEventListener('keydown', handleKeyDown);
+
+    const hash = window.location.hash;
+    const params = new URLSearchParams(window.location.search);
+    if (hash === '#signin' || params.get('modal') === 'signin') {
+      setShowSignInModal(true);
+    } else if (hash === '#career-modal' || params.get('modal') === 'careers') {
+      setShowCareerModal(true);
+    }
+
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
