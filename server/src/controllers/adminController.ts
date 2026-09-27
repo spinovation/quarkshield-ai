@@ -2551,15 +2551,16 @@ export const probeEndpoint = async (req: Request, res: Response) => {
 // ==============================================================================
 export const unifiedLogin = async (req: Request, res: Response) => {
   try {
-    const { identifier, password, totpCode } = req.body;
-    if (!identifier || !identifier.trim()) {
+    const rawIdentifier = (req.body.identifier || req.body.email || req.body.username || '').toString();
+    const { password, totpCode } = req.body;
+    if (!rawIdentifier || !rawIdentifier.trim()) {
       return res.status(400).json({ error: 'Email or workspace identifier is required.' });
     }
     if (!password) {
       return res.status(401).json({ error: 'Password is required.' });
     }
 
-    const cleanId = identifier.trim().toLowerCase();
+    const cleanId = rawIdentifier.trim().toLowerCase();
     const INVALID = 'Invalid credentials.'; // uniform message: no account enumeration
 
     // ---- 1. Platform operator (admin_users) by email or id ----
