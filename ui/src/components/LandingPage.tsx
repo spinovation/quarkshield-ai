@@ -448,7 +448,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const [showStripeModal, setShowStripeModal] = useState(false);
   const [stripeTier, setStripeTier] = useState<'entry' | 'scale' | 'enterprise'>('scale');
   const [stripeBillingCycle, setStripeBillingCycle] = useState<'monthly' | 'annual'>('annual');
-  const [stripeEmail, setStripeEmail] = useState('');
+  const [checkoutForm, setCheckoutForm] = useState({ companyName: '', contactName: '', email: '' });
   const [stripeLoading, setStripeLoading] = useState(false);
   const [stripeError, setStripeError] = useState<string | null>(null);
 
@@ -627,29 +627,30 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const handleStripeCheckout = async (e: React.FormEvent) => {
     e.preventDefault();
     setStripeError(null);
-    if (!stripeEmail || !stripeEmail.trim()) {
-      setStripeError('Please enter your billing email address.');
+    if (!checkoutForm.companyName.trim() || !checkoutForm.email.trim()) {
+      setStripeError('Please provide both your company name and corporate email address.');
       return;
     }
     setStripeLoading(true);
     try {
-      const res = await fetch('/api/create-checkout-session', {
+      const res = await fetch('/api/billing/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           tier: stripeTier,
-          billingCycle: stripeBillingCycle,
-          customerEmail: stripeEmail.trim()
+          billingInterval: stripeBillingCycle,
+          companyName: checkoutForm.companyName.trim(),
+          contactName: checkoutForm.contactName.trim(),
+          email: checkoutForm.email.trim()
         })
       });
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        throw new Error(data.error || 'Failed to create checkout session.');
+      if (!res.ok || !data.checkoutUrl) {
+        throw new Error(data.error || 'Failed to initialize Stripe checkout session.');
       }
+      window.location.href = data.checkoutUrl;
     } catch (err: any) {
-      setStripeError(err.message || 'Stripe initialization failed.');
+      setStripeError(err.message || 'Payment system error. Please try again.');
       setStripeLoading(false);
     }
   };
@@ -1189,6 +1190,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                 onClick={() => {
                   setStripeTier('entry');
                   setStripeBillingCycle(isAnnualBilling ? 'annual' : 'monthly');
+                  setStripeError(null);
                   setShowStripeModal(true);
                 }}
               >
@@ -1234,6 +1236,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                 onClick={() => {
                   setStripeTier('scale');
                   setStripeBillingCycle(isAnnualBilling ? 'annual' : 'monthly');
+                  setStripeError(null);
                   setShowStripeModal(true);
                 }}
               >
@@ -2698,31 +2701,40 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
 
       {/* ===================== STRIPE CHECKOUT MODAL ===================== */}
       {showStripeModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(8px)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 2000,
-          padding: '1.5rem'
-        }}>
-          <div style={{
-            background: 'var(--surface-2)',
-            maxWidth: '480px',
-            width: '100%',
-            borderRadius: '14px',
-            border: '1px solid var(--line)',
-            boxShadow: '0 24px 60px rgba(0, 0, 0, 0.85)',
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Subscribe to Plan"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(8px)',
             display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }}>
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 2000,
+            padding: '1.5rem'
+          }}
+          onClick={() => setShowStripeModal(false)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--surface-2)',
+              maxWidth: '500px',
+              width: '100%',
+              borderRadius: '14px',
+              border: '1px solid var(--line)',
+              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.85)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden'
+            }}
+          >
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -2744,21 +2756,83 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <div style={{ background: 'var(--surface)', padding: '0.85rem', borderRadius: '8px', fontSize: '0.88rem' }}>
                 <b>Plan:</b> {stripeTier.toUpperCase()} &nbsp;·&nbsp;
                 <b>Billing:</b> {stripeBillingCycle === 'annual' ? 'Annual (~17% savings)' : 'Monthly'} &nbsp;·&nbsp;
-                <b>Price:</b> {stripeTier === 'entry' ? (stripeBillingCycle === 'annual' ? '$249/mo' : '$300/mo') : (stripeBillingCycle === 'annual' ? '$2,075/mo' : '$2,500/mo')}
+                <b>Price:</b> {stripeTier === 'entry' ? (stripeBillingCycle === 'annual' ? '$249/mo' : '$300/mo') : stripeTier === 'scale' ? (stripeBillingCycle === 'annual' ? '$2,075/mo' : '$2,500/mo') : (stripeBillingCycle === 'annual' ? '$8,300/mo' : '$10,000/mo')}
               </div>
-              {stripeError && <div style={{ color: 'var(--critical)', fontSize: '0.85rem' }}>{stripeError}</div>}
+              {stripeError && (
+                <div style={{
+                  padding: '0.75rem',
+                  borderRadius: '6px',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid var(--critical)',
+                  color: '#f87171',
+                  fontSize: '0.85rem'
+                }}>
+                  {stripeError}
+                </div>
+              )}
               <div className="field">
-                <label>Billing Contact Email</label>
+                <label>Company / Organization Name <span className="req">*</span></label>
                 <input
-                  type="email"
-                  placeholder="billing@yourcompany.com"
-                  value={stripeEmail}
-                  onChange={(e) => setStripeEmail(e.target.value)}
+                  type="text"
                   required
+                  placeholder="e.g. Acme Aerospace Corp"
+                  value={checkoutForm.companyName}
+                  onChange={(e) => setCheckoutForm(prev => ({ ...prev, companyName: e.target.value }))}
                 />
               </div>
-              <button type="submit" className="btn btn-primary" disabled={stripeLoading} style={{ width: '100%', justifyContent: 'center' }}>
-                {stripeLoading ? 'Connecting to Stripe...' : 'Proceed to Stripe Checkout →'}
+              <div className="field">
+                <label>Contact Name</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Jane Doe"
+                  value={checkoutForm.contactName}
+                  onChange={(e) => setCheckoutForm(prev => ({ ...prev, contactName: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label>Corporate Email (Billing &amp; Super Admin) <span className="req">*</span></label>
+                <input
+                  type="email"
+                  required
+                  placeholder="admin@acme.com"
+                  value={checkoutForm.email}
+                  onChange={(e) => setCheckoutForm(prev => ({ ...prev, email: e.target.value }))}
+                />
+              </div>
+
+              <div style={{
+                fontSize: '0.78rem',
+                color: 'var(--muted)',
+                lineHeight: 1.5,
+                background: 'rgba(0, 242, 254, 0.04)',
+                border: '1px solid rgba(0, 242, 254, 0.15)',
+                borderRadius: '6px',
+                padding: '0.65rem 0.85rem'
+              }}>
+                🔒 You will be redirected to Stripe's PCI-DSS Level 1 compliant checkout to finalize your payment securely. Your QuarkShield tenant and license keys will be provisioned immediately.
+              </div>
+
+              <button
+                type="submit"
+                disabled={stripeLoading}
+                className="btn btn-primary"
+                style={{
+                  width: '100%',
+                  justifyContent: 'center',
+                  padding: '0.85rem',
+                  fontWeight: 700,
+                  fontSize: '0.95rem'
+                }}
+              >
+                {stripeLoading ? (
+                  <>
+                    <RefreshCw size={16} className="spin" style={{ animation: 'spin 1s linear infinite' }} /> Connecting to Stripe...
+                  </>
+                ) : (
+                  <>
+                    <Lock size={16} /> Proceed to Stripe Checkout <ArrowRight size={16} />
+                  </>
+                )}
               </button>
             </form>
           </div>
