@@ -55,6 +55,8 @@ export interface RoadmapReport {
   scopeLabel: string;       // "SPINOVATIONCORP" or "All Tenants (Fleet)"
   collective: boolean;
   generatedAt: string;
+  reportId: string;         // short human reference for the document
+  riskGrade: string;        // A / B+ / C / D+ / F derived from vuln % + avg risk
   totals: { tenants: number; machines: number; assets: number; vulnerable: number; pqcReady: number; avgRisk: number; vulnPct: number };
   mosca: { verdict: string; detail: string };
   priorities: Priority[];
@@ -212,10 +214,16 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     }));
   }
 
+  // Risk grade (A best … F worst) from vulnerable % blended with avg risk score.
+  const blended = Math.round(vulnPct * 0.7 + (m.avg_risk || 0) * 0.3);
+  const riskGrade = blended >= 65 ? 'F' : blended >= 50 ? 'D+' : blended >= 35 ? 'C' : blended >= 15 ? 'B+' : blended > 0 ? 'A-' : 'A';
+
   return {
     scopeLabel: scope.collective ? 'All Tenants (Fleet)' : (scope.tenant || ''),
     collective: scope.collective,
     generatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC',
+    reportId: `QS-PQCR-${(scope.collective ? 'FLEET' : (scope.tenant || 'T').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8))}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+    riskGrade,
     totals: { tenants: t.tenants || 0, machines: m.machines || 0, assets, vulnerable, pqcReady: t.pqc_ready || 0, avgRisk: m.avg_risk || 0, vulnPct },
     mosca,
     priorities,

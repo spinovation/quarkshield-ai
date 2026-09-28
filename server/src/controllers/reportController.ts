@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
 import PDFDocument from 'pdfkit';
 import { Document, Packer, Paragraph, HeadingLevel, Table, TableRow, TableCell, TextRun, WidthType, AlignmentType } from 'docx';
+import pool from '../config/db';
 import { isSuperRole } from '../middleware/auth';
+import { sendSupportEmail } from './adminController';
 import { buildRoadmapReport, generateNarrative, RoadmapReport, Priority } from '../lib/roadmapReport';
 
 /**
@@ -23,12 +25,18 @@ const buildPdf = (r: RoadmapReport, res: Response) => {
   const rule = () => { doc.moveTo(50, doc.y + 4).lineTo(545, doc.y + 4).strokeColor('#e2e8f0').stroke(); doc.moveDown(0.8); };
   const h = (t: string) => { doc.moveDown(0.8).fillColor(navy).fontSize(13).text(t); doc.moveDown(0.3); };
 
-  // Header
-  doc.fillColor(navy).fontSize(22).text('QuarkShield.ai');
+  // Header (with risk-grade badge on the right)
+  const gradeColor = r.riskGrade[0] === 'F' ? '#b91c1c' : r.riskGrade[0] === 'D' ? '#c2410c' : r.riskGrade[0] === 'C' ? '#a16207' : r.riskGrade[0] === 'B' ? '#0369a1' : '#15803d';
+  const topY = doc.y;
+  doc.fillColor('#b91c1c').fontSize(8).text('CONFIDENTIAL', 50, topY);
+  doc.fillColor(navy).fontSize(22).text('quarkshield', 50, doc.y + 2);
   doc.fillColor(cyan).fontSize(13).text('Executive Post-Quantum Cryptography Roadmap Report');
   doc.moveDown(0.4).fillColor(slate).fontSize(10)
-    .text(`Scope: ${r.scopeLabel}${r.collective ? `  ·  ${r.totals.tenants} tenants` : ''}`)
-    .text(`Generated: ${r.generatedAt}`);
+    .text(`Prepared for: ${r.scopeLabel}${r.collective ? `  ·  ${r.totals.tenants} tenants` : ''}`)
+    .text(`Generated: ${r.generatedAt}   ·   Report ID: ${r.reportId}`);
+  // Grade badge, top-right
+  doc.fillColor(gradeColor).fontSize(34).text(r.riskGrade, 470, topY + 6, { width: 75, align: 'right' });
+  doc.fillColor(slate).fontSize(8).text('RISK GRADE', 470, topY + 44, { width: 75, align: 'right' });
   doc.moveTo(50, doc.y + 6).lineTo(545, doc.y + 6).strokeColor(cyan).stroke();
   doc.moveDown(1);
 
@@ -121,10 +129,12 @@ const buildDocx = async (r: RoadmapReport): Promise<Buffer> => {
   });
 
   const children: any[] = [
-    new Paragraph({ text: 'QuarkShield.ai', heading: HeadingLevel.TITLE }),
+    new Paragraph({ children: [new TextRun({ text: 'CONFIDENTIAL', bold: true, color: 'B91C1C', size: 16 })] }),
+    new Paragraph({ text: 'QuarkShield', heading: HeadingLevel.TITLE }),
     new Paragraph({ text: 'Executive Post-Quantum Cryptography Roadmap Report', heading: HeadingLevel.HEADING_2 }),
-    new Paragraph(`Scope: ${r.scopeLabel}${r.collective ? `  ·  ${r.totals.tenants} tenants` : ''}`),
-    new Paragraph(`Generated: ${r.generatedAt}`),
+    new Paragraph({ children: [new TextRun({ text: `Risk Grade: ${r.riskGrade}`, bold: true, size: 28 })] }),
+    new Paragraph(`Prepared for: ${r.scopeLabel}${r.collective ? `  ·  ${r.totals.tenants} tenants` : ''}`),
+    new Paragraph(`Generated: ${r.generatedAt}   ·   Report ID: ${r.reportId}`),
     new Paragraph({ text: 'Executive Summary', heading: HeadingLevel.HEADING_1 }),
     new Paragraph({ children: [new TextRun(r.summary)] }),
     new Paragraph({ text: 'Cryptographic Posture', heading: HeadingLevel.HEADING_1 }),
@@ -170,8 +180,15 @@ const buildHtml = (r: RoadmapReport): string => `<!doctype html><html lang="en">
 :root{--navy:#0f172a;--cyan:#0284c7;--slate:#475569;--bg:#f8fafc;--card:#fff;--line:#e2e8f0}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:#0f172a;font:15px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
 .wrap{max-width:900px;margin:0 auto;padding:32px 20px}
-.head{border-bottom:3px solid var(--cyan);padding-bottom:14px;margin-bottom:8px}
-.head h1{margin:0;font-size:26px;color:var(--navy)}.head .sub{color:var(--cyan);font-weight:600}
+.head{border-bottom:3px solid var(--cyan);padding-bottom:16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.wordmark{font-size:26px;font-weight:800;color:var(--navy);font-family:Georgia,'Times New Roman',serif;letter-spacing:-.5px}
+.wordmark em{font-style:italic;color:var(--cyan);font-weight:600}
+.head .sub{color:var(--cyan);font-weight:600;margin-top:2px}
+.conf{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.08em;color:#b91c1c;border:1px solid #fecaca;background:#fef2f2;border-radius:4px;padding:2px 8px;margin-bottom:6px}
+.grade{text-align:center;min-width:96px}
+.grade .g{font-size:44px;font-weight:800;line-height:1;color:var(--navy)}
+.grade .gl{font-size:10px;letter-spacing:.1em;color:var(--slate);text-transform:uppercase}
+.grade.f .g{color:#b91c1c}.grade.d .g{color:#c2410c}.grade.c .g{color:#a16207}.grade.b .g{color:#0369a1}.grade.a .g{color:#15803d}
 .meta{color:var(--slate);font-size:13px;margin:6px 0 0}
 h2{color:var(--navy);font-size:18px;margin:28px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0}
@@ -193,8 +210,15 @@ th{background:#f1f5f9;color:var(--navy)}
 .foot{color:var(--slate);font-size:12px;margin-top:28px;border-top:1px solid var(--line);padding-top:12px}
 @media print{body{background:#fff}.kpi,.pri,.phase{break-inside:avoid}}
 </style></head><body><div class="wrap">
-<div class="head"><h1>QuarkShield.ai</h1><div class="sub">Executive Post-Quantum Cryptography Roadmap Report</div>
-<div class="meta">Scope: <strong>${esc(r.scopeLabel)}</strong>${r.collective ? ` · ${r.totals.tenants} tenants` : ''} &nbsp;·&nbsp; Generated: ${esc(r.generatedAt)}</div></div>
+<div class="head">
+<div>
+<div class="conf">CONFIDENTIAL</div>
+<div class="wordmark">quark<em>shield</em></div>
+<div class="sub">Executive Post-Quantum Cryptography Roadmap Report</div>
+<div class="meta">Prepared for: <strong>${esc(r.scopeLabel)}</strong>${r.collective ? ` · ${r.totals.tenants} tenants` : ''}<br>Generated: ${esc(r.generatedAt)} &nbsp;·&nbsp; Report ID: ${esc(r.reportId)}</div>
+</div>
+<div class="grade ${(r.riskGrade[0] || 'a').toLowerCase()}"><div class="g">${esc(r.riskGrade)}</div><div class="gl">Risk Grade</div></div>
+</div>
 
 <h2>Executive Summary</h2><p>${esc(r.summary)}</p>
 
@@ -263,5 +287,88 @@ export const exportExecutiveReport = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error generating executive roadmap report:', err);
     if (!res.headersSent) res.status(500).json({ error: 'Failed to generate report.' });
+  }
+};
+
+// ------------------------------------------------ stakeholders + email --------
+const STAKEHOLDER_KEY = 'report_stakeholders';
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+const scopeKey = (collective: boolean, tenant: string) => (collective ? '__fleet__' : (tenant || '').toUpperCase());
+
+const resolveScope = (req: Request, tenantIn?: string, scopeIn?: string) => {
+  const collective = String(scopeIn || '').toLowerCase() === 'collective' || String(tenantIn || '').toLowerCase() === 'all';
+  const tenant = collective ? '' : (tenantIn || req.user?.tenant || '');
+  return { collective, tenant };
+};
+
+export const getReportStakeholders = async (req: Request, res: Response) => {
+  try {
+    const { collective, tenant } = resolveScope(req, req.query.tenant as string, req.query.scope as string);
+    if (collective && !isSuperRole(req.user?.role)) return res.status(403).json({ error: 'Super-admin required for fleet stakeholders.' });
+    if (!collective && !tenant) return res.status(400).json({ error: 'A tenant is required.' });
+    const r = await pool.query('SELECT value FROM tenant_settings WHERE tenant_name = $1 AND key = $2', [scopeKey(collective, tenant), STAKEHOLDER_KEY]);
+    let list: any[] = [];
+    if (r.rows[0]?.value) { try { list = JSON.parse(r.rows[0].value); } catch { /* ignore */ } }
+    return res.json({ stakeholders: Array.isArray(list) ? list : [] });
+  } catch (err: any) {
+    console.error('getReportStakeholders error:', err);
+    res.status(500).json({ error: 'Failed to load stakeholders.' });
+  }
+};
+
+export const saveReportStakeholders = async (req: Request, res: Response) => {
+  try {
+    const { tenant: tBody, scope, stakeholders } = req.body || {};
+    const { collective, tenant } = resolveScope(req, tBody, scope);
+    if (collective && !isSuperRole(req.user?.role)) return res.status(403).json({ error: 'Super-admin required for fleet stakeholders.' });
+    if (!collective && !tenant) return res.status(400).json({ error: 'A tenant is required.' });
+    const clean = (Array.isArray(stakeholders) ? stakeholders : [])
+      .filter((s: any) => s && typeof s.email === 'string' && EMAIL_RE.test(s.email.trim()))
+      .slice(0, 50)
+      .map((s: any) => ({ name: String(s.name || '').slice(0, 120), email: s.email.trim().slice(0, 200), role: String(s.role || '').slice(0, 80) }));
+    await pool.query(
+      `INSERT INTO tenant_settings (tenant_name, key, value) VALUES ($1, $2, $3)
+       ON CONFLICT (tenant_name, key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [scopeKey(collective, tenant), STAKEHOLDER_KEY, JSON.stringify(clean)]
+    );
+    return res.json({ success: true, stakeholders: clean });
+  } catch (err: any) {
+    console.error('saveReportStakeholders error:', err);
+    res.status(500).json({ error: 'Failed to save stakeholders.' });
+  }
+};
+
+export const sendRoadmapReport = async (req: Request, res: Response) => {
+  try {
+    const { tenant: tBody, scope, recipients } = req.body || {};
+    const { collective, tenant } = resolveScope(req, tBody, scope);
+    if (collective && !isSuperRole(req.user?.role)) return res.status(403).json({ error: 'Super-admin required for fleet reports.' });
+    if (!collective && !tenant) return res.status(400).json({ error: 'A tenant is required.' });
+
+    let toList: { name?: string; email: string }[] = [];
+    if (Array.isArray(recipients) && recipients.length) {
+      toList = recipients.map((s: any) => ({ name: s?.name, email: String(s?.email || '').trim() }));
+    } else {
+      const r = await pool.query('SELECT value FROM tenant_settings WHERE tenant_name = $1 AND key = $2', [scopeKey(collective, tenant), STAKEHOLDER_KEY]);
+      if (r.rows[0]?.value) { try { toList = JSON.parse(r.rows[0].value); } catch { /* ignore */ } }
+    }
+    toList = (toList || []).filter(s => s.email && EMAIL_RE.test(s.email));
+    if (!toList.length) return res.status(400).json({ error: 'No valid recipients. Add stakeholders under Profile first.' });
+
+    const report = await buildRoadmapReport(collective ? { collective: true } : { collective: false, tenant });
+    report.summary = await generateNarrative(report);
+    const html = buildHtml(report);
+    const subject = `QuarkShield PQC Roadmap — ${report.scopeLabel} (Risk ${report.riskGrade})`;
+    const text = `QuarkShield Executive PQC Roadmap Report for ${report.scopeLabel}. Risk grade ${report.riskGrade}. ${report.totals.vulnerable} of ${report.totals.assets} assets are quantum-vulnerable. This email contains the full report (priorities, remediation, migration roadmap).`;
+
+    let sent = 0; const failed: string[] = [];
+    for (const s of toList) {
+      const r = await sendSupportEmail({ to: s.email, subject, html, text });
+      if (r.success) sent++; else failed.push(s.email);
+    }
+    return res.json({ success: sent > 0, sent, failed, total: toList.length });
+  } catch (err: any) {
+    console.error('sendRoadmapReport error:', err);
+    res.status(500).json({ error: 'Failed to send report.' });
   }
 };

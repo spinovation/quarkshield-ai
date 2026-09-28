@@ -754,6 +754,69 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const [cbomJsonCopied, setCbomJsonCopied] = useState<boolean>(false);
   const [cbomAttestationMode, setCbomAttestationMode] = useState<boolean>(false);
 
+  // Report stakeholders (email recipients managed under Profile)
+  interface Stakeholder { name: string; email: string; role?: string }
+  const [reportStakeholders, setReportStakeholders] = useState<Stakeholder[]>([]);
+  const [newStkName, setNewStkName] = useState('');
+  const [newStkEmail, setNewStkEmail] = useState('');
+  const [stkSaving, setStkSaving] = useState(false);
+  const [emailingReport, setEmailingReport] = useState(false);
+  const [stkToast, setStkToast] = useState<string | null>(null);
+
+  const stkTenantParam = () => encodeURIComponent(client?.name || cleanSlug || '');
+
+  const loadStakeholders = async () => {
+    try {
+      const res = await fetch(`/api/reports/stakeholders?tenant=${stkTenantParam()}`, { credentials: 'include' });
+      if (res.ok) { const d = await res.json(); setReportStakeholders(Array.isArray(d.stakeholders) ? d.stakeholders : []); }
+    } catch { /* ignore */ }
+  };
+
+  const persistStakeholders = async (list: Stakeholder[]) => {
+    setStkSaving(true);
+    try {
+      const res = await fetch('/api/reports/stakeholders', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant: client?.name || cleanSlug, stakeholders: list })
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
+      const d = await res.json();
+      setReportStakeholders(Array.isArray(d.stakeholders) ? d.stakeholders : list);
+      setStkToast('Stakeholders saved.');
+      setTimeout(() => setStkToast(null), 3000);
+    } catch (err: any) {
+      alert(`Failed to save stakeholders: ${err.message}`);
+    } finally { setStkSaving(false); }
+  };
+
+  const addStakeholder = () => {
+    const email = newStkEmail.trim();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { alert('Enter a valid email address.'); return; }
+    const list = [...reportStakeholders, { name: newStkName.trim(), email }];
+    setNewStkName(''); setNewStkEmail('');
+    persistStakeholders(list);
+  };
+  const removeStakeholder = (email: string) => persistStakeholders(reportStakeholders.filter(s => s.email !== email));
+
+  useEffect(() => { if (effectiveSettingsTab === 'profile') loadStakeholders(); /* eslint-disable-next-line */ }, [effectiveSettingsTab]);
+
+  const emailRoadmapToStakeholders = async () => {
+    if (!reportStakeholders.length) { alert('Add at least one stakeholder first.'); return; }
+    setEmailingReport(true);
+    try {
+      const res = await fetch('/api/reports/executive/send', {
+        method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant: client?.name || cleanSlug })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      setStkToast(`Report emailed to ${d.sent}/${d.total} stakeholder(s).`);
+      setTimeout(() => setStkToast(null), 4000);
+    } catch (err: any) {
+      alert(`Failed to email report: ${err.message}`);
+    } finally { setEmailingReport(false); }
+  };
+
   // Drift & Executive Report State
   interface DriftEvent {
     id: string;
@@ -5381,6 +5444,52 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 {/* SUBTAB 1: PROFILE */}
                 {effectiveSettingsTab === 'profile' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    {/* Report Stakeholders — email recipients for the PQC Roadmap report */}
+                    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.25rem 1.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                        <div>
+                          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <Users size={17} color="var(--accent-cyan, #38bdf8)" /> Report Stakeholders
+                          </h3>
+                          <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted, #94a3b8)' }}>
+                            Management / stakeholders who receive the PQC Executive Roadmap report by email in one click.
+                          </p>
+                        </div>
+                        <button
+                          onClick={emailRoadmapToStakeholders}
+                          disabled={emailingReport || reportStakeholders.length === 0}
+                          title={reportStakeholders.length === 0 ? 'Add a stakeholder first' : 'Email the PQC Roadmap report to all stakeholders'}
+                          style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)', color: '#34d399', padding: '0.5rem 0.95rem', borderRadius: '7px', fontSize: '0.82rem', fontWeight: 600, cursor: (emailingReport || reportStakeholders.length === 0) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', opacity: reportStakeholders.length === 0 ? 0.55 : 1 }}
+                        >
+                          <Save size={14} /> {emailingReport ? 'Sending…' : '📧 Email PQC Roadmap'}
+                        </button>
+                      </div>
+                      {stkToast && (
+                        <div style={{ marginBottom: '0.75rem', padding: '0.5rem 0.75rem', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)', borderRadius: '6px', color: '#4ade80', fontSize: '0.82rem' }}>{stkToast}</div>
+                      )}
+                      {/* List */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.75rem' }}>
+                        {reportStakeholders.length === 0 && (
+                          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)', fontStyle: 'italic' }}>No stakeholders yet. Add management or stakeholders below.</div>
+                        )}
+                        {reportStakeholders.map((s) => (
+                          <div key={s.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.5rem 0.75rem', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '6px' }}>
+                            <div style={{ overflow: 'hidden' }}>
+                              <span style={{ color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>{s.name || s.email}</span>
+                              {s.name && <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.8rem', marginLeft: '0.5rem' }}>{s.email}</span>}
+                            </div>
+                            <button onClick={() => removeStakeholder(s.email)} disabled={stkSaving} title="Remove" style={{ background: 'transparent', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', padding: '0.2rem 0.5rem', borderRadius: '5px', fontSize: '0.72rem', cursor: 'pointer' }}>Remove</button>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Add row */}
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <input value={newStkName} onChange={e => setNewStkName(e.target.value)} placeholder="Name (optional)" style={{ flex: '1 1 140px', minWidth: 0, padding: '0.5rem 0.7rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem' }} />
+                        <input value={newStkEmail} onChange={e => setNewStkEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addStakeholder(); }} placeholder="email@company.com" style={{ flex: '2 1 220px', minWidth: 0, padding: '0.5rem 0.7rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem' }} />
+                        <button onClick={addStakeholder} disabled={stkSaving} style={{ background: 'rgba(0,242,254,0.12)', border: '1px solid rgba(0,242,254,0.35)', color: 'var(--accent-cyan, #38bdf8)', padding: '0.5rem 0.9rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}>{stkSaving ? 'Saving…' : '+ Add'}</button>
+                      </div>
+                    </div>
+
                     {/* Feedback Toasts */}
                     {profileToast && (
                       <div style={{

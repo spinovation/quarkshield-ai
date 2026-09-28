@@ -800,6 +800,24 @@ export default function App() {
     }
   };
 
+  // Email the PQC Roadmap report to stakeholders (prompt for recipients; fleet or selected tenant).
+  const emailRoadmapReport = async () => {
+    const isFleet = selectedTenantFilter === 'all';
+    const input = window.prompt(`Email the ${isFleet ? 'Fleet' : selectedTenantFilter} PQC Roadmap report to (comma-separated emails):`, '');
+    if (input === null) return;
+    const recipients = input.split(',').map(e => e.trim()).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)).map(email => ({ email }));
+    if (!recipients.length) { alert('No valid email addresses entered.'); return; }
+    try {
+      const body: any = isFleet ? { scope: 'collective', recipients } : { tenant: selectedTenantFilter, recipients };
+      const res = await fetch('/api/reports/executive/send', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      alert(`Report emailed to ${d.sent}/${d.total} recipient(s).`);
+    } catch (err: any) {
+      alert(`Failed to email report: ${err.message}`);
+    }
+  };
+
   const downloadCBOMJson = (attested: boolean = false) => {
     if (!cbomData) return;
     const exportComponents = filteredCBOMComponents;
@@ -2684,6 +2702,22 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                       title="Download the PQC Executive Roadmap Report (PDF)"
                     >
                       <Download size={14} /> Roadmap PDF
+                    </button>
+                    <button
+                      onClick={() => downloadRoadmapReport('docx')}
+                      className="btn-secondary"
+                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderColor: '#60a5fa', color: '#60a5fa', background: 'rgba(59, 130, 246, 0.1)' }}
+                      title="Download the PQC Executive Roadmap Report (Word / DOCX)"
+                    >
+                      <Download size={14} /> Roadmap DOCX
+                    </button>
+                    <button
+                      onClick={emailRoadmapReport}
+                      className="btn-secondary"
+                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderColor: '#a78bfa', color: '#a78bfa', background: 'rgba(139, 92, 246, 0.12)' }}
+                      title="Email the PQC Roadmap report to stakeholders"
+                    >
+                      <FileText size={14} /> Email Roadmap
                     </button>
                   </div>
                 </div>
