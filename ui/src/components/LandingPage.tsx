@@ -408,6 +408,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const [signInError, setSignInError] = useState<string | null>(null);
   const [signInSuccessMsg, setSignInSuccessMsg] = useState<string | null>(null);
 
+  // Cal.com embed loader — wires any element with data-cal-link to open a booking popup.
+  useEffect(() => {
+    try {
+      (function (C: any, A: string, L: string) {
+        const p = function (a: any, ar: any) { a.q.push(ar); };
+        const d = C.document;
+        C.Cal = C.Cal || function () {
+          const cal = C.Cal; const ar = arguments;
+          if (!cal.loaded) { cal.ns = {}; cal.q = cal.q || []; d.head.appendChild(d.createElement('script')).src = A; cal.loaded = true; }
+          if (ar[0] === L) {
+            const api: any = function () { p(api, arguments); };
+            const namespace = ar[1]; api.q = api.q || [];
+            if (typeof namespace === 'string') { cal.ns[namespace] = cal.ns[namespace] || api; p(cal.ns[namespace], ar); p(cal, ['initNamespace', namespace]); }
+            else p(cal, ar);
+            return;
+          }
+          p(cal, ar);
+        };
+      })(window, 'https://app.cal.com/embed/embed.js', 'init');
+      (window as any).Cal('init', { origin: 'https://cal.com' });
+      (window as any).Cal('ui', { hideEventTypeDetails: false, layout: 'month_view' });
+    } catch (e) {
+      /* embed is progressive enhancement; ignore load failures */
+    }
+  }, []);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1899,6 +1925,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               {/* STEP 1: Focus chips */}
               {assessmentStep === 1 && (
                 <div>
+                  {/* Live calendar booking (Cal.com) — instant alternative to the email form */}
+                  <div style={{ marginBottom: '1.1rem', padding: '0.85rem 1rem', borderRadius: '10px', background: 'rgba(0, 242, 254, 0.06)', border: '1px solid rgba(0, 242, 254, 0.25)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem' }}>
+                    <span style={{ fontSize: '0.86rem', color: 'var(--text)' }}>
+                      Prefer to talk live? <strong>Book a PQC assessment slot</strong> directly on our calendar.
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      data-cal-link="sridhar-ganapati-twnjrp"
+                      data-cal-config='{"layout":"month_view"}'
+                    >
+                      📅 Book a time
+                    </button>
+                  </div>
+                  <div style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--muted)', margin: '0 0 0.9rem 0' }}>
+                    — or tell us what you&apos;re focused on and we&apos;ll follow up by email —
+                  </div>
                   <div className="chips">
                     {[
                       'PQC / Quantum Readiness',
