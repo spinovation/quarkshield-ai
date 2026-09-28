@@ -1935,6 +1935,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                       className="btn btn-primary btn-sm"
                       data-cal-link="sridhar-ganapati-twnjrp"
                       data-cal-config='{"layout":"month_view"}'
+                      onClick={() => setShowAssessmentModal(false)}
                     >
                       📅 Book a time
                     </button>

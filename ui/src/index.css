@@ -1933,3 +1933,6 @@ footer { border-top: 1px solid var(--line-soft); padding-block: 44px 26px; color
   .form-grid { grid-template-columns: 1fr; }
   .nav-links { display: none; }
 }
+
+/* Cal.com embed popup must sit above app modals/overlays (our overlay is z-index:100) */
+cal-modal-box { z-index: 2147483647 !important; }
