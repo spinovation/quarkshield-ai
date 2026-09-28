@@ -1,0 +1,6 @@
+# QuarkShield.ai
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://quarkshield.ai/sitemap.xml
