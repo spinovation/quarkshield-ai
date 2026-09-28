@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -64,6 +65,21 @@ func openBrowser(url string) {
 	}
 	hideConsole(cmd)
 	_ = cmd.Start()
+}
+
+// isManagedInstall reports whether QuarkShield was installed by the Windows
+// installer, which drops a ".managed_install" marker next to the exe and owns the
+// Start-Menu shortcut + Add/Remove Programs entry. In that case the app must not
+// self-create duplicates.
+func isManagedInstall() bool {
+	exePath, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(exePath), ".managed_install")); err == nil {
+		return true
+	}
+	return false
 }
 
 // Register Windows Add/Remove Programs entry on first run
@@ -174,8 +190,12 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 
 	// Detach console immediately so no black command prompt window lingers
 	detachConsole()
-	createDesktopAndStartMenuShortcuts()
-	registerWindowsUninstall()
+	// When installed via the Windows installer, it owns the shortcuts and the
+	// Add/Remove Programs entry — don't self-create duplicates.
+	if !isManagedInstall() {
+		createDesktopAndStartMenuShortcuts()
+		registerWindowsUninstall()
+	}
 	InitLicense()
 
 	hostname, _ := os.Hostname()

@@ -62,3 +62,16 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 ; Launch the local scanner GUI right after install (opens 127.0.0.1 dashboard in the browser)
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppShortName}}"; Flags: nowait postinstall skipifsilent
+
+[UninstallDelete]
+; Remove the managed-install marker (and app dir) on uninstall.
+Type: files; Name: "{app}\.managed_install"
+
+[Code]
+{ Drop a marker so the agent knows the installer owns shortcuts + Add/Remove entry
+  (agent/gui.go: isManagedInstall) and won't self-create duplicates. }
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+    SaveStringToFile(ExpandConstant('{app}\.managed_install'), 'installed', False);
+end;
