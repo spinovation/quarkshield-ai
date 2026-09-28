@@ -1933,7 +1933,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"
-                      data-cal-link="sridhar-ganapati-twnjrp"
+                      data-cal-link="sridhar-ganapati-twnjrp/pqc-assessment"
                       data-cal-config='{"layout":"month_view"}'
                       onClick={() => setShowAssessmentModal(false)}
                     >
