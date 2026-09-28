@@ -539,7 +539,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     });
   }, [assets, machines, stats]);
 
-  const [settingsSubTab, setSettingsSubTab] = useState<'profile' | 'users' | 'license' | 'planner'>('profile');
+  const [settingsSubTab, setSettingsSubTab] = useState<'profile' | 'users' | 'license' | 'stakeholders'>('profile');
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState<boolean>(true);
   const [deploymentTierTab, setDeploymentTierTab] = useState<'tier1' | 'tier2' | 'tier3' | 'desktop'>('tier1');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
@@ -709,11 +709,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const isSettingsActive = activeTab === 'settings' || activeTab === 'profile' || activeTab === 'users' || activeTab === 'license' || activeTab === 'planner';
   // Integrations & Gateways is a container tab whose content is the Git / PKI / Proxy sub-tabs
   const isIntegrationsTab = activeTab === 'git' || activeTab === 'pki' || activeTab === 'proxy';
-  const effectiveSettingsTab: 'profile' | 'users' | 'license' | 'planner' = 
+  const effectiveSettingsTab: 'profile' | 'users' | 'license' | 'stakeholders' =
     activeTab === 'profile' ? 'profile' :
     activeTab === 'users' ? 'users' :
     activeTab === 'license' ? 'license' :
-    activeTab === 'planner' ? 'planner' :
     settingsSubTab;
 
   // 1. Enrollment Token Modal State
@@ -798,7 +797,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   };
   const removeStakeholder = (email: string) => persistStakeholders(reportStakeholders.filter(s => s.email !== email));
 
-  useEffect(() => { if (effectiveSettingsTab === 'profile') loadStakeholders(); /* eslint-disable-next-line */ }, [effectiveSettingsTab]);
+  useEffect(() => { if (effectiveSettingsTab === 'stakeholders') loadStakeholders(); /* eslint-disable-next-line */ }, [effectiveSettingsTab]);
 
   const emailRoadmapToStakeholders = async () => {
     if (!reportStakeholders.length) { alert('Add at least one stakeholder first.'); return; }
@@ -5394,7 +5393,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       { id: 'profile' as const, label: 'Profile', icon: User, badge: 'Personal & Logs' },
                       { id: 'users' as const, label: 'Team & 2FA', icon: Users, badge: 'RBAC' },
                       { id: 'license' as const, label: 'License', icon: Key, badge: `${activeLicenses.length} Active` },
-                      { id: 'planner' as const, label: "Mosca's Migration Planner", icon: Calendar, badge: 'X+Y>Z' }
+                      { id: 'stakeholders' as const, label: 'Report Stakeholders', icon: Users, badge: 'Email' }
                     ].map(tab => {
                       const Icon = tab.icon;
                       const isSubActive = effectiveSettingsTab === tab.id;
@@ -5444,52 +5443,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 {/* SUBTAB 1: PROFILE */}
                 {effectiveSettingsTab === 'profile' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                    {/* Report Stakeholders — email recipients for the PQC Roadmap report */}
-                    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.25rem 1.5rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '0.75rem' }}>
-                        <div>
-                          <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                            <Users size={17} color="var(--accent-cyan, #38bdf8)" /> Report Stakeholders
-                          </h3>
-                          <p style={{ margin: '0.25rem 0 0', fontSize: '0.8rem', color: 'var(--text-muted, #94a3b8)' }}>
-                            Management / stakeholders who receive the PQC Executive Roadmap report by email in one click.
-                          </p>
-                        </div>
-                        <button
-                          onClick={emailRoadmapToStakeholders}
-                          disabled={emailingReport || reportStakeholders.length === 0}
-                          title={reportStakeholders.length === 0 ? 'Add a stakeholder first' : 'Email the PQC Roadmap report to all stakeholders'}
-                          style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)', color: '#34d399', padding: '0.5rem 0.95rem', borderRadius: '7px', fontSize: '0.82rem', fontWeight: 600, cursor: (emailingReport || reportStakeholders.length === 0) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', opacity: reportStakeholders.length === 0 ? 0.55 : 1 }}
-                        >
-                          <Save size={14} /> {emailingReport ? 'Sending…' : '📧 Email PQC Roadmap'}
-                        </button>
-                      </div>
-                      {stkToast && (
-                        <div style={{ marginBottom: '0.75rem', padding: '0.5rem 0.75rem', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)', borderRadius: '6px', color: '#4ade80', fontSize: '0.82rem' }}>{stkToast}</div>
-                      )}
-                      {/* List */}
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginBottom: '0.75rem' }}>
-                        {reportStakeholders.length === 0 && (
-                          <div style={{ fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)', fontStyle: 'italic' }}>No stakeholders yet. Add management or stakeholders below.</div>
-                        )}
-                        {reportStakeholders.map((s) => (
-                          <div key={s.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.5rem 0.75rem', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '6px' }}>
-                            <div style={{ overflow: 'hidden' }}>
-                              <span style={{ color: '#fff', fontSize: '0.85rem', fontWeight: 600 }}>{s.name || s.email}</span>
-                              {s.name && <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.8rem', marginLeft: '0.5rem' }}>{s.email}</span>}
-                            </div>
-                            <button onClick={() => removeStakeholder(s.email)} disabled={stkSaving} title="Remove" style={{ background: 'transparent', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', padding: '0.2rem 0.5rem', borderRadius: '5px', fontSize: '0.72rem', cursor: 'pointer' }}>Remove</button>
-                          </div>
-                        ))}
-                      </div>
-                      {/* Add row */}
-                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                        <input value={newStkName} onChange={e => setNewStkName(e.target.value)} placeholder="Name (optional)" style={{ flex: '1 1 140px', minWidth: 0, padding: '0.5rem 0.7rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem' }} />
-                        <input value={newStkEmail} onChange={e => setNewStkEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addStakeholder(); }} placeholder="email@company.com" style={{ flex: '2 1 220px', minWidth: 0, padding: '0.5rem 0.7rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.82rem' }} />
-                        <button onClick={addStakeholder} disabled={stkSaving} style={{ background: 'rgba(0,242,254,0.12)', border: '1px solid rgba(0,242,254,0.35)', color: 'var(--accent-cyan, #38bdf8)', padding: '0.5rem 0.9rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}>{stkSaving ? 'Saving…' : '+ Add'}</button>
-                      </div>
-                    </div>
-
                     {/* Feedback Toasts */}
                     {profileToast && (
                       <div style={{
@@ -5575,7 +5528,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                             color: isPartner ? '#c084fc' : 'var(--accent-cyan, #38bdf8)',
                             border: `1px solid ${isPartner ? 'rgba(168, 85, 247, 0.3)' : 'rgba(0, 242, 254, 0.3)'}`
                           }}>
-                            {displayRole}
+                            Profile Information
                           </span>
                         </div>
 
@@ -6243,6 +6196,54 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 )}
 
                 {/* SUBTAB 2: TEAM & 2FA POLICIES */}
+                {/* SUBTAB: REPORT STAKEHOLDERS */}
+                {effectiveSettingsTab === 'stakeholders' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.5rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1rem' }}>
+                        <div>
+                          <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#fff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <Users size={19} color="var(--accent-cyan, #38bdf8)" /> Report Stakeholders
+                          </h3>
+                          <p style={{ margin: '0.3rem 0 0', fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)' }}>
+                            Management &amp; stakeholders who receive the PQC Executive Roadmap report by email in one click. Add as many recipients as you need.
+                          </p>
+                        </div>
+                        <button
+                          onClick={emailRoadmapToStakeholders}
+                          disabled={emailingReport || reportStakeholders.length === 0}
+                          title={reportStakeholders.length === 0 ? 'Add a stakeholder first' : 'Email the PQC Roadmap report to all stakeholders'}
+                          style={{ background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)', color: '#34d399', padding: '0.55rem 1rem', borderRadius: '7px', fontSize: '0.84rem', fontWeight: 600, cursor: (emailingReport || reportStakeholders.length === 0) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', opacity: reportStakeholders.length === 0 ? 0.55 : 1 }}
+                        >
+                          <Save size={15} /> {emailingReport ? 'Sending…' : '📧 Email PQC Roadmap'}
+                        </button>
+                      </div>
+                      {stkToast && (
+                        <div style={{ marginBottom: '0.9rem', padding: '0.6rem 0.8rem', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.4)', borderRadius: '6px', color: '#4ade80', fontSize: '0.84rem' }}>{stkToast}</div>
+                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', marginBottom: '1rem' }}>
+                        {reportStakeholders.length === 0 && (
+                          <div style={{ fontSize: '0.84rem', color: 'var(--text-muted, #94a3b8)', fontStyle: 'italic', padding: '0.5rem 0' }}>No stakeholders yet. Add management or stakeholders below.</div>
+                        )}
+                        {reportStakeholders.map((s) => (
+                          <div key={s.email} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.6rem 0.85rem', background: 'rgba(0,0,0,0.25)', border: '1px solid rgba(255,255,255,0.06)', borderRadius: '7px' }}>
+                            <div style={{ overflow: 'hidden' }}>
+                              <span style={{ color: '#fff', fontSize: '0.88rem', fontWeight: 600 }}>{s.name || s.email}</span>
+                              {s.name && <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.82rem', marginLeft: '0.5rem' }}>{s.email}</span>}
+                            </div>
+                            <button onClick={() => removeStakeholder(s.email)} disabled={stkSaving} title="Remove" style={{ background: 'transparent', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171', padding: '0.25rem 0.6rem', borderRadius: '5px', fontSize: '0.74rem', cursor: 'pointer' }}>Remove</button>
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <input value={newStkName} onChange={e => setNewStkName(e.target.value)} placeholder="Name (optional)" style={{ flex: '1 1 160px', minWidth: 0, padding: '0.6rem 0.8rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.84rem' }} />
+                        <input value={newStkEmail} onChange={e => setNewStkEmail(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addStakeholder(); }} placeholder="email@company.com" style={{ flex: '2 1 240px', minWidth: 0, padding: '0.6rem 0.8rem', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#fff', fontSize: '0.84rem' }} />
+                        <button onClick={addStakeholder} disabled={stkSaving} style={{ background: 'rgba(0,242,254,0.12)', border: '1px solid rgba(0,242,254,0.35)', color: 'var(--accent-cyan, #38bdf8)', padding: '0.6rem 1rem', borderRadius: '6px', fontSize: '0.84rem', fontWeight: 600, cursor: 'pointer' }}>{stkSaving ? 'Saving…' : '+ Add'}</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {effectiveSettingsTab === 'users' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                     <TenantUserManagement currentTenant={cleanSlug} allowTenantSwitch={false} />
