@@ -243,7 +243,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   // ---------------------------------------------------------
   const [isCopiedInstall, setIsCopiedInstall] = useState(false);
   const copyInstallCmd = () => {
-    const cmd = `# 1. Download the universal scanner\ncurl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner -o quarkshield-scanner\n# 2. Make it executable\nchmod +x quarkshield-scanner\n# 3. Launch the interactive dashboard (local-first, no data leaves the host)\n./quarkshield-scanner --server https://quarkshield.ai`;
+    const cmd = `# 1. Download the Linux scanner (macOS: use the .dmg instead)\ncurl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner-linux-amd64 -o quarkshield-scanner\n# 2. Make it executable\nchmod +x quarkshield-scanner\n# 3. Launch the interactive dashboard (local-first, no data leaves the host)\n./quarkshield-scanner --server https://quarkshield.ai`;
     navigator.clipboard?.writeText(cmd).then(() => {
       setIsCopiedInstall(true);
       setTimeout(() => setIsCopiedInstall(false), 2000);
@@ -267,6 +267,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   };
 
   // ---------------------------------------------------------
+  // Download confirmation toast (downloads are native browser <a download>, which
+  // give no on-page feedback — this makes it obvious so users don't re-click).
+  const [dlToast, setDlToast] = useState<string | null>(null);
+  const handleDownloadClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const a = (e.target as HTMLElement).closest('a[download]') as HTMLAnchorElement | null;
+    if (!a) return;
+    const file = (a.getAttribute('href') || '').split('/').pop() || 'file';
+    setDlToast(`Downloading ${file} — check your browser's Downloads folder.`);
+    window.setTimeout(() => setDlToast(null), 5000);
+  };
+
   // 3-Step Assessment Request Modal
   // ---------------------------------------------------------
   const [showAssessmentModal, setShowAssessmentModal] = useState(false);
@@ -1326,7 +1337,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       </section>
 
       {/* ===================== DOWNLOADS ===================== */}
-      <section className="band" id="downloads">
+      <section className="band" id="downloads" onClick={handleDownloadClick}>
+        {dlToast && (
+          <div role="status" style={{ position: 'fixed', bottom: '24px', left: '50%', transform: 'translateX(-50%)', zIndex: 9999, background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.45)', color: '#34d399', padding: '0.7rem 1.1rem', borderRadius: '10px', fontSize: '0.88rem', fontWeight: 600, boxShadow: '0 8px 30px rgba(0,0,0,0.35)', backdropFilter: 'blur(8px)', maxWidth: '90vw' }}>
+            ✓ {dlToast}
+          </div>
+        )}
         <div className="wrap">
           <span className="band-eyebrow">Multi-OS host scanners</span>
           <h2>Prefer to run it yourself? Download the signed scanner.</h2>
@@ -1398,14 +1414,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
 
           <div className="code-block">
             <div className="cb-bar">
-              <span>Quick install — macOS &amp; Linux</span>
+              <span>Quick install — Linux (CLI)</span>
               <button className="copy-btn" onClick={copyInstallCmd}>
                 {isCopiedInstall ? 'Copied ✓' : 'Copy'}
               </button>
             </div>
             <pre>
-              <span className="c"># 1. Download the universal scanner</span>{'\n'}
-              curl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner -o quarkshield-scanner{'\n'}
+              <span className="c"># 1. Download the Linux scanner (macOS: use the .dmg above)</span>{'\n'}
+              curl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner-linux-amd64 -o quarkshield-scanner{'\n'}
               <span className="c"># 2. Make it executable</span>{'\n'}
               chmod +x quarkshield-scanner{'\n'}
               <span className="c"># 3. Launch the interactive dashboard (local-first, no data leaves the host)</span>{'\n'}
