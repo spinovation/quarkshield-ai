@@ -99,6 +99,35 @@ if security find-identity -v -p codesigning 2>/dev/null | grep -q "Developer ID 
   echo "🔑 Detected Apple Developer ID: $SIGN_IDENTITY"
 fi
 
+# Notarize + staple (Apple's trust ticket → Gatekeeper opens the app with no warning).
+# Credentials (one of):
+#   NOTARY_PROFILE=<name>   (recommended; created once via:
+#       xcrun notarytool store-credentials <name> --apple-id you@example.com --team-id 4ADVSK467Z --password <app-specific-pw>)
+#   or NOTARY_APPLE_ID + NOTARY_PASSWORD (app-specific) + NOTARY_TEAM_ID
+notarize_and_staple() {
+  local target="$1" args=()
+  if [ -n "${NOTARY_PROFILE:-}" ]; then
+    args=(--keychain-profile "$NOTARY_PROFILE")
+  elif [ -n "${NOTARY_APPLE_ID:-}" ] && [ -n "${NOTARY_PASSWORD:-}" ] && [ -n "${NOTARY_TEAM_ID:-}" ]; then
+    args=(--apple-id "$NOTARY_APPLE_ID" --password "$NOTARY_PASSWORD" --team-id "$NOTARY_TEAM_ID")
+  else
+    echo "⚠️  Notarization SKIPPED for $(basename "$target") — set NOTARY_PROFILE (recommended)"
+    echo "    or NOTARY_APPLE_ID/NOTARY_PASSWORD/NOTARY_TEAM_ID. Build is SIGNED but Gatekeeper will still warn."
+    return 0
+  fi
+  case "$target" in
+    *.app)
+      local nz="/tmp/notarize_$$.zip"
+      ditto -c -k --keepParent "$target" "$nz"
+      echo "🍏 Notarizing $(basename "$target") (Apple scan — may take a few minutes)..."
+      xcrun notarytool submit "$nz" "${args[@]}" --wait && xcrun stapler staple "$target" || echo "❌ Notarization failed for $(basename "$target")"
+      rm -f "$nz" ;;
+    *)
+      echo "🍏 Notarizing $(basename "$target")..."
+      xcrun notarytool submit "$target" "${args[@]}" --wait && xcrun stapler staple "$target" || echo "❌ Notarization failed for $(basename "$target")" ;;
+  esac
+}
+
 # Strip extended attributes and resource forks from staging bundle
 dot_clean -m "$APP_STAGE/QuarkShield.app" 2>/dev/null || true
 xattr -cr "$APP_STAGE/QuarkShield.app" 2>/dev/null || true
@@ -112,6 +141,11 @@ else
   echo "ℹ️ Signing macOS bundle with hardened runtime & bundle identifier (com.fedmitigate.quarkshield)..."
   codesign --force --options runtime --identifier "com.fedmitigate.quarkshield" --sign - "$APP_STAGE/QuarkShield.app/Contents/MacOS/quarkshield-scanner"
   codesign --force --deep --options runtime --identifier "com.fedmitigate.quarkshield" --sign - "$APP_STAGE/QuarkShield.app"
+fi
+
+# Notarize + staple the app BEFORE packaging so the ZIP and DMG both carry the trust ticket.
+if [ -n "$SIGN_IDENTITY" ]; then
+  notarize_and_staple "$APP_STAGE/QuarkShield.app"
 fi
 
 # Update /Applications/QuarkShield.app if installed
@@ -151,6 +185,8 @@ rm -rf QuarkShield.app 2>/dev/null || true
 
 if [ -n "$SIGN_IDENTITY" ]; then
   codesign --force --timestamp --sign "$SIGN_IDENTITY" QuarkShield-macOS.dmg
+  # Notarize + staple the DMG itself so the download passes Gatekeeper on mount.
+  notarize_and_staple QuarkShield-macOS.dmg
 fi
 
 # ------------------------------------------------------------------------------
