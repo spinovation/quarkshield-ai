@@ -1542,8 +1542,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     URL.revokeObjectURL(url);
   };
 
-  // Download Executive Audit Report (PDF or DOCX)
-  const downloadExecutiveReport = async (format: 'pdf' | 'docx') => {
+  // Generate PQC Executive Roadmap Report (pdf/docx download, or html opened in a tab)
+  const downloadExecutiveReport = async (format: 'pdf' | 'docx' | 'html') => {
     try {
       setIsGeneratingReport(true);
       const tenantParam = encodeURIComponent(client?.name || cleanSlug || 'all');
@@ -1556,16 +1556,22 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       }
       const blob = await res.blob();
       const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `QuarkShield-Executive-Report-${(client?.name || cleanSlug || 'fleet').toUpperCase()}-${new Date().toISOString().split('T')[0]}.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      window.URL.revokeObjectURL(url);
+      if (format === 'html') {
+        // Open the styled report in a new tab (auth already handled by this fetch).
+        window.open(url, '_blank', 'noopener');
+        setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `QuarkShield-PQC-Roadmap-${(client?.name || cleanSlug || 'fleet').toUpperCase()}-${new Date().toISOString().split('T')[0]}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }
     } catch (err: any) {
-      console.error('Failed to download executive report:', err);
-      alert(`Executive report export error: ${err.message}`);
+      console.error('Failed to generate PQC roadmap report:', err);
+      alert(`PQC roadmap report error: ${err.message}`);
     } finally {
       setIsGeneratingReport(false);
     }
@@ -3711,7 +3717,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           transition: 'all 0.15s ease'
                         }}
                       >
-                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'Executive PDF'}
+                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'PQC Roadmap PDF'}
                       </button>
 
                       {/* Export Executive Report (DOCX) */}
@@ -3734,7 +3740,30 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           transition: 'all 0.15s ease'
                         }}
                       >
-                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'Executive DOCX'}
+                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'PQC Roadmap DOCX'}
+                      </button>
+
+                      {/* View PQC Roadmap Report (HTML, opens in new tab) */}
+                      <button
+                        onClick={() => downloadExecutiveReport('html')}
+                        disabled={isGeneratingReport}
+                        title="Open the PQC Executive Roadmap Report in a new tab (priorities, remediation, roadmap)"
+                        style={{
+                          background: 'rgba(16, 185, 129, 0.12)',
+                          border: '1px solid rgba(16, 185, 129, 0.35)',
+                          color: '#34d399',
+                          padding: '0.45rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: isGeneratingReport ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          transition: 'all 0.15s ease'
+                        }}
+                      >
+                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'View PQC Roadmap'}
                       </button>
 
                       {/* Enroll Workstations / Fleet Token */}

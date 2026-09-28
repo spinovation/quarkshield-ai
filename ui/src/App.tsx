@@ -35,6 +35,7 @@ import {
   Database,
   Radio,
   Network,
+  FileText,
   Package
 } from 'lucide-react';
 
@@ -764,6 +765,39 @@ export default function App() {
     navigator.clipboard.writeText(text);
     setCopiedCode(label);
     setTimeout(() => setCopiedCode(null), 2500);
+  };
+
+  // PQC Executive Roadmap Report — fleet-wide (collective) when no tenant is
+  // selected, otherwise scoped to the selected tenant. html opens in a new tab.
+  const downloadRoadmapReport = async (format: 'pdf' | 'docx' | 'html') => {
+    try {
+      const isFleet = selectedTenantFilter === 'all';
+      const qs = isFleet
+        ? `scope=collective&format=${format}`
+        : `tenant=${encodeURIComponent(selectedTenantFilter)}&format=${format}`;
+      const res = await fetch(`/api/reports/executive?${qs}`, { credentials: 'include' });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || `Server returned HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      if (format === 'html') {
+        window.open(url, '_blank', 'noopener');
+        setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+      } else {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `QuarkShield-PQC-Roadmap-${(isFleet ? 'fleet' : selectedTenantFilter).toUpperCase()}-${new Date().toISOString().split('T')[0]}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+      }
+    } catch (err: any) {
+      console.error('Failed to generate PQC roadmap report:', err);
+      alert(`PQC roadmap report error: ${err.message}`);
+    }
   };
 
   const downloadCBOMJson = (attested: boolean = false) => {
@@ -2634,6 +2668,22 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                       title="Download CycloneDX 1.6 with CDXA Attestation & ML-DSA-65 Signature"
                     >
                       <ShieldCheck size={14} color="#c084fc" /> Export Attested (CDXA)
+                    </button>
+                    <button
+                      onClick={() => downloadRoadmapReport('html')}
+                      className="btn-secondary"
+                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderColor: '#34d399', color: '#34d399', background: 'rgba(16, 185, 129, 0.12)' }}
+                      title={selectedTenantFilter === 'all' ? 'Open the fleet-wide PQC Executive Roadmap Report' : `Open the PQC Executive Roadmap Report for ${selectedTenantFilter}`}
+                    >
+                      <FileText size={14} /> {selectedTenantFilter === 'all' ? 'Fleet PQC Roadmap' : 'PQC Roadmap'}
+                    </button>
+                    <button
+                      onClick={() => downloadRoadmapReport('pdf')}
+                      className="btn-secondary"
+                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderColor: '#f87171', color: '#f87171', background: 'rgba(239, 68, 68, 0.1)' }}
+                      title="Download the PQC Executive Roadmap Report (PDF)"
+                    >
+                      <Download size={14} /> Roadmap PDF
                     </button>
                   </div>
                 </div>
