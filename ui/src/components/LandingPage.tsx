@@ -1485,7 +1485,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
 
           <div style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(235px, 1fr))',
             gap: '16px',
             marginTop: '20px'
           }}>
