@@ -453,9 +453,19 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
     }
   }
 
-  // Preview providers: simulated inventory (clearly labeled downstream).
-  const mockAssets = mockAssetsFor(provider);
-  return persistAssets(connectorId, tenantName, provider, connectorName, mockAssets);
+  // Preview / not-yet-implemented providers: never fabricate assets into the
+  // authoritative CBOM. Demo data is written only when QS_DEMO_PKI=1 (never in
+  // production); otherwise the connector is marked preview with zero assets so the
+  // inventory stays truthful.
+  if (process.env.QS_DEMO_PKI === '1') {
+    return persistAssets(connectorId, tenantName, provider, connectorName, mockAssetsFor(provider));
+  }
+  await pool.query(
+    `UPDATE pki_connectors SET sync_status = 'preview', last_error = $1, last_sync_at = NOW(),
+       total_keys_discovered = 0, vulnerable_keys_count = 0, pqc_ready_count = 0 WHERE id = $2`,
+    [`Live discovery for '${provider}' is not implemented yet (preview connector) — no assets cataloged.`, connectorId]
+  );
+  return { total: 0, vulnerable: 0, pqcReady: 0 };
 }
 
 function mockAssetsFor(provider: string): DiscoveredAsset[] {
