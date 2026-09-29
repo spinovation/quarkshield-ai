@@ -476,7 +476,11 @@ function crawlAndAuditDirectory(dir: string, baseDir: string, maxFiles: number =
       const relPath = path.relative(baseDir, fullPath).replace(/\\/g, '/');
 
       if (entry.isDirectory()) {
-        if (!IGNORED_DIRS.has(entry.name) && !entry.name.startsWith('.')) {
+        // Do NOT blanket-skip dot-directories: .github/workflows, .circleci,
+        // .gitlab, .ssh, .aws and .gnupg hold CI secrets and keys that a
+        // "Git & CI/CD Gate" must scan. Noise dot-dirs (.git, .venv, .idea, …)
+        // are already in IGNORED_DIRS.
+        if (!IGNORED_DIRS.has(entry.name)) {
           traverse(fullPath);
         }
       } else if (entry.isFile()) {
