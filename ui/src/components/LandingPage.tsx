@@ -723,6 +723,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
             <a href="#platform" style={{ textDecoration: 'none' }}>Platform</a>
             <a href="#pricing" style={{ textDecoration: 'none' }}>Pricing</a>
             <a href="#downloads" style={{ textDecoration: 'none' }}>Downloads</a>
+            <a href="/quantum-risk" style={{ textDecoration: 'none' }}>Risk Calculator</a>
             <div
               className={`nav-item ${resDropdownOpen ? 'open' : ''}`}
               ref={resDropdownRef}
