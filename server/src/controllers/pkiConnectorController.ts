@@ -24,9 +24,24 @@ const parseKmsConfig = (row: any): KmsConfig => {
     regions: cfg.regions || (cfg.region ? [cfg.region] : undefined),
     region: cfg.region,
     endpointUrl: row.endpoint_url || cfg.endpointUrl || undefined,
-    accessKeyId: cfg.accessKeyId,
-    secretAccessKey: cfg.secretAccessKey,
+    // Sealed at rest by createPkiConnector; fall back to a raw value for any
+    // legacy row written before sealing was added.
+    accessKeyId: unseal(cfg.accessKeyId) || cfg.accessKeyId,
+    secretAccessKey: unseal(cfg.secretAccessKey) || cfg.secretAccessKey,
   };
+};
+
+// Config keys safe to return to the client. Everything else (tokens, client/
+// AWS secrets, access keys) is withheld from API responses.
+const PUBLIC_CONFIG_KEYS = ['region', 'regions', 'roleArn', 'externalId', 'namespace', 'transitMount', 'pkiMount', 'roleId', 'clientId', 'tenantId', 'vaultUrl', 'authorityHost', 'endpointUrl'];
+
+/** Strip config_summary (which holds secrets) and expose only non-secret hints. */
+const publicConnector = (row: any): any => {
+  const cfg = rawConfig(row);
+  const safeCfg: any = {};
+  for (const k of PUBLIC_CONFIG_KEYS) if (cfg[k] !== undefined) safeCfg[k] = cfg[k];
+  const { config_summary, ...rest } = row;
+  return { ...rest, config: safeCfg };
 };
 
 const parseVaultConfig = (row: any): VaultConfig => {
@@ -77,7 +92,7 @@ export const getPkiConnectors = async (req: Request, res: Response) => {
         }).catch(() => {});
     }
 
-    res.json(result.rows);
+    res.json(result.rows.map(publicConnector));
   } catch (err: any) {
     console.error('Error fetching PKI connectors:', err);
     res.status(500).json({ error: 'Failed to retrieve PKI connectors.' });
@@ -110,7 +125,11 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     if (sanitizedConfig.token) sanitizedConfig.token = seal(String(sanitizedConfig.token));
     if (sanitizedConfig.secretId) sanitizedConfig.secretId = seal(String(sanitizedConfig.secretId));
     if (sanitizedConfig.clientSecret) sanitizedConfig.clientSecret = seal(String(sanitizedConfig.clientSecret));
-    if (sanitizedConfig.secretKey) sanitizedConfig.secretKey = '••••••••' + String(sanitizedConfig.secretKey).slice(-4);
+    // AWS keys must be recoverable for discovery, so seal (encrypt) rather than
+    // mask. accessKeyId is sealed alongside its secret so neither sits plaintext.
+    if (sanitizedConfig.accessKeyId) sanitizedConfig.accessKeyId = seal(String(sanitizedConfig.accessKeyId));
+    if (sanitizedConfig.secretAccessKey) sanitizedConfig.secretAccessKey = seal(String(sanitizedConfig.secretAccessKey));
+    if (sanitizedConfig.secretKey) sanitizedConfig.secretKey = seal(String(sanitizedConfig.secretKey));
 
     await pool.query(`
       INSERT INTO pki_connectors (
