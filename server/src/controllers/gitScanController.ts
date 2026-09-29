@@ -49,6 +49,7 @@ export interface GitScanSummary {
   lowCount: number;
   quantumRiskScore: number;
   cnsaStatus: 'Non-Compliant' | 'Partially Compliant' | 'PQC Ready';
+  partial?: boolean;
   findings: GitFinding[];
 }
 
@@ -452,12 +453,14 @@ function auditFileContent(filePath: string, content: string, relPath: string): G
 }
 
 // Recursive directory crawler
-function crawlAndAuditDirectory(dir: string, baseDir: string, maxFiles: number = 3000): { findings: GitFinding[]; fileCount: number } {
+function crawlAndAuditDirectory(dir: string, baseDir: string, maxFiles: number = 3000): { findings: GitFinding[]; fileCount: number; truncated: boolean; skippedLarge: number } {
   let fileCount = 0;
+  let truncated = false;
+  let skippedLarge = 0;
   const allFindings: GitFinding[] = [];
 
   function traverse(currentPath: string) {
-    if (fileCount >= maxFiles) return;
+    if (fileCount >= maxFiles) { truncated = true; return; }
 
     let entries: fs.Dirent[] = [];
     try {
@@ -467,7 +470,7 @@ function crawlAndAuditDirectory(dir: string, baseDir: string, maxFiles: number =
     }
 
     for (const entry of entries) {
-      if (fileCount >= maxFiles) break;
+      if (fileCount >= maxFiles) { truncated = true; break; }
 
       const fullPath = path.join(currentPath, entry.name);
       const relPath = path.relative(baseDir, fullPath).replace(/\\/g, '/');
@@ -482,7 +485,7 @@ function crawlAndAuditDirectory(dir: string, baseDir: string, maxFiles: number =
 
         try {
           const stats = fs.statSync(fullPath);
-          if (stats.size > 2 * 1024 * 1024) continue; // Skip files > 2MB
+          if (stats.size > 2 * 1024 * 1024) { skippedLarge++; continue; } // Skip files > 2MB
 
           fileCount++;
           const content = fs.readFileSync(fullPath, 'utf8');
@@ -496,7 +499,7 @@ function crawlAndAuditDirectory(dir: string, baseDir: string, maxFiles: number =
   }
 
   traverse(dir);
-  return { findings: allFindings, fileCount };
+  return { findings: allFindings, fileCount, truncated, skippedLarge };
 }
 
 // Helper to sanitize remote git url for secure cloning
@@ -652,7 +655,11 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
     }
 
     // Step 3: Run cryptographic discovery engine across the tree
-    const { findings, fileCount } = crawlAndAuditDirectory(tmpDir, tmpDir);
+    const { findings, fileCount, truncated, skippedLarge } = crawlAndAuditDirectory(tmpDir, tmpDir);
+    // A crawl that hit the file cap or skipped large files did not see the whole
+    // tree — plus we only clone a single branch tip (--depth 1), so history is
+    // unseen. Such a scan must never claim full compliance.
+    const partial = truncated || skippedLarge > 0;
 
     // Step 4: Calculate Quantum Risk Metrics
     const criticalCount = findings.filter(f => f.riskLevel === 'critical').length;
@@ -674,6 +681,10 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
     if (vulnerableCount === 0 && pqcCount > 0) {
       cnsaStatus = 'PQC Ready';
     } else if (pqcCount > 0) {
+      cnsaStatus = 'Partially Compliant';
+    }
+    // Never report full "PQC Ready" from a scan that did not see the whole repo.
+    if (partial && cnsaStatus === 'PQC Ready') {
       cnsaStatus = 'Partially Compliant';
     }
 
@@ -700,6 +711,7 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
       lowCount,
       quantumRiskScore,
       cnsaStatus,
+      partial,
       findings
     };
 
@@ -707,10 +719,15 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
     recentScansCache.unshift(summary);
     if (recentScansCache.length > 50) recentScansCache.pop();
 
-    // Persist in DB and sync into central `assets` table for CBOM Inventory
+    // Persist in DB and sync into central `assets` table for CBOM Inventory.
+    // Transactional: the git_scans row and the assets rows commit together, so a
+    // DB failure never leaves the CBOM half-populated behind a "success" response.
+    let persisted = true;
+    const client = await pool.connect();
     try {
+      await client.query('BEGIN');
       // 1. Record the repository scan log
-      await pool.query(`
+      await client.query(`
         INSERT INTO git_scans (
           id, provider, repo_url, repo_name, branch, commit_hash,
           quantum_risk_score, total_assets, vulnerable_count, pqc_count,
@@ -737,8 +754,8 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
       ]);
 
       // 2. Clean up previous scan findings for this repository & tenant to avoid duplicates
-      await pool.query(
-        `DELETE FROM assets WHERE source = 'git_repo' AND source_ref = $1 AND (LOWER(tenant_name) = LOWER($2) OR tenant_name IS NULL)`,
+      await client.query(
+        `DELETE FROM assets WHERE source = 'git_repo' AND source_ref = $1 AND LOWER(tenant_name) = LOWER($2)`,
         [summary.repoUrl, cleanTenant]
       );
 
@@ -773,7 +790,7 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
         const uniqueKey = `${cleanTenant}-${summary.repoName}-${f.filePath}-${f.assetName}-${f.algorithm}-${idx}`;
         const assetId = 'asset-git-' + crypto.createHash('sha256').update(uniqueKey).digest('hex').substring(0, 24);
 
-        await pool.query(insertAssetQuery, [
+        await client.query(insertAssetQuery, [
           assetId,
           f.category || 'source_code',
           f.assetName || summary.repoName,
@@ -793,13 +810,21 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
           summary.repoUrl
         ]);
       }
+      await client.query('COMMIT');
       console.log(`✓ Synchronized ${findings.length} findings from Git repo "${summary.repoName}" into CBOM Inventory (tenant: ${cleanTenant})`);
     } catch (dbErr) {
+      persisted = false;
+      try { await client.query('ROLLBACK'); } catch { /* ignore */ }
       console.warn('Could not persist git_scan and assets into PostgreSQL:', dbErr);
+    } finally {
+      client.release();
     }
 
     return res.status(200).json({
       success: true,
+      persisted,
+      partial,
+      ...(persisted ? {} : { warning: 'Scan ran, but results could not be saved — the CBOM inventory was not updated.' }),
       summary
     });
 
