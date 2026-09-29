@@ -1361,12 +1361,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
               <p className="dl-desc">Authenticode-signed scanner. Audits Schannel ciphers, the certificate store, registry-installed crypto tooling, OpenSSH and PKI.</p>
               <div className="dl-actions">
-                <a className="btn btn-primary btn-sm" href="/downloads/pqc-scanner-windows-amd64.exe" download style={{ textDecoration: 'none' }}>
-                  Download .exe (Installer)
+                <a className="btn btn-primary btn-sm" href="/downloads/QuarkShield-Setup.exe" download style={{ textDecoration: 'none' }}>
+                  Download Installer (.exe)
                 </a>
               </div>
               <div className="dl-alt">
-                <a href="/downloads/pqc-scanner-windows.zip" style={{ color: 'inherit', textDecoration: 'none' }} download>Portable .zip · CLI (x64)</a>
+                <a href="/downloads/pqc-scanner-windows-amd64.exe" style={{ color: 'inherit', textDecoration: 'none' }} download>Portable .exe · no install</a>
+                {' · '}
+                <a href="/downloads/pqc-scanner-windows.zip" style={{ color: 'inherit', textDecoration: 'none' }} download>CLI .zip</a>
               </div>
             </div>
 

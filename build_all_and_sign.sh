@@ -71,6 +71,32 @@ zip -9 quarkshield-scanner-windows.zip \
   uninstall.bat \
   README.txt
 
+# Build the Windows Inno Setup installer (Program Files + Start Menu + uninstaller).
+# ISCC is Windows-only, so on macOS/Linux we compile it inside the amake/innosetup
+# Docker image (bundles Wine + Inno Setup). Skipped cleanly if Docker is absent.
+echo "📥 Building Windows installer (QuarkShield-Setup.exe)..."
+rm -f QuarkShield-Setup.exe installer/Output/QuarkShield-Setup.exe
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  if docker run --rm --platform linux/amd64 -v "$AGENT_DIR:/work" amake/innosetup \
+       /DMyAppVersion="${APP_VERSION:-1.0.0}" installer/quarkshield.iss; then
+    if [ -f installer/Output/QuarkShield-Setup.exe ]; then
+      cp -f installer/Output/QuarkShield-Setup.exe QuarkShield-Setup.exe
+      # Sign the installer itself so it shows "Fedmitigate LLC" (not "Unknown Publisher").
+      if [ -f ".env.signing" ] || [ -n "$AZURE_CLIENT_ID" ]; then
+        python3 sign_azure.py QuarkShield-Setup.exe && \
+          echo "   ✓ Installer signed (Fedmitigate LLC / Microsoft Root CA)!" || \
+          echo "   ⚠️  Installer built but signing failed — check Azure creds."
+      else
+        echo "   ⚠️  Installer built but UNSIGNED (no .env.signing / AZURE_CLIENT_ID)."
+      fi
+    fi
+  else
+    echo "   ⚠️  Inno Setup compile failed — skipping installer (portable .exe still ships)."
+  fi
+else
+  echo "   ⚠️  Docker not available — skipping installer build (portable .exe still ships)."
+fi
+
 # ------------------------------------------------------------------------------
 # 2. MACOS BUILD, CODE SIGNING & DMG / ZIP PACKAGING
 # ------------------------------------------------------------------------------
@@ -227,6 +253,7 @@ cp -f Start-QuarkShield.command binaries/
 cp -f Trust-QuarkShield.command binaries/
 cp -f quarkshield-scanner-windows-amd64.exe binaries/
 cp -f quarkshield-scanner-windows.zip binaries/
+[ -f QuarkShield-Setup.exe ] && cp -f QuarkShield-Setup.exe binaries/
 cp -f Trust-FedMitigate.bat binaries/
 cp -f Trust-FedMitigate.ps1 binaries/
 cp -f FedMitigate-Root-CA.cer binaries/
@@ -263,6 +290,7 @@ for DL_DIR in "$SCRIPT_DIR/ui/public/downloads" "$SCRIPT_DIR/ui/dist/downloads" 
     cp -f Trust-QuarkShield.command "$DL_DIR/"
     cp -f quarkshield-scanner-windows-amd64.exe "$DL_DIR/"
     cp -f quarkshield-scanner-windows.zip "$DL_DIR/"
+    [ -f QuarkShield-Setup.exe ] && cp -f QuarkShield-Setup.exe "$DL_DIR/"
     cp -f Trust-FedMitigate.bat "$DL_DIR/"
     cp -f Trust-FedMitigate.ps1 "$DL_DIR/"
     cp -f FedMitigate-Root-CA.cer "$DL_DIR/"
