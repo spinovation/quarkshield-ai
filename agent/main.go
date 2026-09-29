@@ -265,11 +265,17 @@ func RunScanWithProgress(ctx context.Context, quick bool, customPath string, onP
 			}
 			content := string(contentBytes)
 			trimmed := strings.TrimSpace(content)
+			ext := strings.ToLower(filepath.Ext(fileName))
+			lowerDir := strings.ToLower(filepath.Dir(path))
 
-			if strings.Contains(content, "-----BEGIN ") {
-				// PEM certificate or private key
-				audit := AuditPEMCertificate(content, fileName, path)
-				assets = append(assets, audit)
+			if ext == ".pfx" || ext == ".p12" {
+				assets = append(assets, keystoreFinding("PKCS#12 keystore", "PKCS#12 (RSA/ECC keys + certificates)", fileName, path,
+					"A PKCS#12 keystore was found; it typically holds quantum-vulnerable RSA/ECC private keys and certificates."))
+			} else if strings.Contains(lowerDir, ".gnupg") && (fileName == "secring.gpg" || fileName == "pubring.kbx" || strings.Contains(lowerDir, "private-keys-v1.d") || ext == ".gpg" || ext == ".key") {
+				assets = append(assets, keystoreFinding("GPG keyring", "OpenPGP (RSA/ECC keys)", fileName, path,
+					"A GnuPG keyring was found; OpenPGP keys are typically RSA or ECC and quantum-vulnerable."))
+			} else if strings.Contains(content, "-----BEGIN ") {
+				assets = append(assets, AuditPEMBundle(content, fileName, path)...)
 			} else if cert, err := x509.ParseCertificate(contentBytes); err == nil {
 				// Binary DER certificate (.cer, .crt, .der)
 				audit := AuditDERCertificate(cert, fileName, path)

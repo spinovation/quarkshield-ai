@@ -467,6 +467,51 @@ func certStatus(vuln bool) string {
 	return "Post-Quantum Ready"
 }
 
+// AuditPEMBundle audits EVERY PEM block in a file, not just the first — so
+// fullchain.pem, combined cert+key files and multi-cert bundles are fully
+// classified instead of only their first block.
+func AuditPEMBundle(content string, fileName string, path string) []AuditResult {
+	var results []AuditResult
+	rest := []byte(content)
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		results = append(results, AuditPEMCertificate(string(pem.EncodeToMemory(block)), fileName, path))
+		if len(rest) == 0 {
+			break
+		}
+	}
+	if len(results) == 0 {
+		results = append(results, AuditPEMCertificate(content, fileName, path))
+	}
+	return results
+}
+
+// keystoreFinding surfaces a binary keystore (PKCS#12/.pfx, GnuPG keyring) that
+// QuarkShield cannot parse inline. Previously these were counted as scanned but
+// produced zero findings — a silent miss. Report them as quantum-vulnerable
+// pending review, since they hold RSA/ECC private keys by default.
+func keystoreFinding(name, algo, fileName, path, desc string) AuditResult {
+	return AuditResult{
+		ID:                   generateID(),
+		Type:                 "keystore",
+		Name:                 fmt.Sprintf("%s: %s", name, fileName),
+		Path:                 path,
+		Algorithm:            algo,
+		QuantumThreat:        "Shor's Algorithm (asymmetric keys inside keystore)",
+		IsVulnerable:         true,
+		RiskLevel:            "high",
+		Status:               "Needs Review",
+		Description:          desc,
+		Recommendation:       "Inspect the keystore and migrate any RSA/ECC/DSA material to NIST FIPS 203 (ML-KEM) / FIPS 204 (ML-DSA).",
+		Explainer:            "Keystore detected but not parsed inline (binary format); treated as quantum-vulnerable pending review so it is not silently missed.",
+		ComplianceViolations: []string{"CNSA 2.0", "NIST FIPS 203", "NIST FIPS 204"},
+	}
+}
+
 func AuditConfigFile(fileName string, content string) ConfigAuditResult {
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	var violations []LineViolation
