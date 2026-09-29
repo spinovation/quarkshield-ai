@@ -25,6 +25,24 @@ const parseHybridCurve = (tlsCurve: string): {
 };
 
 /**
+ * Classify a MEASURED upstream by its negotiated key-exchange group. Quantum
+ * exposure is decided by the KE group (Shor breaks classical ECDH/DH), never by
+ * the TLS version — TLS 1.3 with classical X25519 is fully exposed to
+ * Harvest-Now-Decrypt-Later. An unreadable group is treated as exposed, never
+ * as safe.
+ */
+const classifyGroup = (group?: string): { isVulnerable: boolean; riskLevel: string; note: string } => {
+  const g = (group || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!g) {
+    return { isVulnerable: true, riskLevel: 'unknown', note: 'The negotiated key-exchange group could not be read; treat the upstream as quantum-exposed until verified. Terminate hybrid PQC TLS at the QuarkShield gateway.' };
+  }
+  if (g.includes('MLKEM') || g.includes('KYBER')) {
+    return { isVulnerable: false, riskLevel: 'secure', note: 'Upstream negotiated a hybrid ML-KEM key-exchange group; it is quantum-safe.' };
+  }
+  return { isVulnerable: true, riskLevel: 'high', note: 'Upstream negotiated a classical key-exchange group (Shor-breakable). Regardless of TLS version, this traffic is exposed to Harvest-Now-Decrypt-Later; terminate hybrid PQC TLS at the QuarkShield gateway.' };
+};
+
+/**
  * Syndicate a proxy gateway's crypto into the CBOM `assets` inventory.
  * Values are derived from the gateway's real configured curve (not hardcoded).
  * When `measured` is supplied (from an actual upstream TLS handshake in
@@ -33,7 +51,7 @@ const parseHybridCurve = (tlsCurve: string): {
  */
 export const syndicateProxyToAssets = async (
   id: string, name: string, listenPort: number, upstreamUrl: string, tlsCurve: string, tenantName: string,
-  measured?: { protocol?: string; cipher?: string }
+  measured?: { protocol?: string; cipher?: string; group?: string }
 ) => {
   try {
     const kemId = ('ast-prx-kem-' + id).substring(0, 64);
@@ -73,7 +91,8 @@ export const syndicateProxyToAssets = async (
     if (measured && (measured.cipher || measured.protocol)) {
       const upId = ('ast-prx-up-' + id).substring(0, 64);
       const proto = measured.protocol || 'unknown';
-      const isModern = proto === 'TLSv1.3';
+      const grp = classifyGroup(measured.group);
+      const groupLabel = measured.group || 'key-exchange group not reported';
       await pool.query(`
         INSERT INTO assets (
           id, type, name, path, algorithm, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name
@@ -92,13 +111,11 @@ export const syndicateProxyToAssets = async (
         upId,
         `${name} Upstream TLS (measured)`,
         upstreamUrl,
-        measured.cipher ? `${measured.cipher}${proto !== 'unknown' ? ' / ' + proto : ''}` : proto,
-        !isModern,
-        isModern ? 'medium' : 'high',
-        `Measured upstream negotiation for ${upstreamUrl}: ${proto}${measured.cipher ? ' / ' + measured.cipher : ''}. This is the legacy backend traffic the hybrid gateway fronts.`,
-        isModern
-          ? 'Upstream negotiates TLS 1.3. Confirm the key-exchange group is hybrid (X25519MLKEM768) for full quantum safety.'
-          : 'Upstream negotiates a pre-TLS 1.3 / classical protocol. Terminate hybrid PQC TLS at the QuarkShield gateway to protect this traffic.',
+        `${groupLabel}${proto !== 'unknown' ? ' / ' + proto : ''}${measured.cipher ? ' / ' + measured.cipher : ''}`,
+        grp.isVulnerable,
+        grp.riskLevel,
+        `Measured upstream negotiation for ${upstreamUrl}: key-exchange ${groupLabel}${proto !== 'unknown' ? ', ' + proto : ''}${measured.cipher ? ', ' + measured.cipher : ''}. Quantum exposure is judged by the key-exchange group, not the TLS version.`,
+        grp.note,
         name,
         tenantName
       ]);
@@ -282,7 +299,7 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
     if (result.reachable && (result.cipher || result.protocol)) {
       await syndicateProxyToAssets(
         p.id, p.name, p.listen_port, p.upstream_url, p.tls_curve, p.tenant_name,
-        { protocol: result.protocol, cipher: result.cipher }
+        { protocol: result.protocol, cipher: result.cipher, group: result.group }
       );
     }
 
@@ -291,6 +308,8 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
       validation: 'target-reachable',
       reachable: result.reachable,
       negotiatedProtocol: result.protocol,
+      negotiatedGroup: result.group || null,
+      quantumExposed: result.reachable ? classifyGroup(result.group).isVulnerable : null,
       cipherSuite: result.cipher,
       latencyMs: Date.now() - started,
       recommendedCurve: p.tls_curve || 'X25519MLKEM768',
@@ -304,17 +323,28 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
   }
 };
 
+type ProbeResult = { reachable: boolean; protocol?: string; cipher?: string; group?: string };
+
 /** Probe an upstream: TLS handshake for https, plain TCP connect otherwise. */
-const probeUpstream = (host: string, port: number, https: boolean): Promise<{ reachable: boolean; protocol?: string; cipher?: string }> =>
+const probeUpstream = (host: string, port: number, https: boolean): Promise<ProbeResult> =>
   new Promise((resolve) => {
     let done = false;
-    const finish = (r: { reachable: boolean; protocol?: string; cipher?: string }) => { if (!done) { done = true; resolve(r); } };
+    const finish = (r: ProbeResult) => { if (!done) { done = true; resolve(r); } };
     if (https) {
       const socket = tls.connect({ host, port, servername: host, rejectUnauthorized: false, timeout: 6000 }, () => {
         const proto = socket.getProtocol() || undefined;
         const cipher = socket.getCipher()?.name;
+        // The negotiated key-exchange group is what determines quantum exposure
+        // (Harvest-Now-Decrypt-Later), NOT the TLS version. Read it explicitly.
+        let group: string | undefined;
+        try {
+          const ek = socket.getEphemeralKeyInfo() as any;
+          if (ek && (ek.name || ek.type)) {
+            group = ek.name || (ek.size ? `${ek.type}-${ek.size}` : ek.type);
+          }
+        } catch { /* older runtimes may not expose it */ }
         socket.end();
-        finish({ reachable: true, protocol: proto || undefined, cipher });
+        finish({ reachable: true, protocol: proto || undefined, cipher, group });
       });
       socket.on('error', () => finish({ reachable: false }));
       socket.on('timeout', () => { socket.destroy(); finish({ reachable: false }); });
