@@ -2471,11 +2471,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <div className="field">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                   <label style={{ margin: 0 }}>Work Email or Account Identifier</label>
-                  <span style={{ fontSize: '0.74rem', color: 'var(--muted)', fontWeight: 500 }}>e.g. superadmin or name@company.com</span>
                 </div>
                 <input
                   type="text"
-                  placeholder="e.g. name@company.com or superadmin"
+                  placeholder="name@company.com"
                   value={loginIdentifier}
                   onChange={(e) => {
                     setLoginIdentifier(e.target.value);
