@@ -164,9 +164,9 @@ byte[] sharedSecret = session.getDerivedKey(); // HKDF(ECDHE-P384 || Kyber-768)`
 			Algorithm:     fmt.Sprintf("%s-%d", certAlgo, keySize),
 			KeySize:       keySize,
 			QuantumThreat: "Shor's Algorithm (Asymmetric Factorization/DLP)",
-			IsVulnerable:  true,
+			IsVulnerable:  algoIsQuantumVulnerable(certAlgo),
 			RiskLevel:     "high",
-			Status:        "Quantum Vulnerable",
+			Status:        certStatus(algoIsQuantumVulnerable(certAlgo)),
 			Description:   desc,
 			Recommendation: fmt.Sprintf("⚠️ SHOR'S FORGERY RISK: Upgrade certificate chain to support NIST FIPS 204 (ML-DSA) composite signatures prior to CRQC realization."),
 			RemediationSteps: []string{

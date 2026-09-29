@@ -443,6 +443,30 @@ func redactConfigLine(line string) string {
 	return "[redacted config line]"
 }
 
+// algoIsQuantumVulnerable reports whether a public-key algorithm name is broken
+// by a quantum computer (Shor). PQC families (ML-KEM/ML-DSA/SLH-DSA/Kyber/
+// Dilithium/SPHINCS/Falcon) are safe; symmetric/hash primitives are only
+// Grover-weakened (handled separately, not "vulnerable" here). RSA, ECC/ECDSA,
+// DSA, DH, Ed25519, X25519, ElGamal and unknown are vulnerable. Prevents a
+// deployed FIPS 203/204 certificate from being mislabeled "Quantum Vulnerable".
+func algoIsQuantumVulnerable(algo string) bool {
+	a := strings.ToLower(algo)
+	for _, safe := range []string{"ml-kem", "mlkem", "ml-dsa", "mldsa", "slh-dsa", "slhdsa", "kyber", "dilithium", "sphincs", "falcon"} {
+		if strings.Contains(a, safe) {
+			return false
+		}
+	}
+	return true
+}
+
+// certStatus is the display status string for a certificate given its verdict.
+func certStatus(vuln bool) string {
+	if vuln {
+		return "Quantum Vulnerable"
+	}
+	return "Post-Quantum Ready"
+}
+
 func AuditConfigFile(fileName string, content string) ConfigAuditResult {
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	var violations []LineViolation
@@ -801,9 +825,9 @@ func AuditDERCertificate(cert *x509.Certificate, fileName string, path string) A
 		Algorithm:            fmt.Sprintf("%s-%d", algorithm, keySize),
 		KeySize:              keySize,
 		QuantumThreat:        quantumThreat,
-		IsVulnerable:         true,
+		IsVulnerable:         algoIsQuantumVulnerable(algorithm),
 		RiskLevel:            riskLevel,
-		Status:               "Quantum Vulnerable",
+		Status:               certStatus(algoIsQuantumVulnerable(algorithm)),
 		Description:          desc,
 		Recommendation:       plan.Recommendation,
 		RemediationSteps:     plan.Steps,
