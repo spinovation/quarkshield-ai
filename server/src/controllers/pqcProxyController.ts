@@ -61,7 +61,7 @@ export const syndicateProxyToAssets = async (
     await pool.query(`
       INSERT INTO assets (
         id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name
-      ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, $7, 'active', $8, $9, 'pqc_proxy', $10, $11)
+      ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, $7, 'planned', $8, $9, 'pqc_proxy', $10, $11)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         path = EXCLUDED.path,
@@ -81,7 +81,7 @@ export const syndicateProxyToAssets = async (
       kem.keySize,
       kem.isVulnerable,
       kem.riskLevel,
-      `QuarkShield transparent hybrid TLS gateway configured with curve "${tlsCurve || 'X25519MLKEM768'}", protecting ${name} against HNDL attacks.`,
+      `QuarkShield hybrid TLS gateway CONFIGURED with curve "${tlsCurve || 'X25519MLKEM768'}" for ${name}. Status is 'planned' until the generated proxy config is deployed and a live hybrid handshake is confirmed — it does not yet protect traffic.`,
       kem.recommendation,
       name,
       tenantName
