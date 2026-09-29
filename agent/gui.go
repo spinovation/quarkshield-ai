@@ -57,7 +57,7 @@ func openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "windows":
-		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		cmd = exec.Command(winSystem32("rundll32.exe"), "url.dll,FileProtocolHandler", url)
 	case "darwin":
 		cmd = exec.Command("open", url)
 	default: // linux, bsd, etc.
@@ -92,31 +92,31 @@ func registerWindowsUninstall() {
 		return
 	}
 	key := `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\QuarkShieldPostQuantumGuard`
-	c1 := exec.Command("reg", "add", key, "/v", "DisplayName", "/d", "QuarkShield Post-Quantum Guard", "/f")
+	c1 := exec.Command(winSystem32("reg.exe"), "add", key, "/v", "DisplayName", "/d", "QuarkShield Post-Quantum Guard", "/f")
 	hideConsole(c1)
 	_ = c1.Run()
 
-	c2 := exec.Command("reg", "add", key, "/v", "DisplayVersion", "/d", "2.0.0", "/f")
+	c2 := exec.Command(winSystem32("reg.exe"), "add", key, "/v", "DisplayVersion", "/d", "2.0.0", "/f")
 	hideConsole(c2)
 	_ = c2.Run()
 
-	c3 := exec.Command("reg", "add", key, "/v", "Publisher", "/d", "Fedmitigate LLC", "/f")
+	c3 := exec.Command(winSystem32("reg.exe"), "add", key, "/v", "Publisher", "/d", "Fedmitigate LLC", "/f")
 	hideConsole(c3)
 	_ = c3.Run()
 
-	c4 := exec.Command("reg", "add", key, "/v", "DisplayIcon", "/d", exePath, "/f")
+	c4 := exec.Command(winSystem32("reg.exe"), "add", key, "/v", "DisplayIcon", "/d", exePath, "/f")
 	hideConsole(c4)
 	_ = c4.Run()
 
-	c5 := exec.Command("reg", "add", key, "/v", "UninstallString", "/d", fmt.Sprintf("\"%s\" --uninstall", exePath), "/f")
+	c5 := exec.Command(winSystem32("reg.exe"), "add", key, "/v", "UninstallString", "/d", fmt.Sprintf("\"%s\" --uninstall", exePath), "/f")
 	hideConsole(c5)
 	_ = c5.Run()
 
-	c6 := exec.Command("reg", "add", key, "/v", "NoModify", "/t", "REG_DWORD", "/d", "1", "/f")
+	c6 := exec.Command(winSystem32("reg.exe"), "add", key, "/v", "NoModify", "/t", "REG_DWORD", "/d", "1", "/f")
 	hideConsole(c6)
 	_ = c6.Run()
 
-	c7 := exec.Command("reg", "add", key, "/v", "NoRepair", "/t", "REG_DWORD", "/d", "1", "/f")
+	c7 := exec.Command(winSystem32("reg.exe"), "add", key, "/v", "NoRepair", "/t", "REG_DWORD", "/d", "1", "/f")
 	hideConsole(c7)
 	_ = c7.Run()
 }
@@ -127,7 +127,7 @@ func unregisterWindowsUninstall() {
 	}
 	removeDesktopAndStartMenuShortcuts()
 	key := `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\QuarkShieldPostQuantumGuard`
-	c := exec.Command("reg", "delete", key, "/f")
+	c := exec.Command(winSystem32("reg.exe"), "delete", key, "/f")
 	hideConsole(c)
 	_ = c.Run()
 }

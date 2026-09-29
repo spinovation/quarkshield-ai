@@ -61,7 +61,7 @@ if ($progs -and (Test-Path $progs)) {
 }
 `, exePath, exeDir)
 
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	cmd := exec.Command(winPowerShell(), "-NoProfile", "-NonInteractive", "-Command", psScript)
 	hideConsole(cmd)
 	_ = cmd.Run()
 }
@@ -74,7 +74,7 @@ $progs = [System.Environment]::GetFolderPath('Programs')
 if ($desk) { Remove-Item "$desk\QuarkShield Post-Quantum Guard.lnk" -ErrorAction SilentlyContinue }
 if ($progs) { Remove-Item "$progs\QuarkShield Post-Quantum Guard.lnk" -ErrorAction SilentlyContinue }
 `
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	cmd := exec.Command(winPowerShell(), "-NoProfile", "-NonInteractive", "-Command", psScript)
 	hideConsole(cmd)
 	_ = cmd.Run()
 }

@@ -21,7 +21,7 @@ func AuditWindowsCertStore() []AuditResult {
 		"$($_.Thumbprint)|$subj|$issuer|$algo|$size|$($_.NotAfter.ToString('yyyy-MM-dd'))|$($_.PSParentPath)"
 	}`
 
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	cmd := exec.Command(winPowerShell(), "-NoProfile", "-NonInteractive", "-Command", psScript)
 	hideConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
@@ -143,7 +143,7 @@ func AuditWindowsSchannel() []AuditResult {
 	$findings -join ";"
 	`
 
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
+	cmd := exec.Command(winPowerShell(), "-NoProfile", "-NonInteractive", "-Command", psScript)
 	hideConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {

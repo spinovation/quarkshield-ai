@@ -527,8 +527,8 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 
 	if runtime.GOOS == "darwin" {
 		// Audit Homebrew installed packages
-		brewBin, err := exec.LookPath("brew")
-		if err == nil && brewBin != "" {
+		brewBin := findExecutable("brew", []string{"/opt/homebrew/bin/brew", "/usr/local/bin/brew"})
+		if brewBin != "" {
 			reportProgress("Auditing Homebrew packages (brew list --versions)...")
 			out, err := exec.Command(brewBin, "list", "--versions").CombinedOutput()
 			if err == nil {
@@ -551,8 +551,8 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 		seenPkgs := make(map[string]bool)
 
 		// 1. Audit dpkg (Debian / Ubuntu / Mint)
-		dpkgBin, err := exec.LookPath("dpkg-query")
-		if err == nil && dpkgBin != "" {
+		dpkgBin := findExecutable("dpkg-query", []string{"/usr/bin/dpkg-query", "/bin/dpkg-query"})
+		if dpkgBin != "" {
 			reportProgress("Auditing Debian/Ubuntu packages (dpkg-query)...")
 			out, err := exec.Command(dpkgBin, "-W", "-f=${Package} ${Version}\n").CombinedOutput()
 			if err == nil {
@@ -572,8 +572,8 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 		}
 
 		// 2. Audit rpm (RHEL / CentOS / Fedora / Rocky / Alma / Amazon Linux / SUSE)
-		rpmBin, err := exec.LookPath("rpm")
-		if err == nil && rpmBin != "" {
+		rpmBin := findExecutable("rpm", []string{"/usr/bin/rpm", "/bin/rpm"})
+		if rpmBin != "" {
 			reportProgress("Auditing RedHat/CentOS/Fedora RPM packages (rpm -qa)...")
 			out, err := exec.Command(rpmBin, "-qa", "--qf", "%{NAME} %{VERSION}-%{RELEASE}\n").CombinedOutput()
 			if err == nil {
@@ -593,8 +593,8 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 		}
 
 		// 3. Audit apk (Alpine Linux)
-		apkBin, err := exec.LookPath("apk")
-		if err == nil && apkBin != "" {
+		apkBin := findExecutable("apk", []string{"/sbin/apk", "/usr/bin/apk"})
+		if apkBin != "" {
 			reportProgress("Auditing Alpine Linux packages (apk info -v)...")
 			out, err := exec.Command(apkBin, "info", "-v").CombinedOutput()
 			if err == nil {
@@ -618,8 +618,8 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 		}
 
 		// 4. Audit pacman (Arch Linux / Manjaro)
-		pacmanBin, err := exec.LookPath("pacman")
-		if err == nil && pacmanBin != "" {
+		pacmanBin := findExecutable("pacman", []string{"/usr/bin/pacman", "/bin/pacman"})
+		if pacmanBin != "" {
 			reportProgress("Auditing Arch Linux packages (pacman -Q)...")
 			out, err := exec.Command(pacmanBin, "-Q").CombinedOutput()
 			if err == nil {
@@ -667,7 +667,7 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 
 		// 1. Audit Registry Installed Applications via PowerShell
 		psScript := `Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*, HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*, HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -and ($_.DisplayName -match '(?i)OpenSSL|PuTTY|WireGuard|OpenVPN|GnuPG|Python|Node\.js|Git|Docker|Go Programming|WinSCP|7-Zip') } | Select-Object -Unique DisplayName, DisplayVersion, InstallLocation | ForEach-Object { "$($_.DisplayName)|$($_.DisplayVersion)|$($_.InstallLocation)" }`
-		cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", psScript)
+		cmd := exec.Command(winPowerShell(), "-NoProfile", "-NonInteractive", "-Command", psScript)
 		hideConsole(cmd)
 		if out, err := cmd.Output(); err == nil {
 			lines := strings.Split(string(out), "\n")
@@ -935,13 +935,15 @@ func parseManifestForCryptoDependencies(filePath, fileName string) []AuditResult
 // -----------------------------------------------------------------------------
 
 func findExecutable(name string, knownPaths []string) string {
-	if p, err := exec.LookPath(name); err == nil && p != "" {
-		return p
-	}
+	// Prefer trusted absolute locations FIRST so a poisoned PATH or CWD cannot
+	// substitute a planted binary (the agent may run as root).
 	for _, p := range knownPaths {
 		if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 			return p
 		}
+	}
+	if p, err := exec.LookPath(name); err == nil && p != "" {
+		return p
 	}
 	return ""
 }

@@ -18,7 +18,7 @@ func DiscoverADCS() ([]ADCSAsset, string, error) {
 	caName := detectCAName()
 
 	// Issued certificates with the columns the parser expects.
-	out, err := exec.Command("certutil",
+	out, err := exec.Command(winSystem32("certutil.exe"),
 		"-view",
 		"-restrict", "Disposition=20",
 		"-out", "CommonName,CertificateTemplate,PublicKeyAlgorithm,PublicKeyLength,NotAfter",
@@ -38,7 +38,7 @@ func DiscoverADCS() ([]ADCSAsset, string, error) {
 }
 
 func detectCAName() string {
-	out, err := exec.Command("certutil", "-getreg", "CA\\CommonName").Output()
+	out, err := exec.Command(winSystem32("certutil.exe"), "-getreg", "CA\\CommonName").Output()
 	if err != nil {
 		return "Enterprise CA"
 	}
@@ -53,7 +53,7 @@ func detectCAName() string {
 
 func discoverCACert(caName string) *ADCSAsset {
 	// certutil -ca.cert emits the CA cert; -dump summarizes algorithm + length.
-	out, err := exec.Command("certutil", "-ca.cert", "-dump").Output()
+	out, err := exec.Command(winSystem32("certutil.exe"), "-ca.cert", "-dump").Output()
 	if err != nil {
 		return nil
 	}

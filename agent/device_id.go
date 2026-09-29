@@ -33,7 +33,7 @@ func GetHardwareUUID() string {
 
 	case "windows":
 		// Query Windows MachineGuid from Registry
-		cmd := exec.Command("reg", "query", `HKLM\SOFTWARE\Microsoft\Cryptography`, "/v", "MachineGuid")
+		cmd := exec.Command(winSystem32("reg.exe"), "query", `HKLM\SOFTWARE\Microsoft\Cryptography`, "/v", "MachineGuid")
 		hideConsole(cmd)
 		out, err := cmd.Output()
 		if err == nil {
