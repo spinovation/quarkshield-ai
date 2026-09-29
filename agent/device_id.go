@@ -98,7 +98,7 @@ func getPersistentFallbackUUID() string {
 		home = "."
 	}
 	dir := filepath.Join(home, ".quarkshield")
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0700)
 	idFile := filepath.Join(dir, "device_id")
 
 	if data, err := os.ReadFile(idFile); err == nil {
@@ -115,6 +115,6 @@ func getPersistentFallbackUUID() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	newUUID := fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 
-	_ = os.WriteFile(idFile, []byte(newUUID), 0644)
+	_ = os.WriteFile(idFile, []byte(newUUID), 0600)
 	return newUUID
 }

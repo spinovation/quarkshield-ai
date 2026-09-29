@@ -428,6 +428,21 @@ func AuditPEMCertificate(pemString string, label string, path string) AuditResul
 }
 
 // AuditConfigFile audits server configuration files for protocols
+// redactConfigLine keeps a generic config/.env line's key and the matched
+// indicator but strips the value, so secrets in .env-style files are never
+// copied into a finding and shipped to the server. Structured protocol configs
+// (nginx/ssh cipher lines) keep their raw content elsewhere; only the generic
+// key=value branch is redacted, because that is where secret values live.
+func redactConfigLine(line string) string {
+	trimmed := strings.TrimSpace(line)
+	for _, sep := range []string{"=", ":"} {
+		if i := strings.Index(trimmed, sep); i > 0 {
+			return strings.TrimSpace(trimmed[:i]) + sep + " [value redacted]"
+		}
+	}
+	return "[redacted config line]"
+}
+
 func AuditConfigFile(fileName string, content string) ConfigAuditResult {
 	scanner := bufio.NewScanner(strings.NewReader(content))
 	var violations []LineViolation
@@ -549,7 +564,7 @@ func AuditConfigFile(fileName string, content string) ConfigAuditResult {
 				isVulnerable = true
 				violations = append(violations, LineViolation{
 					LineNumber:  lineNum,
-					LineContent: line,
+					LineContent: redactConfigLine(line),
 					Issue:       "Insecure hash reference (SHA-1 / MD5) detected: Collision resistance collapsed under Grover's Algorithm.",
 					RiskLevel:   "high",
 					Fix:         "Migrate hashing to SHA-384 or SHA-512 for CNSA 2.0 compliance.",

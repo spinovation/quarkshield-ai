@@ -39,7 +39,7 @@ func getEnrollmentConfigPath() string {
 		localApp := os.Getenv("LOCALAPPDATA")
 		if localApp != "" {
 			dir := filepath.Join(localApp, "QuarkShield")
-			_ = os.MkdirAll(dir, 0755)
+			_ = os.MkdirAll(dir, 0700)
 			return filepath.Join(dir, "enrollment.json")
 		}
 	}
@@ -48,7 +48,7 @@ func getEnrollmentConfigPath() string {
 		home = "."
 	}
 	dir := filepath.Join(home, ".quarkshield")
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0700)
 	return filepath.Join(dir, "enrollment.json")
 }
 
@@ -95,7 +95,7 @@ func SaveEnrollmentConfig(cfg EnrollmentConfig) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(getEnrollmentConfigPath(), data, 0644)
+	return os.WriteFile(getEnrollmentConfigPath(), data, 0600)
 }
 
 // FleetPayload represents the JSON body sent to QuarkShield.AI /api/scan/agent/ingest
