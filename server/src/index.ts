@@ -80,7 +80,17 @@ app.use('/downloads', express.static(downloadsDir, {
   }
 }));
 
-// API Routes
+// API Routes.
+// Force no-store on every API response so no CDN/proxy (e.g. a Cloudflare
+// "Cache Everything" rule) can cache an authenticated response and serve one
+// user's data or session to another. Auth responses also set Set-Cookie, which
+// must never be cached by an intermediary.
+app.use('/api', (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
 app.use('/api', routes);
 
 // Health check
