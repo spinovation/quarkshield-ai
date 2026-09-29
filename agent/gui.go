@@ -145,7 +145,7 @@ func unregisterWindowsUninstall() {
 //     cross-site or same-site request (fetch, form, img, navigation) is refused.
 //   - If an Origin header is present it must be this exact local origin.
 // No permissive CORS headers are ever sent, so cross-origin reads are blocked.
-func localGuard(next http.Handler, port int) http.Handler {
+func localGuard(next http.Handler, port int, apiToken string) http.Handler {
 	allowedHosts := map[string]bool{
 		fmt.Sprintf("127.0.0.1:%d", port): true,
 		fmt.Sprintf("localhost:%d", port): true,
@@ -170,6 +170,20 @@ func localGuard(next http.Handler, port int) http.Handler {
 				http.Error(w, "Forbidden (origin)", http.StatusForbidden)
 				return
 			}
+			// State-changing calls require the per-install token (set as a cookie
+			// when the dashboard page is served, or read from the 0600 config).
+			// This stops a non-browser local process — which omits Sec-Fetch-Site
+			// and the cookie — from driving sync/enrollment/uninstall/probe.
+			switch r.Method {
+			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+				if apiToken != "" {
+					c, err := r.Cookie("qs_local_token")
+					if err != nil || c.Value != apiToken {
+						http.Error(w, "Forbidden (token)", http.StatusForbidden)
+						return
+					}
+				}
+			}
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -184,7 +198,15 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 	if errCheck == nil && resp.StatusCode == http.StatusOK {
 		_ = resp.Body.Close()
 		exitURL := fmt.Sprintf("http://127.0.0.1:%d/api/exit", preferredPort)
-		_, _ = client.Post(exitURL, "application/json", nil)
+		// Authenticate the shutdown to the running instance with the shared token
+		// (both instances read it from the same 0600 config).
+		if req, e := http.NewRequest(http.MethodPost, exitURL, nil); e == nil {
+			req.Header.Set("Content-Type", "application/json")
+			if tok := LoadEnrollmentConfig().LocalAPIToken; tok != "" {
+				req.AddCookie(&http.Cookie{Name: "qs_local_token", Value: tok})
+			}
+			_, _ = client.Do(req)
+		}
 		time.Sleep(900 * time.Millisecond)
 	}
 
@@ -206,6 +228,15 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 	osName := runtime.GOOS
 	archName := runtime.GOARCH
 
+	// Per-install token gating state-changing local API calls. Persisted in the
+	// 0600 enrollment config; delivered to the legitimate dashboard as a cookie.
+	apiCfg := LoadEnrollmentConfig()
+	if apiCfg.LocalAPIToken == "" {
+		apiCfg.LocalAPIToken = randToken()
+		_ = SaveEnrollmentConfig(apiCfg)
+	}
+	localAPIToken := apiCfg.LocalAPIToken
+
 	mux := http.NewServeMux()
 
 	// 1. Serve Embedded Single-Page Post-Quantum Guard GUI
@@ -215,6 +246,8 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 			http.Error(w, "Failed to load embedded UI", http.StatusInternalServerError)
 			return
 		}
+		// Hand the dashboard the local API token so its POSTs authenticate.
+		http.SetCookie(w, &http.Cookie{Name: "qs_local_token", Value: localAPIToken, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
 		w.Header().Set("Pragma", "no-cache")
@@ -734,10 +767,11 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 			return
 		}
 
-		srv := strings.TrimSpace(req.ServerUrl)
-		if srv == "" {
-			srv = cfg.ServerURL
-		}
+		// Destination is the ENROLLED server only, never a caller-supplied URL, so
+		// a local process cannot POST /api/sync with its own serverUrl and redirect
+		// telemetry (findings + the fleet token) to an attacker host. Change the
+		// server through /api/enrollment, which persists it to the config.
+		srv := strings.TrimSpace(cfg.ServerURL)
 		if srv == "" {
 			srv = "https://quarkshield.ai"
 		}
@@ -890,7 +924,7 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 	serverURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	server = &http.Server{
-		Handler: localGuard(mux, port),
+		Handler: localGuard(mux, port, localAPIToken),
 	}
 
 	fmt.Println("==================================================")

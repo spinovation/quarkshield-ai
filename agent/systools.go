@@ -1,10 +1,21 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"runtime"
 )
+
+// randToken returns a 32-hex-char (128-bit) random token for the local API gate.
+func randToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "qs-local-fallback-token"
+	}
+	return hex.EncodeToString(b)
+}
 
 // Resolve privileged system tools by ABSOLUTE path so the agent never runs a
 // binary planted in the current working directory or on a poisoned PATH. This

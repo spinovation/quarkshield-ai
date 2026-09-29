@@ -24,6 +24,10 @@ type EnrollmentConfig struct {
 	AutoSyncEnabled bool   `json:"autoSyncEnabled"`
 	SyncIntervalMin int    `json:"syncIntervalMinutes"`
 	LastSyncTime    string `json:"lastSyncTime,omitempty"`
+	// LocalAPIToken gates state-changing calls to the local dashboard API. It is
+	// set into a cookie when the dashboard page is served, so only a client that
+	// loaded the page (or can read this 0600 config) can drive those endpoints.
+	LocalAPIToken string `json:"localApiToken,omitempty"`
 }
 
 var (
