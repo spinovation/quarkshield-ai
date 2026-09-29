@@ -5,7 +5,7 @@ import { discoverKmsKeys, pingKms, DiscoveredAsset, KmsConfig } from '../lib/aws
 import { discoverVaultKeys, pingVault, VaultConfig } from '../lib/hashiVault';
 import { discoverAzureKeys, pingAzure, AzureConfig } from '../lib/azureKeyVault';
 import { seal, open as unseal } from '../utils/secretbox';
-import { canAccessTenant } from '../middleware/auth';
+import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 
 // Providers with a real backend implemented. Others return clearly-labeled
 // preview (simulated) data until their integrations land (DEF-51).
@@ -115,7 +115,9 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     }
 
     const id = 'conn-' + crypto.randomUUID().substring(0, 10);
-    const cleanTenant = tenantName.toUpperCase().trim();
+    // Pin the connector to the session's tenant (super roles may target the
+    // requested tenant); a body-supplied tenantName cannot write into another.
+    const cleanTenant = (resolveWriteTenant(req, tenantName) || 'SPINOVATIONCORP').toUpperCase().trim();
 
     // Credentials that real discovery needs (Vault token / AppRole secret_id,
     // Azure client secret) are encrypted at rest; other secret-ish fields are

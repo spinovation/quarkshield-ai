@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import tls from 'tls';
 import net from 'net';
 import { assertPublicHost } from '../utils/ssrf';
-import { canAccessTenant } from '../middleware/auth';
+import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 
 /**
  * Derive real KEM crypto metadata from the gateway's CONFIGURED tls curve.
@@ -149,7 +149,8 @@ export const createProxy = async (req: Request, res: Response) => {
     }
 
     const id = 'prx-' + crypto.randomUUID().substring(0, 8);
-    const cleanTenant = tenantName.toUpperCase().trim();
+    // Pin to the session's tenant; a body tenantName cannot target another tenant.
+    const cleanTenant = (resolveWriteTenant(req, tenantName) || 'SPINOVATIONCORP').toUpperCase().trim();
 
     await pool.query(`
       INSERT INTO pqc_proxies (

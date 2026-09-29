@@ -158,6 +158,20 @@ export const canAccessTenant = (req: Request, rowTenant?: string | null): boolea
 };
 
 /**
+ * The tenant a WRITE must be attributed to. A tenant session is always pinned to
+ * its own session tenant, so a body-supplied `tenantName` cannot poison another
+ * tenant's inventory. Super roles (the fleet console acting on behalf of tenants)
+ * may target the requested tenant. Never trust a client-supplied tenant for a
+ * non-super session.
+ */
+export const resolveWriteTenant = (req: Request, requested?: string | null): string => {
+  if (req.user && !isSuperRole(req.user.role)) {
+    return (req.user.tenant || '').toString();
+  }
+  return (requested || req.user?.tenant || '').toString();
+};
+
+/**
  * Require that the session may act on the tenant named in the request
  * (route param :tenant, or ?tenant / X-Tenant-Id). Super admins may act on any
  * tenant. A tenant session may act only on its own tenant.

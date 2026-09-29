@@ -7,6 +7,7 @@ import os from 'os';
 import { execFile } from 'child_process';
 import { assertPublicHost } from '../utils/ssrf';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
+import { resolveWriteTenant } from '../middleware/auth';
 
 export interface GitFinding {
   id: string;
@@ -557,7 +558,10 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
     tenantName
   } = req.body;
 
-  const cleanTenant = (tenantName || tenant || (req.headers['x-tenant'] as string) || 'SPINOVATIONCORP').trim().toUpperCase();
+  // Pin the scan (and its persisted assets) to the session's tenant; a body/header
+  // tenant cannot inject findings into another tenant's inventory (super roles may
+  // target the requested tenant).
+  const cleanTenant = (resolveWriteTenant(req, tenantName || tenant) || 'SPINOVATIONCORP').trim().toUpperCase();
 
   if (!repoUrl || typeof repoUrl !== 'string') {
     return res.status(400).json({ error: 'Valid Git repository URL is required (e.g. https://github.com/org/repo).' });
