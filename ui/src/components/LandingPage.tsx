@@ -2440,7 +2440,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </button>
             </div>
 
-            <form onSubmit={handleSignIn} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
+            <form onSubmit={handleSignIn} autoComplete="off" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1.1rem' }}>
               {signInError && (
                 <div style={{
                   padding: '0.75rem 1rem',
@@ -2480,7 +2480,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     setLoginIdentifier(e.target.value);
                     if (signInError) setSignInError(null);
                   }}
-                  autoComplete="username"
+                  autoComplete="off"
                   required
                 />
               </div>
@@ -2512,7 +2512,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     placeholder="••••••••••••"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                     style={{ paddingRight: '2.5rem' }}
                     required
                   />
