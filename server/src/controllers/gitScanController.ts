@@ -150,7 +150,7 @@ const CRYPTO_RULES: CryptoPatternRule[] = [
   {
     name: 'RSA Key Generation / Cipher in Code',
     category: 'source_code',
-    regex: /(?:generateKeyPair(?:Sync)?\s*\(\s*['"]rsa['"]|KeyPairGenerator\.getInstance\s*\(\s*["']RSA["']|RSA\.generate|createSign\s*\(\s*['"]RSA-SHA256['"]|Cipher\.getInstance\s*\(\s*["']RSA|rsa\.GenerateKey)/i,
+    regex: /(?:generateKeyPair(?:Sync)?\s*\(\s*['"]rsa['"]|KeyPairGenerator\.getInstance\s*\(\s*["']RSA["']|RSA\.generate|createSign\s*\(\s*['"]RSA-SHA256['"]|Cipher\.getInstance\s*\(\s*["']RSA|rsa\.GenerateKey|rsa\.generate_private_key)/i,
     algorithm: 'RSA',
     keySize: 2048,
     isVulnerable: true,
@@ -164,7 +164,7 @@ const CRYPTO_RULES: CryptoPatternRule[] = [
   {
     name: 'ECDSA / ECDH Elliptic Curve Invocations',
     category: 'source_code',
-    regex: /(?:createECDH\s*\(\s*['"](?:secp256k1|prime256v1)['"]|crypto\.subtle\.generateKey\s*\(\s*\{[^\}]*name:\s*['"]ECDSA['"]|KeyPairGenerator\.getInstance\s*\(\s*["']EC["']|ecdsa\.GenerateKey)/i,
+    regex: /(?:createECDH\s*\(\s*['"](?:secp256k1|prime256v1)['"]|crypto\.subtle\.generateKey\s*\(\s*\{[^\}]*name:\s*['"]ECDSA['"]|KeyPairGenerator\.getInstance\s*\(\s*["']EC["']|ecdsa\.GenerateKey|ec\.generate_private_key|secp384r1|secp521r1)/i,
     algorithm: 'ECDSA / ECDH',
     curve: 'P-256 / secp256k1',
     isVulnerable: true,
@@ -205,7 +205,7 @@ const CRYPTO_RULES: CryptoPatternRule[] = [
   {
     name: 'Broken Hash Function (MD5 / SHA-1)',
     category: 'source_code',
-    regex: /(?:createHash\s*\(\s*['"](?:md5|sha1)['"]|MessageDigest\.getInstance\s*\(\s*["'](?:MD5|SHA-1)["']|crypto\.createHash\(['"](?:md5|sha1)['"]\))/i,
+    regex: /(?:createHash\s*\(\s*['"](?:md5|sha1)['"]|MessageDigest\.getInstance\s*\(\s*["'](?:MD5|SHA-1)["']|crypto\.createHash\(['"](?:md5|sha1)['"]\)|hashlib\.(?:md5|sha1)\(|(?:md5|sha1)\.New\()/i,
     algorithm: 'MD5 / SHA-1',
     isVulnerable: true,
     riskLevel: 'medium',
