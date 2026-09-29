@@ -528,7 +528,10 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
     else pqc++;
 
     const pkiAssetId = 'ast-' + crypto.randomUUID().substring(0, 8);
-    const cbomAssetId = ('ast-pki-' + crypto.randomUUID()).substring(0, 64);
+    // Deterministic CBOM id (connector + asset + algorithm) so a re-sync updates
+    // the same row via ON CONFLICT instead of appending a new one — prevents the
+    // CBOM inflating with duplicates when the pre-sync cleanup DELETE fails.
+    const cbomAssetId = 'ast-pki-' + crypto.createHash('sha256').update(`${connectorId}|${a.name}|${a.algo}`).digest('hex').substring(0, 24);
 
     await pool.query(`
       INSERT INTO pki_synced_assets (
