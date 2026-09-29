@@ -57,7 +57,13 @@ func AuditMacOSKeychains() []AuditResult {
 		}
 
 		out, err := cmd.Output()
-		if err != nil || len(out) == 0 {
+		if err != nil {
+			// A keychain that errored (locked, TCC-denied, no GUI session) is
+			// unread, not empty — record it so the scan is not scored "secure".
+			RecordCollectorError("macos_keychain:"+kcPath, err)
+			continue
+		}
+		if len(out) == 0 {
 			continue
 		}
 

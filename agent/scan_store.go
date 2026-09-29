@@ -23,6 +23,11 @@ type ScanSummary struct {
 	VulnerableCount  int       `json:"vulnerableCount"`
 	QuantumRiskScore int       `json:"quantumRiskScore"`
 	RiskLevel        string    `json:"riskLevel"`
+	// Incomplete is true when a required collector failed to READ (not merely
+	// found nothing). A scan with Incomplete=true is never reported "secure",
+	// because a blind scan is not a clean scan.
+	Incomplete bool     `json:"incomplete"`
+	ScanErrors []string `json:"scanErrors,omitempty"`
 }
 
 type StoredScanRecord struct {
@@ -34,6 +39,32 @@ type StoredScanRecord struct {
 }
 
 var scanStoreMu sync.RWMutex
+
+var (
+	collectorErrMu  sync.Mutex
+	collectorErrors []string
+)
+
+// RecordCollectorError notes that a system-store collector failed to READ (as
+// opposed to legitimately finding nothing). Any such error means the next scan
+// result must not be reported as "secure": a blind scan is not a clean scan.
+func RecordCollectorError(source string, err error) {
+	if err == nil {
+		return
+	}
+	collectorErrMu.Lock()
+	defer collectorErrMu.Unlock()
+	collectorErrors = append(collectorErrors, fmt.Sprintf("%s: %v", source, err))
+}
+
+// TakeCollectorErrors returns and clears the accumulated collector errors.
+func TakeCollectorErrors() []string {
+	collectorErrMu.Lock()
+	defer collectorErrMu.Unlock()
+	e := collectorErrors
+	collectorErrors = nil
+	return e
+}
 
 // getScanStorageDir returns the OS-specific local directory for scan history
 func getScanStorageDir() string {
@@ -102,6 +133,15 @@ func SaveScanResult(scanType string, targetPath string, scannedFiles int, findin
 		riskLevel = "medium"
 	} else if vulnerableCount > 0 {
 		riskLevel = "low"
+	}
+
+	// If a collector failed to read (locked-down PowerShell, denied keychain,
+	// missing tool), we cannot claim the host is clean. Surface the scan as
+	// incomplete and never present "secure" — an unread store is unknown, not safe.
+	scanErrors := TakeCollectorErrors()
+	incomplete := len(scanErrors) > 0
+	if incomplete && riskLevel == "secure" {
+		riskLevel = "unknown"
 	}
 
 	hostname, _ := os.Hostname()

@@ -25,6 +25,9 @@ func AuditWindowsCertStore() []AuditResult {
 	hideConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
+		// Read failure (locked-down PowerShell, non-elevated, WOW64) — record it
+		// so the scan is not scored "secure" on an unread certificate store.
+		RecordCollectorError("windows_cert_store", err)
 		return results
 	}
 
@@ -144,6 +147,7 @@ func AuditWindowsSchannel() []AuditResult {
 	hideConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
+		RecordCollectorError("windows_schannel", err)
 		return results
 	}
 
