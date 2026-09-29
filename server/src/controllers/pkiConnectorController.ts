@@ -5,6 +5,7 @@ import { discoverKmsKeys, pingKms, DiscoveredAsset, KmsConfig } from '../lib/aws
 import { discoverVaultKeys, pingVault, VaultConfig } from '../lib/hashiVault';
 import { discoverAzureKeys, pingAzure, AzureConfig } from '../lib/azureKeyVault';
 import { seal, open as unseal } from '../utils/secretbox';
+import { canAccessTenant } from '../middleware/auth';
 
 // Providers with a real backend implemented. Others return clearly-labeled
 // preview (simulated) data until their integrations land (DEF-51).
@@ -150,6 +151,9 @@ export const testPkiConnector = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Connector not found.' });
     }
     const c = lookup.rows[0];
+    if (!canAccessTenant(req, c.tenant_name)) {
+      return res.status(404).json({ error: 'Connector not found.' });
+    }
 
     // Real reachability + auth check for implemented providers.
     if (REAL_PROVIDERS.has(c.provider)) {
@@ -203,6 +207,9 @@ export const syncPkiConnector = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Connector not found.' });
     }
     const c = lookup.rows[0];
+    if (!canAccessTenant(req, c.tenant_name)) {
+      return res.status(404).json({ error: 'Connector not found.' });
+    }
 
     // Execute synchronization
     const result = await executeDiscoverySync(id, c.tenant_name, c.provider, c.name);
@@ -229,6 +236,9 @@ export const deletePkiConnector = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Connector not found.' });
     }
     const c = lookup.rows[0];
+    if (!canAccessTenant(req, c.tenant_name)) {
+      return res.status(404).json({ error: 'Connector not found.' });
+    }
 
     await pool.query('DELETE FROM pki_synced_assets WHERE connector_id = $1', [id]);
     await pool.query("DELETE FROM assets WHERE source IN ('cloud_kms', 'enterprise_pki') AND (source_ref = $1 OR source_ref = $2)", [c.id, c.name]).catch(() => {});

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import tls from 'tls';
 import net from 'net';
 import { assertPublicHost } from '../utils/ssrf';
+import { canAccessTenant } from '../middleware/auth';
 
 /**
  * Derive real KEM crypto metadata from the gateway's CONFIGURED tls curve.
@@ -177,6 +178,11 @@ export const toggleProxyState = async (req: Request, res: Response) => {
     const { status } = req.body; // 'running' | 'stopped'
     const cleanStatus = status === 'stopped' ? 'stopped' : 'running';
 
+    const owner = await pool.query('SELECT tenant_name FROM pqc_proxies WHERE id = $1', [id]);
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant_name)) {
+      return res.status(404).json({ error: 'Proxy instance not found.' });
+    }
+
     const result = await pool.query(
       'UPDATE pqc_proxies SET status = $1, last_active_at = NOW() WHERE id = $2 RETURNING *',
       [cleanStatus, id]
@@ -200,6 +206,10 @@ export const toggleProxyState = async (req: Request, res: Response) => {
 export const deleteProxy = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const owner = await pool.query('SELECT tenant_name FROM pqc_proxies WHERE id = $1', [id]);
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant_name)) {
+      return res.status(404).json({ error: 'Proxy instance not found.' });
+    }
     const result = await pool.query('DELETE FROM pqc_proxies WHERE id = $1', [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Proxy instance not found.' });
@@ -239,6 +249,9 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Proxy instance not found.' });
     }
     const p = lookup.rows[0];
+    if (!canAccessTenant(req, p.tenant_name)) {
+      return res.status(404).json({ error: 'Proxy instance not found.' });
+    }
 
     let upstream: URL;
     try { upstream = new URL(p.upstream_url); }

@@ -142,7 +142,20 @@ export const requireRole = (...roles: string[]) => (req: Request, res: Response,
   res.status(403).json({ error: 'Insufficient permissions' });
 };
 
-const normTenant = (s: string): string => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+export const normTenant = (s: string): string => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Row-level tenant guard. Returns true if the current session may act on a
+ * resource owned by `rowTenant`. Super roles may act on any tenant; a tenant
+ * session may act only on its own. Call this AFTER fetching a resource by id
+ * (e.g. a connector/proxy/machine) to prevent cross-tenant IDOR — route
+ * middleware alone cannot, because these resources are keyed by id, not tenant.
+ */
+export const canAccessTenant = (req: Request, rowTenant?: string | null): boolean => {
+  if (!req.user) return false;
+  if (isSuperRole(req.user.role)) return true;
+  return !!req.user.tenant && normTenant(rowTenant || '') === normTenant(req.user.tenant);
+};
 
 /**
  * Require that the session may act on the tenant named in the request

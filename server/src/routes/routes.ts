@@ -159,10 +159,10 @@ router.post('/support/contact', submitSupportTicket);
 // ==========================================
 router.get('/fleet/tokens', requireAuth, requireTenantAccess, getFleetTokens);
 router.post('/fleet/tokens', requireAuth, requireTenantAccess, createFleetToken);
-router.delete('/fleet/tokens/:id', requireAuth, revokeFleetToken);
+router.delete('/fleet/tokens/:id', requireAuth, requireTenantAccess, revokeFleetToken);
 router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines);
-router.delete('/fleet/machines/:id', requireAuth, deleteFleetMachine);
-router.post('/fleet/machines/:machineId/pull', requireAuth, enqueuePullCommand);
+router.delete('/fleet/machines/:id', requireAuth, requireTenantAccess, deleteFleetMachine);
+router.post('/fleet/machines/:machineId/pull', requireAuth, requireTenantAccess, enqueuePullCommand);
 router.get('/tenant/:tenant/daily-snapshots', requireAuth, requireTenantAccess, getTenantDailySnapshots);
 router.get('/fleet/drift', requireAuth, requireTenantAccess, getFleetDrift);
 router.get('/fleet/cbom', requireAuth, requireTenantAccess, getFleetCBOM);
@@ -252,9 +252,9 @@ router.get('/git/ci-gate/runner.sh', (req, res) => getCITemplate({ ...req, param
 // ==========================================
 router.get('/pki/connectors', requireAuth, requireTenantAccess, getPkiConnectors);
 router.post('/pki/connectors', requireAuth, requireTenantAccess, createPkiConnector);
-router.post('/pki/connectors/:id/test', requireAuth, testPkiConnector);
-router.post('/pki/connectors/:id/sync', requireAuth, syncPkiConnector);
-router.delete('/pki/connectors/:id', requireAuth, deletePkiConnector);
+router.post('/pki/connectors/:id/test', requireAuth, requireTenantAccess, testPkiConnector);
+router.post('/pki/connectors/:id/sync', requireAuth, requireTenantAccess, syncPkiConnector);
+router.delete('/pki/connectors/:id', requireAuth, requireTenantAccess, deletePkiConnector);
 router.get('/pki/assets', requireAuth, requireTenantAccess, getPkiSyncedAssets);
 
 // ==========================================
@@ -262,9 +262,9 @@ router.get('/pki/assets', requireAuth, requireTenantAccess, getPkiSyncedAssets);
 // ==========================================
 router.get('/proxy/instances', requireAuth, requireTenantAccess, getProxies);
 router.post('/proxy/instances', requireAuth, requireTenantAccess, createProxy);
-router.patch('/proxy/instances/:id/state', requireAuth, toggleProxyState);
-router.delete('/proxy/instances/:id', requireAuth, deleteProxy);
-router.post('/proxy/instances/:id/test', requireAuth, testProxyHandshake);
+router.patch('/proxy/instances/:id/state', requireAuth, requireTenantAccess, toggleProxyState);
+router.delete('/proxy/instances/:id', requireAuth, requireTenantAccess, deleteProxy);
+router.post('/proxy/instances/:id/test', requireAuth, requireTenantAccess, testProxyHandshake);
 router.get('/proxy/templates/:format', getProxyTemplate);
 router.get('/proxy/template', (req, res) => {
   const format = (req.query.format as string) || 'nginx';

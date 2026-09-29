@@ -3,6 +3,7 @@ import pool from '../config/db';
 import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
+import { canAccessTenant } from '../middleware/auth';
 
 // ==========================================
 // 1. FLEET TOKENS
@@ -118,6 +119,10 @@ export const createFleetToken = async (req: Request, res: Response) => {
 export const revokeFleetToken = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const owner = await pool.query('SELECT tenant_name, name FROM fleet_tokens WHERE id = $1', [id]);
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant_name || owner.rows[0].name)) {
+      return res.status(404).json({ error: 'Fleet token not found.' });
+    }
     const result = await pool.query('DELETE FROM fleet_tokens WHERE id = $1 RETURNING id', [id]);
     if (result.rowCount === 0) {
       return res.status(404).json({ error: 'Fleet token not found.' });
@@ -177,6 +182,15 @@ export const getFleetMachines = async (req: Request, res: Response) => {
 export const deleteFleetMachine = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    const owner = await pool.query(
+      `SELECT COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name) AS tenant
+         FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE m.id = $1`,
+      [id]
+    );
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant)) {
+      return res.status(404).json({ error: 'Fleet machine not found.' });
+    }
     await pool.query('DELETE FROM assets WHERE machine_id = $1', [id]);
     const result = await pool.query('DELETE FROM fleet_machines WHERE id = $1 RETURNING id', [id]);
     if (result.rowCount === 0) {
@@ -1088,6 +1102,15 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
 export const enqueuePullCommand = async (req: Request, res: Response) => {
   try {
     const { machineId } = req.params;
+    const owner = await pool.query(
+      `SELECT COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name) AS tenant
+         FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE m.id = $1`,
+      [machineId]
+    );
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant)) {
+      return res.status(404).json({ error: 'Fleet machine not found.' });
+    }
     const commandId = 'cmd-' + crypto.randomBytes(8).toString('hex');
     await pool.query(`
       INSERT INTO fleet_commands (id, machine_id, command, status)
