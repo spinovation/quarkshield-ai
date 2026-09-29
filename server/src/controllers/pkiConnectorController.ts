@@ -29,6 +29,18 @@ const assertConnectorHostPublic = async (endpointUrl?: string): Promise<void> =>
 // preview (simulated) data until their integrations land (DEF-51).
 const REAL_PROVIDERS = new Set(['aws_kms', 'hashicorp_vault', 'azure_keyvault']);
 
+// Quantum-safe allow-list. Anything NOT matched here (RSA, ECC, DSA, DH,
+// Diffie-Hellman, X25519, Ed25519, ElGamal, or unknown asymmetric) is treated as
+// quantum-vulnerable by default — fail safe, rather than the old block-list that
+// let classical DH/X25519/ElGamal through as "safe".
+const PQC_SAFE_RE = /(ml-?kem|ml-?dsa|slh-?dsa|kyber|dilithium|sphincs|falcon)/i;
+const SYMMETRIC_SAFE_RE = /(aes|chacha|poly1305|hmac|sha-?(?:256|384|512|3))/i;
+const inferVulnerable = (algo: string): boolean => {
+  const a = String(algo || '');
+  if (!a) return true; // unknown -> assume vulnerable
+  return !(PQC_SAFE_RE.test(a) || SYMMETRIC_SAFE_RE.test(a));
+};
+
 const rawConfig = (row: any): any => {
   try { return typeof row.config_summary === 'string' ? JSON.parse(row.config_summary) : (row.config_summary || {}); }
   catch { return {}; }
@@ -381,7 +393,7 @@ export const reportAdcs = async (req: Request, res: Response) => {
       type: a.type || (a.isTemplate ? 'template' : 'ca_root'),
       algo: String(a.algo || a.algorithm || 'unknown'),
       size: Number(a.size || a.keySize || 0),
-      vuln: a.vuln !== undefined ? !!a.vuln : /^(rsa|ecdsa|ecc|ec|dsa|ed25519)/i.test(String(a.algo || '')),
+      vuln: a.vuln !== undefined ? !!a.vuln : inferVulnerable(String(a.algo || '')),
       risk: a.risk || 'high',
       threat: String(a.threat || 'AD CS-issued classical key; vulnerable to a CRQC.'),
       rot: !!a.rot,
