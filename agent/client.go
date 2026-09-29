@@ -134,6 +134,13 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 		serverURL = "https://quarkshield.ai"
 	}
 
+	// Enforce TLS for telemetry: never ship the fleet token + findings in
+	// cleartext. Allow plain http only for an explicit loopback/dev server.
+	if lo := strings.ToLower(serverURL); strings.HasPrefix(lo, "http://") &&
+		!strings.Contains(lo, "127.0.0.1") && !strings.Contains(lo, "localhost") && !strings.Contains(lo, "[::1]") {
+		return fmt.Errorf("refusing to send telemetry over plaintext http to %s; use https", serverURL)
+	}
+
 	payloadObj := FleetPayload{
 		Hostname:     hostname,
 		ComputerName: compName,
