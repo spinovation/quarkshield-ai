@@ -6,6 +6,24 @@ import { discoverVaultKeys, pingVault, VaultConfig } from '../lib/hashiVault';
 import { discoverAzureKeys, pingAzure, AzureConfig } from '../lib/azureKeyVault';
 import { seal, open as unseal } from '../utils/secretbox';
 import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
+import { assertPublicHost } from '../utils/ssrf';
+
+/**
+ * Reject a connector endpoint URL that targets a non-public host (SSRF): a
+ * tenant must not be able to point a Vault/Azure connector at 169.254.169.254,
+ * localhost, or an RFC1918 address and have the server probe it. Called at
+ * create time and before every outbound connector call.
+ */
+const assertConnectorHostPublic = async (endpointUrl?: string): Promise<void> => {
+  const u = (endpointUrl || '').trim();
+  if (!u) return; // keyless providers (e.g. AWS role auth) have no endpoint
+  let parsed: URL;
+  try { parsed = new URL(u); } catch { throw new Error('Endpoint URL is not a valid URL'); }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    throw new Error('Endpoint URL must use http(s)');
+  }
+  await assertPublicHost(parsed.hostname);
+};
 
 // Providers with a real backend implemented. Others return clearly-labeled
 // preview (simulated) data until their integrations land (DEF-51).
@@ -113,6 +131,11 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     if (!name || !provider) {
       return res.status(400).json({ error: 'Connector name and provider type are required.' });
     }
+    try {
+      await assertConnectorHostPublic(endpointUrl);
+    } catch (e: any) {
+      return res.status(400).json({ error: `Endpoint URL rejected: ${e.message}` });
+    }
 
     const id = 'conn-' + crypto.randomUUID().substring(0, 10);
     // Pin the connector to the session's tenant (super roles may target the
@@ -174,6 +197,11 @@ export const testPkiConnector = async (req: Request, res: Response) => {
     const c = lookup.rows[0];
     if (!canAccessTenant(req, c.tenant_name)) {
       return res.status(404).json({ error: 'Connector not found.' });
+    }
+    try {
+      await assertConnectorHostPublic(c.endpoint_url);
+    } catch (e: any) {
+      return res.status(400).json({ success: false, error: `Endpoint URL rejected: ${e.message}` });
     }
 
     // Real reachability + auth check for implemented providers.
@@ -410,6 +438,7 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
   if (REAL_PROVIDERS.has(provider)) {
     const row = (await pool.query('SELECT config_summary, endpoint_url FROM pki_connectors WHERE id = $1', [connectorId])).rows[0] || {};
     try {
+      await assertConnectorHostPublic(row.endpoint_url);
       let assets: DiscoveredAsset[] = [];
       if (provider === 'aws_kms') assets = await discoverKmsKeys(parseKmsConfig(row));
       else if (provider === 'hashicorp_vault') assets = await discoverVaultKeys(parseVaultConfig(row));
