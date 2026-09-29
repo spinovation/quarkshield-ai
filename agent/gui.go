@@ -871,9 +871,7 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 			if runtime.GOOS == "windows" {
 				exePath, err := os.Executable()
 				if err == nil {
-					cmdDel := exec.Command("cmd.exe", "/c", "timeout /t 2 >nul & del /f /q \""+exePath+"\"")
-					hideConsole(cmdDel)
-					_ = cmdDel.Start()
+					scheduleSelfDelete(exePath)
 				}
 			} else if runtime.GOOS == "darwin" {
 				exePath, err := os.Executable()
@@ -883,8 +881,7 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 						parts := strings.Split(exePath, ".app/Contents/MacOS")
 						targetToRemove = parts[0] + ".app"
 					}
-					cmdDel := exec.Command("sh", "-c", "sleep 1; rm -rf \""+targetToRemove+"\"")
-					_ = cmdDel.Start()
+					scheduleSelfDelete(targetToRemove)
 				}
 			}
 			os.Exit(0)

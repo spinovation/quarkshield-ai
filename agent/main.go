@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -530,11 +529,8 @@ func main() {
 		fmt.Println("    Background services & registry removed.")
 		fmt.Println("==================================================")
 		if runtime.GOOS == "windows" {
-			exePath, err := os.Executable()
-			if err == nil {
-				cmdDel := exec.Command("cmd.exe", "/c", "timeout /t 2 >nul & del /f /q \""+exePath+"\"")
-				hideConsole(cmdDel)
-				_ = cmdDel.Start()
+			if exePath, err := os.Executable(); err == nil {
+				scheduleSelfDelete(exePath)
 			}
 		}
 		os.Exit(0)
