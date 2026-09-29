@@ -868,8 +868,8 @@ export const getGitScanHistory = async (req: Request, res: Response) => {
     `;
     const params: any[] = [];
     if (tenant && tenant !== 'all') {
-      params.push(`%${tenant}%`);
-      query += ` WHERE LOWER(COALESCE(tenant_name, '')) LIKE LOWER($1) `;
+      params.push(tenant);
+      query += ` WHERE LOWER(COALESCE(tenant_name, '')) = LOWER($1) `;
     }
     query += ` ORDER BY created_at DESC LIMIT 20`;
 

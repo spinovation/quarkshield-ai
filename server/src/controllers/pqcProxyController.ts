@@ -19,6 +19,15 @@ const parseHybridCurve = (tlsCurve: string): {
   if (c.includes('MLKEM768')) return { algorithm: 'ML-KEM-768 + X25519 (Hybrid)', keySize: 768, isVulnerable: false, riskLevel: 'secure', recommendation: 'NIST FIPS 203 (ML-KEM) hybrid key exchange. Quantum-safe; no remediation needed.' };
   if (c.includes('MLKEM512')) return { algorithm: 'ML-KEM-512 + X25519 (Hybrid)', keySize: 512, isVulnerable: false, riskLevel: 'secure', recommendation: 'NIST FIPS 203 (ML-KEM) hybrid key exchange. Quantum-safe; no remediation needed.' };
   if (c.includes('MLKEM')) return { algorithm: 'ML-KEM + X25519 (Hybrid)', keySize: 768, isVulnerable: false, riskLevel: 'secure', recommendation: 'NIST FIPS 203 (ML-KEM) hybrid key exchange. Quantum-safe; no remediation needed.' };
+  // Pre-standard Kyber-named hybrids (X25519Kyber768, P256Kyber768) are ML-KEM and quantum-safe.
+  if (c.includes('KYBER')) {
+    const ksz = c.includes('1024') ? 1024 : c.includes('512') ? 512 : 768;
+    return { algorithm: `${tlsCurve} (Hybrid ML-KEM/Kyber)`, keySize: ksz, isVulnerable: false, riskLevel: 'secure', recommendation: 'Pre-standard Kyber (now ML-KEM) hybrid key exchange. Quantum-safe.' };
+  }
+  // Empty/unknown curve: do not assert classical — report unknown, not a false alarm.
+  if (!c) {
+    return { algorithm: 'unknown', keySize: 0, isVulnerable: true, riskLevel: 'unknown', recommendation: 'The gateway curve could not be determined; verify it is a hybrid X25519MLKEM768 group.' };
+  }
   // Classical-only key exchange — vulnerable to Harvest-Now-Decrypt-Later.
   const keySize = c.includes('SECP384') || c.includes('P384') ? 384 : c.includes('SECP521') || c.includes('P521') ? 521 : c.includes('SECP256') || c.includes('P256') ? 256 : 256;
   return { algorithm: `${tlsCurve || 'X25519'} (classical)`, keySize, isVulnerable: true, riskLevel: 'high', recommendation: 'Gateway is configured with a classical-only key-exchange curve. Switch to a hybrid X25519MLKEM768 curve (OpenSSL 3.2+) to be quantum-safe.' };
