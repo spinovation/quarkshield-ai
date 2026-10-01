@@ -1592,6 +1592,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
 
   // Fetch client list and users from Express API
+  // Superadmin license/plan update (BILL-2). Seats auto-map to the billing PLANS so a
+  // tier change also sets the enrollment seat limit AND the Integrations entitlement.
+  const SEATS_BY_TIER: Record<string, number> = { entry: 5, growth: 50, enterprise: 250 };
+  const updateClientPlan = async (name: string, tier: string) => {
+    const seats = SEATS_BY_TIER[tier] ?? 250;
+    const snapshot = clients;
+    // optimistic — the badge/select reflects the change immediately
+    setClients(cs => cs.map(c => (c.name === name ? { ...c, subscriptionTier: tier, mcaLimit: seats } : c)));
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch(`/api/admin/clients/${encodeURIComponent(name)}/subscription`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ subscription_tier: tier, mca_limit: seats })
+      });
+      if (!res.ok) throw new Error(res.status === 403 ? 'Access Denied: Admin privileges required.' : `Plan update failed (${res.status})`);
+    } catch (e: any) {
+      setClients(snapshot); // revert on failure
+      setErrorMessage(e.message || 'Failed to update plan');
+    }
+  };
+
   const fetchClients = async () => {
     setIsRefreshing(true);
     setErrorMessage(null);
@@ -3398,9 +3420,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                               return (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: '150px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                                    <span style={{ fontWeight: 600, fontSize: '0.78rem', color: '#e2e8f0' }}>
-                                      {(client.subscriptionTier || 'Standard').toUpperCase()}
-                                    </span>
+                                    <select
+                                      value={['entry', 'growth', 'enterprise'].includes((client.subscriptionTier || '').toLowerCase()) ? (client.subscriptionTier as string).toLowerCase() : 'growth'}
+                                      onChange={(e) => updateClientPlan(client.name, e.target.value)}
+                                      title="Change this tenant's plan — sets the seat limit and unlocks Integrations & Gateways (Growth/Enterprise)."
+                                      style={{
+                                        fontWeight: 600, fontSize: '0.72rem', color: '#e2e8f0',
+                                        background: 'rgba(15,23,42,0.85)', border: '1px solid rgba(148,163,184,0.3)',
+                                        borderRadius: '4px', padding: '0.15rem 0.3rem', cursor: 'pointer'
+                                      }}
+                                    >
+                                      <option value="entry">ENTRY</option>
+                                      <option value="growth">GROWTH</option>
+                                      <option value="enterprise">ENTERPRISE</option>
+                                    </select>
                                     <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
                                       ({client.mcaLimit || 250} Nodes)
                                     </span>
