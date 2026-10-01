@@ -96,7 +96,14 @@ export const ComplianceProjects: React.FC<{ tenantName?: string }> = ({ tenantNa
   const patchControl = (pid: string, key: string, patch: Partial<Control>) =>
     setControls(c => ({ ...c, [pid]: (c[pid] || []).map(ct => ct.controlKey === key ? { ...ct, ...patch } : ct) }));
 
+  const needsAction = (status: string) => status === 'in_progress' || status === 'non_compliant';
+
   const saveControl = async (pid: string, ct: Control) => {
+    // Conditional requirement: a control that isn't Compliant/N-A needs owner, target date, and a comment.
+    if (needsAction(ct.status) && (!(ct.owner || '').trim() || !(ct.targetDate || '') || !(ct.comments || '').trim())) {
+      setError(`${ct.controlId} (${STATUS_META[ct.status].label}): Owner (SME), estimated completion date, and a comment are required.`);
+      return;
+    }
     setSavingKey(`${pid}-${ct.controlKey}`); setError(null);
     try {
       const r = await fetch(`/api/projects/${pid}/controls/${ct.controlKey}`, {
@@ -222,20 +229,28 @@ export const ComplianceProjects: React.FC<{ tenantName?: string }> = ({ tenantNa
                       <tbody>
                         {list.map(ct => {
                           const m = STATUS_META[ct.status] || STATUS_META.in_progress;
+                          const needs = needsAction(ct.status);
+                          // Required-field styling: red when empty & required; dimmed when not applicable.
+                          const req = (empty: boolean): React.CSSProperties => needs
+                            ? (empty ? { border: '1px solid #f87171', background: 'rgba(239,68,68,0.07)' } : {})
+                            : { opacity: 0.4 };
                           return (
                             <tr key={ct.controlKey} style={{ borderBottom: '1px solid rgba(148,163,184,0.1)' }}>
-                              <td style={{ ...cell, fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)', whiteSpace: 'nowrap' }} title={ct.fips}>{ct.controlId}</td>
-                              <td style={{ ...cell, maxWidth: '180px' }}>{ct.title}</td>
+                              <td style={{ ...cell, fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)', whiteSpace: 'nowrap', fontWeight: 600 }}>{ct.controlId}</td>
+                              <td style={{ ...cell, maxWidth: '260px' }}>
+                                <div style={{ fontWeight: 500, color: '#e2e8f0' }}>{ct.title}</div>
+                                {ct.fips && <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', marginTop: '0.2rem', lineHeight: 1.35 }}>{ct.fips}</div>}
+                              </td>
                               <td style={cell}>
                                 <select value={ct.status} onChange={e => patchControl(p.id, ct.controlKey, { status: e.target.value })}
                                   style={{ ...input, padding: '0.25rem 0.4rem', fontWeight: 600, color: m.color, background: m.bg, border: `1px solid ${m.color}55` }}>
                                   {Object.entries(STATUS_META).map(([v, meta]) => <option key={v} value={v} style={{ color: '#e2e8f0', background: '#0f172a' }}>{meta.label}</option>)}
                                 </select>
                               </td>
-                              <td style={cell}><input type="number" min={0} max={100} value={ct.percentComplete ?? 0} onChange={e => patchControl(p.id, ct.controlKey, { percentComplete: Number(e.target.value) })} style={{ ...input, width: '56px', padding: '0.25rem 0.35rem' }} /></td>
-                              <td style={cell}><input value={ct.owner ?? ''} placeholder="SME" onChange={e => patchControl(p.id, ct.controlKey, { owner: e.target.value })} style={{ ...input, minWidth: '120px', padding: '0.25rem 0.4rem' }} /></td>
-                              <td style={cell}><input type="date" value={(ct.targetDate || '').slice(0, 10)} onChange={e => patchControl(p.id, ct.controlKey, { targetDate: e.target.value })} style={{ ...input, padding: '0.25rem 0.35rem' }} /></td>
-                              <td style={cell}><input value={ct.comments ?? ''} placeholder="Notes…" onChange={e => patchControl(p.id, ct.controlKey, { comments: e.target.value })} style={{ ...input, minWidth: '140px', padding: '0.25rem 0.4rem' }} /></td>
+                              <td style={cell}><input type="number" min={0} max={100} value={ct.percentComplete ?? 0} disabled={!needs} onChange={e => patchControl(p.id, ct.controlKey, { percentComplete: Number(e.target.value) })} style={{ ...input, width: '56px', padding: '0.25rem 0.35rem', ...(needs ? {} : { opacity: 0.4 }) }} /></td>
+                              <td style={cell}><input value={ct.owner ?? ''} placeholder={needs ? 'SME *' : '—'} disabled={!needs} onChange={e => patchControl(p.id, ct.controlKey, { owner: e.target.value })} style={{ ...input, minWidth: '120px', padding: '0.25rem 0.4rem', ...req(!(ct.owner || '').trim()) }} /></td>
+                              <td style={cell}><input type="date" value={(ct.targetDate || '').slice(0, 10)} disabled={!needs} onChange={e => patchControl(p.id, ct.controlKey, { targetDate: e.target.value })} style={{ ...input, padding: '0.25rem 0.35rem', ...req(!(ct.targetDate || '')) }} /></td>
+                              <td style={cell}><input value={ct.comments ?? ''} placeholder={needs ? 'Required *' : '—'} disabled={!needs} onChange={e => patchControl(p.id, ct.controlKey, { comments: e.target.value })} style={{ ...input, minWidth: '140px', padding: '0.25rem 0.4rem', ...req(!(ct.comments || '').trim()) }} /></td>
                               <td style={cell}>
                                 <button style={{ ...btn(true), padding: '0.3rem 0.55rem' }} onClick={() => saveControl(p.id, ct)} disabled={savingKey === `${p.id}-${ct.controlKey}`}>
                                   {savingKey === `${p.id}-${ct.controlKey}` ? <Loader2 size={13} className="spin" /> : <Save size={13} />}
