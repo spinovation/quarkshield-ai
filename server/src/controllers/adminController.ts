@@ -793,6 +793,33 @@ export const deleteUser = async (req: Request, res: Response) => {
 // 3. SEO, GEO & BOT CRAWLER ANALYTICS
 // ==============================================================================
 
+/**
+ * Agent download analytics (BILL-5): real data from agent_downloads — totals, breakdown
+ * by OS and by country, and a recent-downloads feed with IP + city/country.
+ */
+export const getDownloadAnalytics = async (req: Request, res: Response) => {
+  try {
+    const [totalRow, byOS, byCountry, recent] = await Promise.all([
+      pool.query(`SELECT COUNT(*)::int AS total FROM agent_downloads`),
+      pool.query(`SELECT COALESCE(NULLIF(os,''),'Other') AS os, COUNT(*)::int AS count
+                  FROM agent_downloads GROUP BY 1 ORDER BY count DESC`),
+      pool.query(`SELECT COALESCE(NULLIF(country,''),'??') AS country, COUNT(*)::int AS count
+                  FROM agent_downloads GROUP BY 1 ORDER BY count DESC LIMIT 25`),
+      pool.query(`SELECT id, ip, country, region, city, os, file, created_at AS "createdAt"
+                  FROM agent_downloads ORDER BY created_at DESC LIMIT 100`),
+    ]);
+    res.json({
+      total: totalRow.rows[0]?.total || 0,
+      byOS: byOS.rows,
+      byCountry: byCountry.rows,
+      recent: recent.rows,
+    });
+  } catch (err: any) {
+    console.error('Error generating download analytics:', err);
+    res.status(500).json({ error: 'Failed to retrieve download analytics.' });
+  }
+};
+
 export const getSeoGeoAnalytics = async (req: Request, res: Response) => {
   try {
     const analytics = {

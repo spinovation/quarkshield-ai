@@ -35,6 +35,7 @@ import {
   resetUserPassword,
   deleteUser,
   getSeoGeoAnalytics,
+  getDownloadAnalytics,
   getSystemHealth,
   generateLicense,
   getLicenses,
@@ -198,6 +199,7 @@ router.post('/admin/users/:id/reset-password', requireSuperAdmin, resetUserPassw
 router.delete('/admin/users/:id', requireSuperAdmin, deleteUser);
 
 router.get('/admin/seo-geo-analytics', requireSuperAdmin, getSeoGeoAnalytics);
+router.get('/admin/download-analytics', requireSuperAdmin, getDownloadAnalytics);
 router.get('/admin/system-health', requireSuperAdmin, getSystemHealth);
 
 router.post('/admin/licenses/generate', requireSuperAdmin, generateLicense);

@@ -10,6 +10,7 @@ import { initDb } from './config/db';
 import { bootstrapAdmin } from './config/bootstrap';
 import routes from './routes/routes';
 import { attachUser } from './middleware/auth';
+import { logDownload } from './lib/downloadTracker';
 
 dotenv.config();
 
@@ -72,6 +73,13 @@ const possibleDownloadPaths = [
 ].filter(Boolean) as string[];
 
 let downloadsDir = possibleDownloadPaths.find(p => fs.existsSync(p)) || path.join(__dirname, '../../agent/binaries');
+// Track agent-binary downloads (OS + geo) before serving the file. Only logs actual
+// file requests (path has an extension), so directory hits aren't counted. Fire-and-forget.
+app.use('/downloads', (req, _res, next) => {
+  const f = req.path.replace(/^\/+/, '');
+  if (f && /\.[a-z0-9]+$/i.test(f)) logDownload(req, f);
+  next();
+});
 app.use('/downloads', express.static(downloadsDir, {
   setHeaders: (res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');

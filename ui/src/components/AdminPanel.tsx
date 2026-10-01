@@ -6,6 +6,7 @@ import {
   ShieldAlert,
   Layers,
   Globe,
+  Download,
   RefreshCw,
   Lock,
   Unlock,
@@ -536,6 +537,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
     };
   } | null>(null);
   const [loadingAnalytics, setLoadingAnalytics] = useState(false);
+  const [downloadData, setDownloadData] = useState<{
+    total: number;
+    byOS: { os: string; count: number }[];
+    byCountry: { country: string; count: number }[];
+    recent: { id: string; ip: string; country: string | null; region: string | null; city: string | null; os: string; file: string; createdAt: string }[];
+  } | null>(null);
 
   // License Management State
   const [licenses, setLicenses] = useState<LicenseInfo[]>([]);
@@ -1538,6 +1545,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       } else {
         throw new Error('Server returned non-200 response');
       }
+      // Real agent-download analytics (OS + geo)
+      try {
+        const dlRes = await fetch('/api/admin/download-analytics', { headers: { 'Authorization': `Bearer ${token}` } });
+        if (dlRes.ok) setDownloadData(await dlRes.json());
+      } catch { /* non-fatal */ }
     } catch (err) {
       console.warn('Backend analytics endpoint failed, loading client-side fallback:', err);
       setAnalyticsData({
@@ -3800,6 +3812,79 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       {/* SEO & GEO Analytics Dashboard */}
       {activeSubTab === 'analytics' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1.5rem' }}>
+          {/* Agent Downloads by OS & Geography (BILL-5) */}
+          <div className="glass-panel" style={{ padding: '1.25rem', borderRadius: '14px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
+              <h3 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0 }}>
+                <Download size={18} color="var(--accent-cyan)" /> Agent Downloads by OS &amp; Geography
+              </h3>
+              <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Total downloads: <strong style={{ color: 'var(--accent-cyan)' }}>{downloadData?.total ?? 0}</strong>
+              </span>
+            </div>
+
+            {/* OS breakdown cards */}
+            <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', marginBottom: '1.25rem' }}>
+              {(['Windows', 'macOS', 'Linux', 'Other'] as const).map(osName => {
+                const row = downloadData?.byOS.find(o => o.os === osName);
+                const color = osName === 'Windows' ? '#38bdf8' : osName === 'macOS' ? '#c084fc' : osName === 'Linux' ? '#34d399' : '#9a92ad';
+                return (
+                  <div key={osName} className="glass-panel metric-card" style={{ borderLeft: `3px solid ${color}` }}>
+                    <div className="metric-info">
+                      <h3>{osName}</h3>
+                      <div className="metric-value" style={{ color }}>{row?.count ?? 0}</div>
+                      <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>downloads</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Recent downloads table */}
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--text-muted)', borderBottom: '1px solid var(--border-normal)' }}>
+                    <th style={{ padding: '0.5rem 0.6rem' }}>When</th>
+                    <th style={{ padding: '0.5rem 0.6rem' }}>OS</th>
+                    <th style={{ padding: '0.5rem 0.6rem' }}>File</th>
+                    <th style={{ padding: '0.5rem 0.6rem' }}>IP</th>
+                    <th style={{ padding: '0.5rem 0.6rem' }}>City</th>
+                    <th style={{ padding: '0.5rem 0.6rem' }}>Country</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {downloadData?.recent?.map(d => (
+                    <tr key={d.id} style={{ borderBottom: '1px solid rgba(148,163,184,0.1)' }}>
+                      <td style={{ padding: '0.45rem 0.6rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{new Date(d.createdAt).toLocaleString()}</td>
+                      <td style={{ padding: '0.45rem 0.6rem', fontWeight: 600 }}>{d.os}</td>
+                      <td style={{ padding: '0.45rem 0.6rem', fontFamily: 'var(--font-mono)', color: 'var(--accent-cyan)' }}>{d.file}</td>
+                      <td style={{ padding: '0.45rem 0.6rem', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{d.ip || '—'}</td>
+                      <td style={{ padding: '0.45rem 0.6rem' }}>{d.city || '—'}{d.region ? `, ${d.region}` : ''}</td>
+                      <td style={{ padding: '0.45rem 0.6rem' }}>{d.country || '—'}</td>
+                    </tr>
+                  ))}
+                  {(!downloadData?.recent || downloadData.recent.length === 0) && (
+                    <tr><td colSpan={6} style={{ padding: '1.25rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                      No agent downloads recorded yet. Downloads are tracked from /downloads once this deploys.
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* By country */}
+            {downloadData?.byCountry && downloadData.byCountry.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}>
+                {downloadData.byCountry.map(c => (
+                  <span key={c.country} style={{ fontSize: '0.78rem', padding: '0.25rem 0.6rem', borderRadius: '100px', background: 'rgba(56,189,248,0.1)', border: '1px solid rgba(56,189,248,0.25)', color: 'var(--text-secondary)' }}>
+                    {c.country}: <strong style={{ color: 'var(--accent-cyan)' }}>{c.count}</strong>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Analytics Summary Cards */}
           <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
             <div className="glass-panel metric-card">

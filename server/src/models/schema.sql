@@ -74,6 +74,22 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 CREATE INDEX IF NOT EXISTS idx_projects_tenant ON projects (LOWER(tenant_name));
 
+-- Agent download analytics: one row per agent-binary download, with OS (from the
+-- filename), client IP + country (Cloudflare headers), and city/region (best-effort
+-- geo lookup). Powers the SEO & GEO Analytics "Agent Downloads" view.
+CREATE TABLE IF NOT EXISTS agent_downloads (
+  id VARCHAR(100) PRIMARY KEY,
+  ip VARCHAR(64),
+  country VARCHAR(4),
+  region VARCHAR(120),
+  city VARCHAR(120),
+  os VARCHAR(20),
+  file VARCHAR(300),
+  user_agent VARCHAR(400),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_agent_downloads_created ON agent_downloads (created_at DESC);
+
 -- Fleet Daily Snapshots for Historical Posture Tracking (Without Polluting Seats)
 CREATE TABLE IF NOT EXISTS fleet_daily_snapshots (
   id VARCHAR(100) PRIMARY KEY,
