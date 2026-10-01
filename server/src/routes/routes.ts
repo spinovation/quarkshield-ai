@@ -73,6 +73,10 @@ import {
   getGitScanHistory,
   exportGitCBOM
 } from '../controllers/gitScanController';
+import {
+  listProjects, createProject, getProject, updateProject, deleteProject,
+  exportProjectSSP, exportProjectPOAM,
+} from '../controllers/projectController';
 import { getAIChatResponse } from '../controllers/aiController';
 import {
   evaluateCIGate,
@@ -275,6 +279,15 @@ router.get('/central/entitlement', async (req, res) => {
   const tenant = (req.query.tenant as string) || '';
   res.json(await localTenantEntitlement(tenant));
 });
+
+// Projects (BILL-4 / OSCAL) — authorization boundaries; each yields its own SSP/POA&M.
+router.get('/projects', requireAuth, requireTenantAccess, listProjects);
+router.post('/projects', requireAuth, requireTenantAccess, createProject);
+router.get('/projects/:id', requireAuth, requireTenantAccess, getProject);
+router.patch('/projects/:id', requireAuth, requireTenantAccess, updateProject);
+router.delete('/projects/:id', requireAuth, requireTenantAccess, deleteProject);
+router.get('/projects/:id/oscal/ssp', requireAuth, requireTenantAccess, exportProjectSSP);
+router.get('/projects/:id/oscal/poam', requireAuth, requireTenantAccess, exportProjectPOAM);
 
 router.get('/pki/connectors', requireAuth, requireTenantAccess, getPkiConnectors);
 router.post('/pki/connectors', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, createPkiConnector);

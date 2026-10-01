@@ -56,6 +56,24 @@ ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS last_sync TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
+-- Projects (BILL-4 / OSCAL): a Project is an authorization boundary (a Program of
+-- Record, a location/region, or a business unit). Every tenant can create them;
+-- each Project produces its own OSCAL SSP + POA&M from a scoped set of assets.
+-- scope_machine_ids / scope_sources = NULL or empty means "all of the tenant's assets".
+CREATE TABLE IF NOT EXISTS projects (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_name VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  description TEXT,
+  system_id VARCHAR(100),
+  impact_level VARCHAR(20) DEFAULT 'moderate',
+  scope_machine_ids TEXT[],
+  scope_sources TEXT[],
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_projects_tenant ON projects (LOWER(tenant_name));
+
 -- Fleet Daily Snapshots for Historical Posture Tracking (Without Polluting Seats)
 CREATE TABLE IF NOT EXISTS fleet_daily_snapshots (
   id VARCHAR(100) PRIMARY KEY,
