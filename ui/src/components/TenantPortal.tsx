@@ -67,6 +67,7 @@ import { EnterprisePkiVaults } from './EnterprisePkiVaults';
 import { PqcProxyGateway } from './PqcProxyGateway';
 import { GitRepoAuditor } from './GitRepoAuditor';
 import SbomInventory from './SbomInventory';
+import ComplianceProjects from './ComplianceProjects';
 import { CryptographicPostureCard, calculatePostureMetrics } from './CryptographicPostureCard';
 
 export interface InternalUserLog {
@@ -519,7 +520,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     vulnerableAssets: 98,
     avgRiskScore: 87
   });
-  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'compliance' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
     try {
       const p = new URLSearchParams(window.location.search);
       const t = p.get('tab');
@@ -2779,6 +2780,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           {[
             { id: 'overview', label: 'Fleet Overview', icon: Laptop },
             { id: 'cbom', label: 'Cryptographic BOM (CBOM)', icon: FileCode },
+            { id: 'compliance', label: 'Compliance (OSCAL)', icon: ShieldCheck },
             { id: 'integrations_gw', label: 'Integrations & Gateways', icon: Network },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
             { id: 'settings', label: 'Settings', icon: Settings }
@@ -4730,6 +4732,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   <PqcProxyGateway onAssetsChanged={fetchTenantData} />
                 )}
               </div>
+            )}
+
+            {/* Compliance (OSCAL) — authorization boundaries / Projects (BILL-4) */}
+            {activeTab === 'compliance' && (
+              <ComplianceProjects tenantName={client.displayName} />
             )}
 
             {/* 4. PQC COPILOT ASSISTANT TAB */}
