@@ -704,7 +704,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
           tier: lic.tier,
           contactEmail: lic.contactEmail || '',
           contactName: lic.contactName || '',
-          totalSeats: lic.seats || 0,
+          // totalSeats reflects usable capacity only — revoked/expired sub-licenses do not count.
+          totalSeats: isActive ? (lic.seats || 0) : 0,
           activeSeats: isActive ? (lic.seats || 0) : 0,
           subLicenses: [lic],
           activeCount: isActive ? 1 : 0,
@@ -718,8 +719,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
         });
       } else {
         existing.subLicenses.push(lic);
-        existing.totalSeats += (lic.seats || 0);
         if (isActive) {
+          existing.totalSeats += (lic.seats || 0);
           existing.activeSeats += (lic.seats || 0);
           existing.activeCount += 1;
         }
@@ -1592,26 +1593,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
 
   // Fetch client list and users from Express API
-  // Superadmin license/plan update (BILL-2). Seats auto-map to the billing PLANS so a
-  // tier change also sets the enrollment seat limit AND the Integrations entitlement.
-  const SEATS_BY_TIER: Record<string, number> = { entry: 5, growth: 50, enterprise: 250 };
-  const updateClientPlan = async (name: string, tier: string) => {
-    const seats = SEATS_BY_TIER[tier] ?? 250;
-    const snapshot = clients;
-    // optimistic — the badge/select reflects the change immediately
-    setClients(cs => cs.map(c => (c.name === name ? { ...c, subscriptionTier: tier, mcaLimit: seats } : c)));
+  // Superadmin plan change (BILL-2b): sets tier + seats on BOTH the client record and the
+  // tenant's ACTIVE license in one call, so entitlement and the displayed scale stay in
+  // sync. Optimistic; reverts on error.
+  const PLAN_SEAT_OPTIONS = [25, 50, 100, 250, 500, 1000, 5000];
+  const updatePlan = async (clientName: string, tier: string, seats: number) => {
+    const norm = (s: string) => (s || '').trim().toLowerCase().replace(/[\s\-_]/g, '');
+    const target = norm(clientName);
+    const licSnap = licenses;
+    const cliSnap = clients;
+    setLicenses(ls => ls.map(l =>
+      (l.status === 'active' && norm(l.tenantName) === target) ? { ...l, tier: tier as any, seats } : l
+    ));
+    setClients(cs => cs.map(c => (c.name === clientName ? { ...c, subscriptionTier: tier, mcaLimit: seats } : c)));
     try {
       const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
-      const res = await fetch(`/api/admin/clients/${encodeURIComponent(name)}/subscription`, {
+      const res = await fetch(`/api/admin/clients/${encodeURIComponent(clientName)}/plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ subscription_tier: tier, mca_limit: seats })
+        body: JSON.stringify({ tier, seats })
       });
       if (!res.ok) throw new Error(res.status === 403 ? 'Access Denied: Admin privileges required.' : `Plan update failed (${res.status})`);
     } catch (e: any) {
-      setClients(snapshot); // revert on failure
+      setLicenses(licSnap); setClients(cliSnap); // revert
       setErrorMessage(e.message || 'Failed to update plan');
     }
+  };
+  const selStyle: React.CSSProperties = {
+    fontWeight: 600, fontSize: '0.72rem', color: '#e2e8f0',
+    background: 'rgba(15,23,42,0.85)', border: '1px solid rgba(148,163,184,0.3)',
+    borderRadius: '4px', padding: '0.1rem 0.25rem', cursor: 'pointer',
   };
 
   const fetchClients = async () => {
@@ -3329,12 +3340,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                         </td>
                         <td>
                           {(() => {
-                            const activeLicense = licenses.find(l => 
+                            const matchesClient = (l: LicenseInfo) =>
                               (client?.customerId && l.customerId && l.customerId.trim().toLowerCase() === client.customerId.trim().toLowerCase()) ||
                               (l.tenantName && client?.name && l.tenantName.trim().toLowerCase() === client.name.trim().toLowerCase()) ||
                               (l.tenantName && client?.displayName && l.tenantName.trim().toLowerCase() === client.displayName.trim().toLowerCase()) ||
-                              (l.contactEmail && l.contactEmail.trim().toLowerCase() === u.email.trim().toLowerCase())
-                            );
+                              (l.contactEmail && l.contactEmail.trim().toLowerCase() === u.email.trim().toLowerCase());
+                            // Prefer an ACTIVE license; only fall back to a revoked/expired one if that's all there is.
+                            const matching = licenses.filter(matchesClient);
+                            const activeLicense = matching.find(l => l.status === 'active') || matching[0];
 
                             if (activeLicense) {
                               const isLicActive = activeLicense.status === 'active';
@@ -3347,13 +3360,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                               return (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '175px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
-                                    <span style={{ 
-                                      fontWeight: 600, 
-                                      fontSize: '0.78rem',
-                                      color: activeLicense.tier === 'partner' ? '#c084fc' : '#38bdf8' 
-                                    }}>
-                                      {tierDisplay}
-                                    </span>
+                                    <select
+                                      value={activeLicense.tier === 'partner' ? 'partner' : 'corporate'}
+                                      onChange={(e) => updatePlan((client?.name || activeLicense.tenantName), e.target.value, activeLicense.seats)}
+                                      title={`Change plan tier (${tierDisplay}) — updates the active license + entitlement`}
+                                      style={{ ...selStyle, fontSize: '0.78rem', color: activeLicense.tier === 'partner' ? '#c084fc' : '#38bdf8' }}
+                                    >
+                                      <option value="partner">MSP PARTNER PRO</option>
+                                      <option value="corporate">CORPORATE ENTERPRISE</option>
+                                    </select>
                                     <span style={{
                                       fontSize: '0.65rem',
                                       padding: '0.1rem 0.35rem',
@@ -3369,7 +3384,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                                     <Layers size={12} style={{ color: 'var(--text-muted)' }} />
-                                    <span>{activeLicense.seats} Nodes / Seats</span>
+                                    <select
+                                      value={String(activeLicense.seats)}
+                                      onChange={(e) => updatePlan((client?.name || activeLicense.tenantName), (activeLicense.tier === 'partner' ? 'partner' : 'corporate'), Number(e.target.value))}
+                                      title="Change seat capacity"
+                                      style={selStyle}
+                                    >
+                                      {(PLAN_SEAT_OPTIONS.includes(activeLicense.seats) ? PLAN_SEAT_OPTIONS : [activeLicense.seats, ...PLAN_SEAT_OPTIONS]).map(s => (
+                                        <option key={s} value={s}>{s}</option>
+                                      ))}
+                                    </select>
+                                    <span>Nodes / Seats</span>
                                   </div>
 
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
@@ -3419,24 +3444,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                             if (client) {
                               return (
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: '150px' }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
                                     <select
-                                      value={['entry', 'growth', 'enterprise'].includes((client.subscriptionTier || '').toLowerCase()) ? (client.subscriptionTier as string).toLowerCase() : 'growth'}
-                                      onChange={(e) => updateClientPlan(client.name, e.target.value)}
-                                      title="Change this tenant's plan — sets the seat limit and unlocks Integrations & Gateways (Growth/Enterprise)."
-                                      style={{
-                                        fontWeight: 600, fontSize: '0.72rem', color: '#e2e8f0',
-                                        background: 'rgba(15,23,42,0.85)', border: '1px solid rgba(148,163,184,0.3)',
-                                        borderRadius: '4px', padding: '0.15rem 0.3rem', cursor: 'pointer'
-                                      }}
+                                      value={client.subscriptionTier === 'partner' ? 'partner' : 'corporate'}
+                                      onChange={(e) => updatePlan(client.name, e.target.value, client.mcaLimit || 100)}
+                                      title="Set plan tier (no license issued yet — use Issue Key to create one)"
+                                      style={selStyle}
                                     >
-                                      <option value="entry">ENTRY</option>
-                                      <option value="growth">GROWTH</option>
-                                      <option value="enterprise">ENTERPRISE</option>
+                                      <option value="partner">MSP PARTNER PRO</option>
+                                      <option value="corporate">CORPORATE ENTERPRISE</option>
                                     </select>
-                                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
-                                      ({client.mcaLimit || 250} Nodes)
-                                    </span>
+                                    <select
+                                      value={String(client.mcaLimit || 100)}
+                                      onChange={(e) => updatePlan(client.name, (client.subscriptionTier === 'partner' ? 'partner' : 'corporate'), Number(e.target.value))}
+                                      title="Seat capacity"
+                                      style={selStyle}
+                                    >
+                                      {(PLAN_SEAT_OPTIONS.includes(client.mcaLimit || 100) ? PLAN_SEAT_OPTIONS : [client.mcaLimit || 100, ...PLAN_SEAT_OPTIONS]).map(s => (
+                                        <option key={s} value={s}>{s}</option>
+                                      ))}
+                                    </select>
+                                    <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Nodes</span>
                                   </div>
                                   <button
                                     onClick={() => handleProceedToIssueLicense(client)}

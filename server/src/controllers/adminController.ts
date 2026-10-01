@@ -211,6 +211,43 @@ export const updateSubscription = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Superadmin plan change (BILL-2b). Sets a tenant's plan in ONE place: updates the
+ * client record (subscription_tier + mca_limit, which drives entitlement + seat cap)
+ * AND the tenant's ACTIVE license (tier + seats, which drives the displayed tier/scale),
+ * transactionally so the two never diverge. Tier vocabulary: partner | corporate.
+ */
+export const updateClientPlan = async (req: Request, res: Response) => {
+  const { name } = req.params;
+  const tier = ['partner', 'corporate'].includes((req.body.tier || '').toLowerCase())
+    ? (req.body.tier as string).toLowerCase()
+    : 'corporate';
+  const seats = Number(req.body.seats) > 0 ? Math.floor(Number(req.body.seats)) : 100;
+  const db = await pool.connect();
+  try {
+    await db.query('BEGIN');
+    await db.query(
+      `UPDATE admin_clients SET subscription_tier = $1, mca_limit = $2
+       WHERE LOWER(name) = LOWER($3) OR LOWER(REPLACE(name,'-','')) = LOWER(REPLACE($3,'-','')) OR id = $3`,
+      [tier, seats, name]
+    );
+    const lic = await db.query(
+      `UPDATE admin_licenses SET tier = $1, seats = $2
+       WHERE (LOWER(tenant_name) = LOWER($3) OR LOWER(REPLACE(tenant_name,' ','')) = LOWER(REPLACE($3,' ','')))
+         AND status = 'active'`,
+      [tier, seats, name]
+    );
+    await db.query('COMMIT');
+    res.json({ success: true, tier, seats, licensesUpdated: lic.rowCount });
+  } catch (err: any) {
+    await db.query('ROLLBACK');
+    console.error('Error updating client plan:', err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    db.release();
+  }
+};
+
 export const deployInlineClient = async (req: Request, res: Response) => {
   try {
     const { email, workspace } = req.body;

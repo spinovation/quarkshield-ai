@@ -22,6 +22,7 @@ import {
   getClients,
   getClientStats,
   updateSubscription,
+  updateClientPlan,
   deployInlineClient,
   createClient,
   deleteClient,
@@ -179,6 +180,7 @@ router.get('/admin/clients', requireSuperAdmin, getClients);
 router.get('/admin/clients/:name/stats', requireSuperAdmin, getClientStats);
 router.post('/admin/clients/deploy-inline', requireSuperAdmin, deployInlineClient);
 router.post('/admin/clients/:name/subscription', requireSuperAdmin, updateSubscription);
+router.post('/admin/clients/:name/plan', requireSuperAdmin, updateClientPlan);
 router.post('/admin/clients', requireSuperAdmin, createClient);
 router.delete('/admin/clients/:id', requireSuperAdmin, deleteClient);
 router.delete('/admin/clients/:name', requireSuperAdmin, deleteClient);
