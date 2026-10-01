@@ -662,27 +662,59 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     }
     const safeAssets = Array.isArray(assets) ? assets : [];
 
-    const assignedTenant = tokenRow.tenant_name || req.body.tenant_name || (tokenRow.name?.toLowerCase().includes('spinovation') || tokenRow.name?.toLowerCase() === 'engg' ? 'SPINOVATIONCORP' : (tokenRow.name || 'DEFAULT_FLEET'));
+    // Tenant canonicalization (BILL-1): the fleet TOKEN is the sole authority on which
+    // tenant a device belongs to. We must NEVER trust req.body.tenant_name — a client
+    // could send a variant spelling ("Acme" vs "acme corp") and land the same physical
+    // device under a second tenant string, which the seat counter would see as a second
+    // seat. Fall back to the token's own name only when the token carries no tenant_name.
+    const tokenTenant = (tokenRow.tenant_name || '').trim();
+    const assignedTenant = tokenTenant
+      || (tokenRow.name?.toLowerCase().includes('spinovation') || tokenRow.name?.toLowerCase() === 'engg'
+            ? 'SPINOVATIONCORP'
+            : ((tokenRow.name || '').trim() || 'DEFAULT_FLEET'));
     const assignedLicense = tokenRow.license_key || req.body.license_key || 'QS-STANDARD-ACTIVE';
 
     const cleanHwUUID = (hardware_uuid || '').trim();
     const cleanHost = (hostname || '').trim();
     const cleanComp = (computer_name || cleanHost).trim();
 
-    // Deduplication Lookup: Match existing machine by Hardware UUID or normalized Hostname within this tenant.
-    // (DEF-35) The old "any darwin host matching %ganapati% is the same machine"
-    // rule was removed — it collapsed every Mac in a tenant into one record.
-    const matchQuery = `
-      SELECT id, hostname, computer_name, hardware_uuid FROM fleet_machines
-      WHERE (LOWER(tenant_name) = LOWER($1) OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', '')))
-        AND (
-          (hardware_uuid IS NOT NULL AND hardware_uuid != '' AND hardware_uuid = $2)
-          OR LOWER(hostname) = LOWER($3)
-          OR LOWER(REPLACE(hostname, '.local', '')) = LOWER(REPLACE($3, '.local', ''))
-        )
-      ORDER BY last_seen DESC LIMIT 1;
-    `;
-    const existingResult = await pool.query(matchQuery, [assignedTenant, cleanHwUUID, cleanHost]);
+    // Deduplication Lookup (BILL-1 / DEF-35): device_id-first.
+    // The agent's hardware_uuid is a STABLE device id — a real platform UUID
+    // (IOPlatformUUID / Windows MachineGuid / /etc/machine-id) or, when none can be
+    // read, a random id persisted to ~/.quarkshield/device_id. When it is present it is
+    // AUTHORITATIVE and we match ONLY on it. We deliberately do NOT also match on
+    // hostname, because that would (a) MERGE two different machines that happen to share
+    // a hostname (e.g. two "DESKTOP-..." or "MacBook-Pro.local" hosts) into one seat, and
+    // (b) SPLIT a single machine into two seats when it is renamed. Hostname matching is
+    // a fallback ONLY for legacy/misconfigured agents that report no hardware_uuid.
+    const tenantMatch = `(LOWER(tenant_name) = LOWER($1) OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', '')))`;
+    let existingResult = await pool.query(
+      cleanHwUUID
+        ? `SELECT id, hostname, computer_name, hardware_uuid FROM fleet_machines
+             WHERE ${tenantMatch} AND hardware_uuid = $2
+             ORDER BY last_seen DESC LIMIT 1;`
+        : `SELECT id, hostname, computer_name, hardware_uuid FROM fleet_machines
+             WHERE ${tenantMatch}
+               AND (hardware_uuid IS NULL OR hardware_uuid = '')
+               AND (LOWER(hostname) = LOWER($2) OR LOWER(REPLACE(hostname, '.local', '')) = LOWER(REPLACE($2, '.local', '')))
+             ORDER BY last_seen DESC LIMIT 1;`,
+      [assignedTenant, cleanHwUUID || cleanHost]
+    );
+
+    // Migration adoption: a machine that first enrolled by hostname (no hardware_uuid)
+    // and now reports one should ADOPT its existing row instead of creating a duplicate
+    // seat. Only matches rows whose hardware_uuid is still blank, so it can never steal
+    // another already-identified device. The upsert below backfills the hardware_uuid.
+    if (cleanHwUUID && !existingResult.rowCount) {
+      existingResult = await pool.query(
+        `SELECT id, hostname, computer_name, hardware_uuid FROM fleet_machines
+           WHERE ${tenantMatch}
+             AND (hardware_uuid IS NULL OR hardware_uuid = '')
+             AND (LOWER(hostname) = LOWER($2) OR LOWER(REPLACE(hostname, '.local', '')) = LOWER(REPLACE($2, '.local', '')))
+           ORDER BY last_seen DESC LIMIT 1;`,
+        [assignedTenant, cleanHost]
+      );
+    }
 
     const isExistingMachine = !!(existingResult.rowCount && existingResult.rows[0]?.id);
 

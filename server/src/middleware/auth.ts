@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import pool from '../config/db';
 
 /**
  * Session authentication and authorization.
@@ -205,4 +206,63 @@ export const requireTenantAccess = (req: Request, res: Response, next: NextFunct
     return;
   }
   res.status(403).json({ error: 'Access to this tenant is not permitted' });
+};
+
+/**
+ * Plan-tier entitlement for Integrations & Gateways (BILL-2).
+ * Integrations (Git/CI, PKI/Vault connectors, PQC proxy Gateways) are a paid-tier
+ * feature. A tenant is entitled when it holds an active Growth/Enterprise license
+ * OR its client record is on a Growth/Enterprise subscription. (admin_clients
+ * defaults subscription_tier to 'growth', so existing tenants stay entitled; only
+ * explicit 'entry' tenants are gated.)
+ */
+export const INTEGRATION_TIERS = new Set(['growth', 'enterprise']);
+
+export const tenantHasIntegrations = async (tenant?: string | null): Promise<boolean> => {
+  if (!tenant) return false;
+  try {
+    const r = await pool.query(
+      `SELECT
+         EXISTS(SELECT 1 FROM admin_licenses
+                  WHERE (LOWER(tenant_name) = LOWER($1) OR LOWER(REPLACE(tenant_name,' ','')) = LOWER(REPLACE($1,' ','')))
+                    AND status <> 'revoked'
+                    AND LOWER(COALESCE(tier,'')) IN ('growth','enterprise')) AS lic,
+         EXISTS(SELECT 1 FROM admin_clients
+                  WHERE (LOWER(name) = LOWER($1) OR LOWER(REPLACE(name,'-','')) = LOWER(REPLACE($1,'-','')))
+                    AND LOWER(COALESCE(subscription_tier,'')) IN ('growth','enterprise')) AS cli`,
+      [tenant]
+    );
+    return !!(r.rows[0]?.lic || r.rows[0]?.cli);
+  } catch (e) {
+    // Fail-open: never block a paying tenant on a transient DB hiccup. The common
+    // case (entry-tier gating) still works; only a rare outage could let an entry
+    // tenant through, which is the safer failure direction for revenue + support.
+    console.warn('tenantHasIntegrations check failed, allowing by default:', (e as Error).message);
+    return true;
+  }
+};
+
+/**
+ * Route guard for integration WRITE/active operations (create/test/sync/scan/toggle).
+ * Super roles (the fleet console operating on behalf of tenants) always pass.
+ * GET (list) and DELETE are intentionally NOT gated — a downgraded tenant can still
+ * see and remove its connectors.
+ */
+export const requireIntegrationsEntitlement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (isSuperRole(req.user.role)) {
+    next();
+    return;
+  }
+  if (await tenantHasIntegrations(req.user.tenant)) {
+    next();
+    return;
+  }
+  res.status(403).json({
+    error: 'Integrations & Gateways require a Growth or Enterprise plan.',
+    code: 'UPGRADE_REQUIRED',
+  });
 };

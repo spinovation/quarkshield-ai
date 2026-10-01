@@ -76,6 +76,10 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // BILL-2: Integrations & Gateways are a Growth/Enterprise feature. Default to
+  // unlocked so paying tenants never see a lock flash; /api/entitlements corrects
+  // entry-tier tenants on load. The server also enforces this (defense in depth).
+  const [entitled, setEntitled] = useState(true);
 
   // Active detail modal/drawer
   const [selectedConnector, setSelectedConnector] = useState<ConnectorItem | null>(null);
@@ -143,6 +147,13 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
   useEffect(() => {
     loadData();
   }, [tenantName]);
+
+  useEffect(() => {
+    fetch('/api/entitlements')
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => { if (d && typeof d.integrations === 'boolean') setEntitled(d.integrations); })
+      .catch(() => { /* fail-open: keep unlocked on a network hiccup */ });
+  }, []);
 
   // Aggregate items for grid
   const awsConn = connectors.find(c => c.provider === 'aws_kms');
@@ -345,6 +356,36 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+      {/* BILL-2: Upgrade lock banner for entry-tier tenants */}
+      {!entitled && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem',
+          padding: '1rem 1.25rem', borderRadius: '14px',
+          background: 'linear-gradient(90deg, rgba(124,58,237,0.18), rgba(192,132,252,0.06))',
+          border: '1px solid rgba(124,58,237,0.45)'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+            <span style={{ fontSize: '1.5rem', lineHeight: 1 }}>🔒</span>
+            <div>
+              <div style={{ fontWeight: 700, color: '#f2eefb', fontSize: '1rem' }}>Integrations &amp; Gateways are a Growth feature</div>
+              <div style={{ fontSize: '0.85rem', color: '#c9c2da', maxWidth: '680px', marginTop: '0.2rem' }}>
+                Connect repositories, Vault/PKI, and PQC Gateways to keep your cryptographic inventory continuously current — not just a one-time snapshot. Available on Growth and Enterprise plans.
+              </div>
+            </div>
+          </div>
+          <a
+            href="https://quarkshield.ai/#pricing"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              whiteSpace: 'nowrap', textDecoration: 'none', fontWeight: 600, fontSize: '0.9rem',
+              padding: '0.65rem 1.2rem', borderRadius: '10px', color: '#ffffff',
+              background: '#7c3aed', border: '1px solid #8b5cf6'
+            }}
+          >Upgrade to unlock →</a>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {notification && (
         <div style={{
@@ -640,6 +681,10 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
               }}>
                 <button
                   onClick={() => {
+                    if (!entitled) {
+                      showNotification('Integrations & Gateways require a Growth or Enterprise plan.', 'error');
+                      return;
+                    }
                     setSelectedConnector(item);
                     setModalTab('blueprint');
                     setTestResult(null);

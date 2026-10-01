@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireSuperAdmin, requireTenantAccess } from '../middleware/auth';
+import { requireAuth, requireSuperAdmin, requireTenantAccess, requireIntegrationsEntitlement, tenantHasIntegrations, isSuperRole } from '../middleware/auth';
 import { exportExecutiveReport, getReportStakeholders, saveReportStakeholders, sendRoadmapReport } from '../controllers/reportController';
 import { twoFactorStatus, twoFactorSetup, twoFactorVerify, twoFactorDisable } from '../controllers/twoFactorController';
 import {
@@ -221,7 +221,7 @@ router.get('/tenant/:tenant/portal-data', requireAuth, requireTenantAccess, getT
 // ==========================================
 // GIT SCANNER (authenticated, tenant-scoped)
 // ==========================================
-router.post('/scan/remote-git', requireAuth, requireTenantAccess, scanRemoteGitRepo);
+router.post('/scan/remote-git', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, scanRemoteGitRepo);
 router.get('/scan/remote-git/history', requireAuth, requireTenantAccess, getGitScanHistory);
 router.post('/scan/remote-git/export-cbom', requireAuth, requireTenantAccess, exportGitCBOM);
 
@@ -250,10 +250,21 @@ router.get('/git/ci-gate/runner.sh', (req, res) => getCITemplate({ ...req, param
 // ==========================================
 // ENTERPRISE PKI & CLOUD VAULT CONNECTORS (authenticated, tenant-scoped)
 // ==========================================
+// Plan entitlements for the current session — the UI uses this to lock/unlock the
+// Integrations & Gateways surface (BILL-2). Super roles always see it unlocked.
+router.get('/entitlements', requireAuth, async (req, res) => {
+  if (isSuperRole(req.user?.role)) {
+    res.json({ integrations: true, tier: 'enterprise', super: true });
+    return;
+  }
+  const integrations = await tenantHasIntegrations(req.user?.tenant);
+  res.json({ integrations, tier: integrations ? 'growth' : 'entry', super: false });
+});
+
 router.get('/pki/connectors', requireAuth, requireTenantAccess, getPkiConnectors);
-router.post('/pki/connectors', requireAuth, requireTenantAccess, createPkiConnector);
-router.post('/pki/connectors/:id/test', requireAuth, requireTenantAccess, testPkiConnector);
-router.post('/pki/connectors/:id/sync', requireAuth, requireTenantAccess, syncPkiConnector);
+router.post('/pki/connectors', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, createPkiConnector);
+router.post('/pki/connectors/:id/test', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, testPkiConnector);
+router.post('/pki/connectors/:id/sync', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, syncPkiConnector);
 router.delete('/pki/connectors/:id', requireAuth, requireTenantAccess, deletePkiConnector);
 router.get('/pki/assets', requireAuth, requireTenantAccess, getPkiSyncedAssets);
 
@@ -261,10 +272,10 @@ router.get('/pki/assets', requireAuth, requireTenantAccess, getPkiSyncedAssets);
 // TRANSPARENT HYBRID QUANTUM TLS PROXY (authenticated, tenant-scoped)
 // ==========================================
 router.get('/proxy/instances', requireAuth, requireTenantAccess, getProxies);
-router.post('/proxy/instances', requireAuth, requireTenantAccess, createProxy);
-router.patch('/proxy/instances/:id/state', requireAuth, requireTenantAccess, toggleProxyState);
+router.post('/proxy/instances', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, createProxy);
+router.patch('/proxy/instances/:id/state', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, toggleProxyState);
 router.delete('/proxy/instances/:id', requireAuth, requireTenantAccess, deleteProxy);
-router.post('/proxy/instances/:id/test', requireAuth, requireTenantAccess, testProxyHandshake);
+router.post('/proxy/instances/:id/test', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, testProxyHandshake);
 router.get('/proxy/templates/:format', getProxyTemplate);
 router.get('/proxy/template', (req, res) => {
   const format = (req.query.format as string) || 'nginx';
