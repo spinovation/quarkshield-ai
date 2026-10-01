@@ -216,7 +216,13 @@ export const requireTenantAccess = (req: Request, res: Response, next: NextFunct
  * defaults subscription_tier to 'growth', so existing tenants stay entitled; only
  * explicit 'entry' tenants are gated.)
  */
-export const INTEGRATION_TIERS = new Set(['growth', 'enterprise']);
+// Paid tiers that unlock Integrations & Gateways. Two vocabularies coexist:
+//   admin_clients.subscription_tier = entry | growth | enterprise
+//   admin_licenses.tier             = partner | corporate | corp  (enterprise license keys)
+// Everything paid is entitled; only the base 'entry' tier is gated.
+export const INTEGRATION_TIERS = new Set(['growth', 'enterprise', 'corporate', 'corp', 'partner']);
+// Rank for choosing the "best" tier when a tenant has both a license and a subscription.
+const TIER_RANK: Record<string, number> = { entry: 1, growth: 2, partner: 3, corporate: 4, corp: 4, enterprise: 5 };
 
 export interface EntitlementRecord {
   integrations: boolean;
@@ -254,9 +260,14 @@ export const localTenantEntitlement = async (tenant?: string | null): Promise<En
       [tenant]
     );
     const row = r.rows[0] || {};
-    const tier = String(row.lic_tier || row.cli_tier || 'entry').toLowerCase();
-    const seats = Number(row.lic_seats || row.cli_seats || 0);
-    return { integrations: INTEGRATION_TIERS.has(tier), tier, seats };
+    const licTier = String(row.lic_tier || '').toLowerCase();
+    const cliTier = String(row.cli_tier || '').toLowerCase();
+    // Entitled if EITHER source is a paid tier (vocabularies differ between the two tables).
+    const integrations = INTEGRATION_TIERS.has(licTier) || INTEGRATION_TIERS.has(cliTier);
+    // Display the highest-ranked tier the tenant holds (so a panel-set 'enterprise' beats an older 'corp' license).
+    const tier = [licTier, cliTier].filter(Boolean).sort((a, b) => (TIER_RANK[b] || 0) - (TIER_RANK[a] || 0))[0] || 'entry';
+    const seats = Math.max(Number(row.lic_seats || 0), Number(row.cli_seats || 0)) || 0;
+    return { integrations, tier, seats };
   } catch (e) {
     // Fail-open: never block a paying tenant on a transient DB hiccup.
     console.warn('localTenantEntitlement failed, assuming entitled:', (e as Error).message);
