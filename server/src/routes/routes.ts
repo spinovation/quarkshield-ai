@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireSuperAdmin, requireTenantAccess, requireIntegrationsEntitlement, tenantHasIntegrations, isSuperRole } from '../middleware/auth';
+import { requireAuth, requireSuperAdmin, requireTenantAccess, requireIntegrationsEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole } from '../middleware/auth';
 import { exportExecutiveReport, getReportStakeholders, saveReportStakeholders, sendRoadmapReport } from '../controllers/reportController';
 import { twoFactorStatus, twoFactorSetup, twoFactorVerify, twoFactorDisable } from '../controllers/twoFactorController';
 import {
@@ -252,13 +252,28 @@ router.get('/git/ci-gate/runner.sh', (req, res) => getCITemplate({ ...req, param
 // ==========================================
 // Plan entitlements for the current session — the UI uses this to lock/unlock the
 // Integrations & Gateways surface (BILL-2). Super roles always see it unlocked.
+// On a tenant pod this resolves from the central plane (BILL-3), with a local fallback.
 router.get('/entitlements', requireAuth, async (req, res) => {
   if (isSuperRole(req.user?.role)) {
-    res.json({ integrations: true, tier: 'enterprise', super: true });
+    res.json({ integrations: true, tier: 'enterprise', seats: 250, super: true });
     return;
   }
-  const integrations = await tenantHasIntegrations(req.user?.tenant);
-  res.json({ integrations, tier: integrations ? 'growth' : 'entry', super: false });
+  const ent = await getTenantEntitlement(req.user?.tenant);
+  res.json({ ...ent, super: false });
+});
+
+// BILL-3: the central plane is the single source of truth for tenant entitlement.
+// Tenant pods call this server-to-server with a shared service token and cache the
+// result. Answers from the LOCAL DB (on central that IS the source of truth); never
+// re-delegates, so there is no cross-pod recursion.
+router.get('/central/entitlement', async (req, res) => {
+  const token = process.env.QS_CENTRAL_SERVICE_TOKEN || '';
+  if (!token || req.headers['x-qs-service-token'] !== token) {
+    res.status(401).json({ error: 'Invalid or missing service token' });
+    return;
+  }
+  const tenant = (req.query.tenant as string) || '';
+  res.json(await localTenantEntitlement(tenant));
 });
 
 router.get('/pki/connectors', requireAuth, requireTenantAccess, getPkiConnectors);

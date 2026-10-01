@@ -218,29 +218,88 @@ export const requireTenantAccess = (req: Request, res: Response, next: NextFunct
  */
 export const INTEGRATION_TIERS = new Set(['growth', 'enterprise']);
 
-export const tenantHasIntegrations = async (tenant?: string | null): Promise<boolean> => {
-  if (!tenant) return false;
+export interface EntitlementRecord {
+  integrations: boolean;
+  tier: string;
+  seats: number;
+}
+
+// BILL-3: the CENTRAL plane is the single source of truth for a tenant's plan.
+// A tenant pod (separate DB) resolves entitlement by asking central and caching the
+// answer briefly, falling back to its own DB if central is unreachable/unconfigured.
+// The central plane leaves QS_CENTRAL_URL unset and always answers from its own DB.
+const CENTRAL_URL = (process.env.QS_CENTRAL_URL || '').replace(/\/+$/, '');
+const CENTRAL_SERVICE_TOKEN = process.env.QS_CENTRAL_SERVICE_TOKEN || '';
+const ENT_TTL_MS = 5 * 60 * 1000;
+const entCache = new Map<string, { at: number; val: EntitlementRecord }>();
+
+/** Resolve a tenant's entitlement from THIS instance's own database. */
+export const localTenantEntitlement = async (tenant?: string | null): Promise<EntitlementRecord> => {
+  if (!tenant) return { integrations: false, tier: 'none', seats: 0 };
   try {
     const r = await pool.query(
       `SELECT
-         EXISTS(SELECT 1 FROM admin_licenses
-                  WHERE (LOWER(tenant_name) = LOWER($1) OR LOWER(REPLACE(tenant_name,' ','')) = LOWER(REPLACE($1,' ','')))
-                    AND status <> 'revoked'
-                    AND LOWER(COALESCE(tier,'')) IN ('growth','enterprise')) AS lic,
-         EXISTS(SELECT 1 FROM admin_clients
-                  WHERE (LOWER(name) = LOWER($1) OR LOWER(REPLACE(name,'-','')) = LOWER(REPLACE($1,'-','')))
-                    AND LOWER(COALESCE(subscription_tier,'')) IN ('growth','enterprise')) AS cli`,
+         (SELECT tier FROM admin_licenses
+            WHERE (LOWER(tenant_name)=LOWER($1) OR LOWER(REPLACE(tenant_name,' ',''))=LOWER(REPLACE($1,' ','')))
+              AND status <> 'revoked'
+            ORDER BY CASE LOWER(COALESCE(tier,'')) WHEN 'enterprise' THEN 3 WHEN 'growth' THEN 2 ELSE 1 END DESC
+            LIMIT 1) AS lic_tier,
+         (SELECT MAX(seats) FROM admin_licenses
+            WHERE (LOWER(tenant_name)=LOWER($1) OR LOWER(REPLACE(tenant_name,' ',''))=LOWER(REPLACE($1,' ','')))
+              AND status <> 'revoked') AS lic_seats,
+         (SELECT subscription_tier FROM admin_clients
+            WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-',''))) LIMIT 1) AS cli_tier,
+         (SELECT mca_limit FROM admin_clients
+            WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-',''))) LIMIT 1) AS cli_seats`,
       [tenant]
     );
-    return !!(r.rows[0]?.lic || r.rows[0]?.cli);
+    const row = r.rows[0] || {};
+    const tier = String(row.lic_tier || row.cli_tier || 'entry').toLowerCase();
+    const seats = Number(row.lic_seats || row.cli_seats || 0);
+    return { integrations: INTEGRATION_TIERS.has(tier), tier, seats };
   } catch (e) {
-    // Fail-open: never block a paying tenant on a transient DB hiccup. The common
-    // case (entry-tier gating) still works; only a rare outage could let an entry
-    // tenant through, which is the safer failure direction for revenue + support.
-    console.warn('tenantHasIntegrations check failed, allowing by default:', (e as Error).message);
-    return true;
+    // Fail-open: never block a paying tenant on a transient DB hiccup.
+    console.warn('localTenantEntitlement failed, assuming entitled:', (e as Error).message);
+    return { integrations: true, tier: 'unknown', seats: 0 };
   }
 };
+
+const fetchCentralEntitlement = async (tenant: string): Promise<EntitlementRecord | null> => {
+  const key = tenant.toLowerCase();
+  const cached = entCache.get(key);
+  if (cached && Date.now() - cached.at < ENT_TTL_MS) return cached.val;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const resp = await fetch(`${CENTRAL_URL}/api/central/entitlement?tenant=${encodeURIComponent(tenant)}`, {
+      headers: { 'x-qs-service-token': CENTRAL_SERVICE_TOKEN },
+      signal: ctrl.signal,
+    });
+    if (!resp.ok) return cached?.val ?? null;
+    const data = (await resp.json()) as EntitlementRecord;
+    entCache.set(key, { at: Date.now(), val: data });
+    return data;
+  } catch (e) {
+    console.warn('central entitlement fetch failed:', (e as Error).message);
+    return cached?.val ?? null; // serve stale cache if available
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+/** Resolve entitlement: central-first on tenant pods, local on the central plane. */
+export const getTenantEntitlement = async (tenant?: string | null): Promise<EntitlementRecord> => {
+  if (!tenant) return { integrations: false, tier: 'none', seats: 0 };
+  if (CENTRAL_URL && CENTRAL_SERVICE_TOKEN) {
+    const remote = await fetchCentralEntitlement(tenant);
+    if (remote) return remote;
+    // central unreachable and nothing cached → fall back to local (fail-safe)
+  }
+  return localTenantEntitlement(tenant);
+};
+
+export const tenantHasIntegrations = async (tenant?: string | null): Promise<boolean> =>
+  (await getTenantEntitlement(tenant)).integrations;
 
 /**
  * Route guard for integration WRITE/active operations (create/test/sync/scan/toggle).
