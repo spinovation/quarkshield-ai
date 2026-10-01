@@ -73,6 +73,29 @@ CREATE TABLE IF NOT EXISTS projects (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_projects_tenant ON projects (LOWER(tenant_name));
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS framework VARCHAR(40) DEFAULT 'nist-800-53r5';
+
+-- Per-control assessment rows for a project (BILL-4b). Seeded from the crypto control
+-- catalog for the project's framework; status auto-suggested from the CBOM, then edited.
+-- This is the "Corrective Action Project" grid and the source for SSP/POA&M generation.
+CREATE TABLE IF NOT EXISTS project_controls (
+  id VARCHAR(100) PRIMARY KEY,
+  project_id VARCHAR(100) NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  control_key VARCHAR(20) NOT NULL,       -- stable 800-53 anchor (e.g. SC-13)
+  control_id VARCHAR(40) NOT NULL,        -- framework-specific id (e.g. 3.13.11)
+  title VARCHAR(255),
+  kind VARCHAR(20),
+  status VARCHAR(20) DEFAULT 'in_progress', -- compliant | non_compliant | in_progress | not_applicable
+  auto_status VARCHAR(20),                 -- CBOM-derived suggestion
+  owner VARCHAR(255),
+  percent_complete INTEGER DEFAULT 0,
+  target_date DATE,
+  comments TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (project_id, control_key)
+);
+CREATE INDEX IF NOT EXISTS idx_project_controls_project ON project_controls (project_id);
 
 -- Agent download analytics: one row per agent-binary download, with OS (from the
 -- filename), client IP + country (Cloudflare headers), and city/region (best-effort

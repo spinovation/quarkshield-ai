@@ -76,7 +76,8 @@ import {
   exportGitCBOM
 } from '../controllers/gitScanController';
 import {
-  listProjects, createProject, getProject, updateProject, deleteProject,
+  getFrameworks, listProjects, createProject, deleteProject,
+  listControls, updateControl, reassessControls,
   exportProjectSSP, exportProjectPOAM,
 } from '../controllers/projectController';
 import { getAIChatResponse } from '../controllers/aiController';
@@ -284,12 +285,15 @@ router.get('/central/entitlement', async (req, res) => {
   res.json(await localTenantEntitlement(tenant));
 });
 
-// Projects (BILL-4 / OSCAL) — authorization boundaries; each yields its own SSP/POA&M.
+// Projects (BILL-4 / BILL-4b) — framework-based authorization boundaries with per-control
+// assessment; each yields its own OSCAL SSP/POA&M.
+router.get('/compliance/frameworks', requireAuth, getFrameworks);
 router.get('/projects', requireAuth, requireTenantAccess, listProjects);
 router.post('/projects', requireAuth, requireTenantAccess, createProject);
-router.get('/projects/:id', requireAuth, requireTenantAccess, getProject);
-router.patch('/projects/:id', requireAuth, requireTenantAccess, updateProject);
 router.delete('/projects/:id', requireAuth, requireTenantAccess, deleteProject);
+router.get('/projects/:id/controls', requireAuth, requireTenantAccess, listControls);
+router.patch('/projects/:id/controls/:controlKey', requireAuth, requireTenantAccess, updateControl);
+router.post('/projects/:id/reassess', requireAuth, requireTenantAccess, reassessControls);
 router.get('/projects/:id/oscal/ssp', requireAuth, requireTenantAccess, exportProjectSSP);
 router.get('/projects/:id/oscal/poam', requireAuth, requireTenantAccess, exportProjectPOAM);
 
