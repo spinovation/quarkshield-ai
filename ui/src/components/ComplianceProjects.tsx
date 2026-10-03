@@ -137,6 +137,18 @@ export const ComplianceProjects: React.FC<{ tenantName?: string }> = ({ tenantNa
     } catch (e: any) { setError(e.message); } finally { setDownloading(null); }
   };
 
+  const downloadExcel = async (id: string, pname: string) => {
+    setDownloading(`${id}-xlsx`); setError(null);
+    try {
+      const r = await fetch(`/api/projects/${id}/poam.xlsx`, { headers: { Authorization: `Bearer ${token()}` } });
+      if (!r.ok) throw new Error(`Export failed (${r.status})`);
+      const blob = await r.blob(); const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url;
+      a.download = `poam-${pname.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.xlsx`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } catch (e: any) { setError(e.message); } finally { setDownloading(null); }
+  };
+
   const fwLabel = (id: string) => frameworks.find(f => f.id === id)?.short || id;
   const card: React.CSSProperties = { background: 'rgba(15,23,42,0.5)', border: '1px solid var(--border-normal, rgba(148,163,184,0.2))', borderRadius: '12px' };
   const btn = (primary = false): React.CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600, padding: '0.45rem 0.8rem', borderRadius: '8px', cursor: 'pointer', background: primary ? '#7c3aed' : 'rgba(56,189,248,0.1)', border: `1px solid ${primary ? '#8b5cf6' : 'rgba(56,189,248,0.3)'}`, color: primary ? '#fff' : 'var(--accent-cyan,#38bdf8)' });
@@ -207,6 +219,7 @@ export const ComplianceProjects: React.FC<{ tenantName?: string }> = ({ tenantNa
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }} onClick={e => e.stopPropagation()}>
                 <button style={btn()} onClick={() => download(p.id, 'ssp', p.name)} disabled={downloading === `${p.id}-ssp`}>{downloading === `${p.id}-ssp` ? <Loader2 size={14} className="spin" /> : <FileDown size={14} />} SSP</button>
                 <button style={btn()} onClick={() => download(p.id, 'poam', p.name)} disabled={downloading === `${p.id}-poam`}>{downloading === `${p.id}-poam` ? <Loader2 size={14} className="spin" /> : <FileDown size={14} />} POA&amp;M</button>
+                <button style={btn()} onClick={() => downloadExcel(p.id, p.name)} disabled={downloading === `${p.id}-xlsx`} title="POA&M as FedRAMP/eMASS-style Excel">{downloading === `${p.id}-xlsx` ? <Loader2 size={14} className="spin" /> : <FileDown size={14} />} POA&amp;M (xlsx)</button>
                 <button style={{ ...btn(), background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5' }} onClick={() => remove(p.id, p.name)}><Trash2 size={14} /></button>
               </div>
             </div>

@@ -78,7 +78,7 @@ import {
 import {
   getFrameworks, listProjects, createProject, deleteProject,
   listControls, updateControl, reassessControls,
-  exportProjectSSP, exportProjectPOAM,
+  exportProjectSSP, exportProjectPOAM, exportProjectPOAMExcel,
 } from '../controllers/projectController';
 import { getAIChatResponse } from '../controllers/aiController';
 import {
@@ -296,6 +296,7 @@ router.patch('/projects/:id/controls/:controlKey', requireAuth, requireTenantAcc
 router.post('/projects/:id/reassess', requireAuth, requireTenantAccess, reassessControls);
 router.get('/projects/:id/oscal/ssp', requireAuth, requireTenantAccess, exportProjectSSP);
 router.get('/projects/:id/oscal/poam', requireAuth, requireTenantAccess, exportProjectPOAM);
+router.get('/projects/:id/poam.xlsx', requireAuth, requireTenantAccess, exportProjectPOAMExcel);
 
 router.get('/pki/connectors', requireAuth, requireTenantAccess, getPkiConnectors);
 router.post('/pki/connectors', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, createPkiConnector);

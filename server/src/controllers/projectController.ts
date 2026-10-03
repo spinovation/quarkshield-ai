@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import pool from '../config/db';
 import { canAccessTenant, isSuperRole } from '../middleware/auth';
-import { buildSSP, buildPOAM, ProjectRecord, ControlRow, Posture } from '../lib/oscal';
+import { buildSSP, buildPOAM, ProjectRecord, ControlRow, Posture, AssetRef } from '../lib/oscal';
+import { buildPOAMWorkbook } from '../lib/poamExcel';
 import {
   FRAMEWORKS, isFramework, controlsForFramework, autoStatus, CRYPTO_CONTROLS, Framework, ControlStatus,
 } from '../lib/controlCatalog';
@@ -247,6 +248,20 @@ const controlRows = async (projectId: string): Promise<ControlRow[]> => {
   return r.rows.map((row: any) => ({ ...row, fips: catalogByKey.get(row.control_key)?.fips || '', implicit: row.status === 'not_applicable' }));
 };
 
+const fetchVulnerableAssets = async (project: any): Promise<AssetRef[]> => {
+  const machineIds = project.scope_machine_ids?.length ? project.scope_machine_ids : null;
+  const sources = project.scope_sources?.length ? project.scope_sources : null;
+  const r = await pool.query(
+    `SELECT name, algorithm, path, machine_id AS "machineId", risk_level AS "riskLevel"
+     FROM assets
+     WHERE ${scopeClause()} AND is_vulnerable = true
+     ORDER BY CASE LOWER(risk_level) WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END
+     LIMIT 200`,
+    [project.tenant_name, machineIds, sources]
+  );
+  return r.rows as AssetRef[];
+};
+
 const sendOscal = (res: Response, filename: string, doc: any) => {
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -271,9 +286,24 @@ export const exportProjectPOAM = async (req: Request, res: Response) => {
     const p = await fetchProject(req.params.id);
     if (!p) return res.status(404).json({ error: 'Project not found' });
     if (!canAccessTenant(req, p.tenant_name)) return res.status(403).json({ error: 'Access not permitted' });
-    const [controls, posture] = await Promise.all([controlRows(p.id), computePosture(p)]);
-    sendOscal(res, `oscal-poam-${slug(p.name)}.json`, buildPOAM(projectRecord(p), controls, posture));
+    const [controls, posture, assets] = await Promise.all([controlRows(p.id), computePosture(p), fetchVulnerableAssets(p)]);
+    sendOscal(res, `oscal-poam-${slug(p.name)}.json`, buildPOAM(projectRecord(p), controls, posture, assets));
   } catch (e: any) {
     res.status(500).json({ error: e.message || 'Failed to export POA&M' });
+  }
+};
+
+export const exportProjectPOAMExcel = async (req: Request, res: Response) => {
+  try {
+    const p = await fetchProject(req.params.id);
+    if (!p) return res.status(404).json({ error: 'Project not found' });
+    if (!canAccessTenant(req, p.tenant_name)) return res.status(403).json({ error: 'Access not permitted' });
+    const [controls, assets] = await Promise.all([controlRows(p.id), fetchVulnerableAssets(p)]);
+    const buf = await buildPOAMWorkbook(projectRecord(p), controls, assets);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="poam-${slug(p.name)}.xlsx"`);
+    res.send(buf);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message || 'Failed to export POA&M (Excel)' });
   }
 };

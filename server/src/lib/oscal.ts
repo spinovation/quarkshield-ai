@@ -44,6 +44,19 @@ export interface Posture {
   byAlgo?: { algo: string; count: number; vulnerable: number }[];
 }
 
+export interface AssetRef {
+  name: string;
+  algorithm?: string | null;
+  path?: string | null;
+  machineId?: string | null;
+  riskLevel?: string | null;
+}
+
+/** Human-readable asset identifier for POA&M "Asset Identifier" field. */
+export const assetIdent = (a: AssetRef): string =>
+  [a.name, a.algorithm ? `(${a.algorithm})` : '', a.path ? `@ ${a.path}` : '']
+    .filter(Boolean).join(' ').trim() || (a.machineId || 'asset');
+
 const frameworkLabel = (fw?: string | null): string =>
   FRAMEWORKS.find(f => f.id === fw)?.label || 'NIST SP 800-53 Rev 5';
 
@@ -169,22 +182,53 @@ export const buildSSP = (project: ProjectRecord, controls: ControlRow[], posture
   };
 };
 
-export const buildPOAM = (project: ProjectRecord, controls: ControlRow[], posture: Posture): any => {
+const QS_NS = 'https://quarkshield.ai/ns/oscal';
+const DETECTOR = 'QuarkShield (FedMitigate LLC)';
+
+export const buildPOAM = (project: ProjectRecord, controls: ControlRow[], posture: Posture, assets: AssetRef[] = []): any => {
   const open = controls.filter(c => c.status === 'non_compliant' || c.status === 'in_progress');
-  const poamItems = open.map(c => ({
+  // Representative affected asset identifiers (eMASS/FedRAMP "Asset Identifier"); capped.
+  const assetIds = assets.slice(0, 25).map(assetIdent);
+  const assetSummary = assetIds.length
+    ? `${assetIds.slice(0, 10).join('; ')}${assetIds.length > 10 ? ` (+${assets.length - 10} more)` : ''}`
+    : `${posture.vulnerable} quantum-vulnerable asset(s) in scope`;
+
+  const observations = open.map((c, i) => ({
+    uuid: uuid(),
+    title: `QuarkShield finding for ${c.control_id}`,
+    description: `QuarkShield cryptographic discovery found ${posture.vulnerable} quantum-vulnerable asset(s) affecting ${c.control_id} (${c.title}). Affected: ${assetSummary}.`,
+    methods: ['TEST'],
+    types: ['control-objective'],
+    props: [
+      { name: 'detector-source', value: DETECTOR, ns: QS_NS },
+      { name: 'detector-identifier', value: `QS-${(c.control_key || 'CTRL')}-${String(i + 1).padStart(3, '0')}`, ns: QS_NS },
+    ],
+    collected: nowIso(),
+  }));
+
+  const poamItems = open.map((c, i) => ({
     uuid: uuid(),
     title: `${c.control_id} — ${c.title}`,
     description:
-      `Control ${c.control_id} (${c.title}) is ${c.status.replace('_', ' ')}. ` +
-      `${posture.vulnerable} quantum-vulnerable asset(s) in scope. ${c.fips || ''}`.trim(),
+      `Weakness: quantum-vulnerable cryptography affecting ${c.control_id} (${c.title}); status ${c.status.replace('_', ' ')}. ` +
+      `${c.fips || ''}`.trim(),
     props: [
-      { name: 'severity', value: c.status === 'non_compliant' ? 'high' : 'medium', ns: 'https://quarkshield.ai/ns/oscal' },
-      { name: 'control-ref', value: c.control_id, ns: 'https://quarkshield.ai/ns/oscal' },
-      ...(c.owner ? [{ name: 'responsible-party', value: c.owner, ns: 'https://quarkshield.ai/ns/oscal' }] : []),
-      ...(typeof c.percent_complete === 'number' ? [{ name: 'percent-complete', value: String(c.percent_complete), ns: 'https://quarkshield.ai/ns/oscal' }] : []),
-      ...(c.target_date ? [{ name: 'target-completion-date', value: String(c.target_date).slice(0, 10), ns: 'https://quarkshield.ai/ns/oscal' }] : []),
+      { name: 'poam-id', value: `V-${String(i + 1).padStart(4, '0')}`, ns: QS_NS },
+      { name: 'POA&M Item ID', value: `V-${String(i + 1).padStart(4, '0')}`, ns: QS_NS },
+      { name: 'control-ref', value: c.control_id, ns: QS_NS },
+      { name: 'weakness-name', value: `Quantum-vulnerable cryptography (${c.control_id})`, ns: QS_NS },
+      { name: 'weakness-detector-source', value: DETECTOR, ns: QS_NS },
+      { name: 'weakness-source-identifier', value: `QS-${(c.control_key || 'CTRL')}-${String(i + 1).padStart(3, '0')}`, ns: QS_NS },
+      { name: 'asset-identifier', value: assetSummary, ns: QS_NS },
+      { name: 'severity', value: c.status === 'non_compliant' ? 'high' : 'moderate', ns: QS_NS },
+      { name: 'original-risk-rating', value: c.status === 'non_compliant' ? 'High' : 'Moderate', ns: QS_NS },
+      ...(c.owner ? [{ name: 'point-of-contact', value: c.owner, ns: QS_NS }] : []),
+      ...(typeof c.percent_complete === 'number' ? [{ name: 'percent-complete', value: String(c.percent_complete), ns: QS_NS }] : []),
+      ...(c.target_date ? [{ name: 'scheduled-completion-date', value: String(c.target_date).slice(0, 10), ns: QS_NS }] : []),
     ],
-    remarks: c.comments || 'Migrate affected cryptography to NIST-standardized post-quantum algorithms (FIPS 203 ML-KEM / FIPS 204 ML-DSA / FIPS 205 SLH-DSA).',
+    'related-observations': [{ 'observation-uuid': observations[i].uuid }],
+    remarks:
+      `Overall remediation plan: ${c.comments || 'Migrate affected cryptography to NIST-standardized post-quantum algorithms (FIPS 203 ML-KEM / FIPS 204 ML-DSA / FIPS 205 SLH-DSA).'}`,
   }));
 
   return {
@@ -193,8 +237,9 @@ export const buildPOAM = (project: ProjectRecord, controls: ControlRow[], postur
       metadata: metadata(`Plan of Action & Milestones — ${project.name} (${frameworkLabel(project.framework)})`, project.tenant_name, project.framework),
       'system-id': systemIds(project)[0],
       'local-definitions': {
-        remarks: `${open.length} open control item(s) of ${controls.length} assessed; ${posture.vulnerable} quantum-vulnerable asset(s) in scope.`,
+        remarks: `${open.length} open control item(s) of ${controls.length} assessed; ${posture.vulnerable} quantum-vulnerable asset(s) in scope. Weakness detector: ${DETECTOR}.`,
       },
+      ...(observations.length ? { observations } : {}),
       'poam-items': poamItems.length > 0 ? poamItems : [{
         uuid: uuid(),
         title: 'No open control items',
