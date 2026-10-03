@@ -520,6 +520,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     vulnerableAssets: 98,
     avgRiskScore: 87
   });
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'compliance' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
     try {
       const p = new URLSearchParams(window.location.search);
@@ -1079,148 +1080,12 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         throw new Error('Failed to fetch from /api/tenant/:tenant/portal-data');
       }
     } catch (err) {
-      console.warn('Backend tenant portal endpoint fallback, using registered tenant state:', err);
-      // Fallback for Spinovation Corp with verified 3 machines and 98 assets
-      if (cleanSlug.includes('spinovation')) {
-        setClient({
-          id: 'client-090e8814',
-          name: 'spinovationcorp',
-          displayName: 'Spinovation Corp',
-          customerId: 'CORP-9812',
-          appPort: 5002,
-          dbPort: 5434,
-          status: 'active',
-          subscriptionTier: 'growth',
-          mcaLimit: 100,
-          contactName: 'Ganapati Sridhar',
-          adminEmail: 'sridhargs@spinovation.com',
-          accountType: 'corporate'
-        });
-        setLicenses([
-          {
-            id: 'lic-spinovation',
-            licenseKey: 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8',
-            tenantName: 'SPINOVATIONCORP',
-            tier: 'corporate',
-            durationDays: 365,
-            seats: 100,
-            expiresAt: new Date(Date.now() + 365 * 86400000).toISOString(),
-            customerId: 'CORP-9812',
-            status: 'active'
-          },
-          {
-            id: 'lic-spinovation-revoked',
-            licenseKey: 'QS-CORP-SPINOVATIONCORP-6C8B185C-ED27F90B',
-            tenantName: 'SPINOVATIONCORP',
-            tier: 'corporate',
-            durationDays: 365,
-            seats: 100,
-            expiresAt: new Date(Date.now() + 365 * 86400000).toISOString(),
-            customerId: 'CORP-9812',
-            status: 'revoked'
-          }
-        ]);
-        setMachines([
-          {
-            id: 'mach-1a3a27bc80a7f8ce7ff6',
-            hostname: 'Ganapatis-MBP',
-            os: 'darwin',
-            arch: 'arm64',
-            ip: '192.168.1.151',
-            agentVersion: '2.0.0',
-            status: 'online',
-            riskLevel: 'high',
-            quantumRiskScore: 78,
-            assetCount: 4,
-            vulnerableCount: 4,
-            lastSeen: new Date(Date.now() - 1000 * 60 * 3).toISOString(),
-            createdAt: new Date().toISOString(),
-            tenantName: 'SPINOVATIONCORP',
-            licenseKey: 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'
-          },
-          {
-            id: 'mach-61bf817fd5925e33c423',
-            hostname: 'DESKTOP-QFOTIIO',
-            os: 'windows',
-            arch: 'amd64',
-            ip: '169.254.137.140',
-            agentVersion: '2.0.0',
-            status: 'online',
-            riskLevel: 'critical',
-            quantumRiskScore: 89,
-            assetCount: 49,
-            vulnerableCount: 49,
-            lastSeen: new Date(Date.now() - 1000 * 60 * 8).toISOString(),
-            createdAt: new Date().toISOString(),
-            tenantName: 'SPINOVATIONCORP',
-            licenseKey: 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'
-          },
-          {
-            id: 'mach-93bd69a57dde89b7c098',
-            hostname: 'WINDOWS-GII1MO9',
-            os: 'windows',
-            arch: 'amd64',
-            ip: '192.168.1.120',
-            agentVersion: '2.0.0',
-            status: 'online',
-            riskLevel: 'critical',
-            quantumRiskScore: 88,
-            assetCount: 45,
-            vulnerableCount: 45,
-            lastSeen: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-            createdAt: new Date().toISOString(),
-            tenantName: 'SPINOVATIONCORP',
-            licenseKey: 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'
-          }
-        ]);
-      } else if (cleanSlug.includes('algomeld')) {
-        setClient({
-          id: 'client-algomeld',
-          name: 'algomeld',
-          displayName: 'Algo Meld MSP',
-          customerId: 'PART-4421',
-          appPort: 5003,
-          dbPort: 5435,
-          status: 'active',
-          subscriptionTier: 'partner',
-          mcaLimit: 50,
-          contactName: 'Ganapati Sridhar',
-          adminEmail: 'sridhargs@algomeld.com',
-          accountType: 'partner'
-        });
-        setLicenses([
-          {
-            id: 'lic-algomeld-01',
-            licenseKey: 'QS-PART-ALGOMELD-4421-KYBER768',
-            tenantName: 'ALGOMELD',
-            tier: 'partner',
-            durationDays: 365,
-            seats: 50,
-            expiresAt: new Date(Date.now() + 365 * 86400000).toISOString(),
-            customerId: 'PART-4421',
-            status: 'active'
-          }
-        ]);
-        setMachines([
-          {
-            id: 'mach-algomeld-01',
-            hostname: 'AlgoMeld-MacBookPro',
-            os: 'darwin',
-            arch: 'arm64',
-            ip: '192.168.1.188',
-            agentVersion: '2.0.0',
-            status: 'online',
-            riskLevel: 'high',
-            quantumRiskScore: 82,
-            assetCount: 12,
-            vulnerableCount: 12,
-            lastSeen: new Date(Date.now() - 1000 * 60 * 2).toISOString(),
-            createdAt: new Date().toISOString(),
-            tenantName: 'ALGOMELD',
-            licenseKey: 'QS-PART-ALGOMELD-4421-KYBER768'
-          }
-        ]);
-      }
+      // Honest handling (BILL-6): a failed portal-data fetch almost always means the
+      // session expired. Do NOT fabricate data — the old mock showed fake 'LIVE'
+      // machines/assets, which misled users and would be dangerous in a live demo.
+      // Flag it so the UI prompts a clean re-login instead of showing invented numbers.
+      console.warn('tenant portal-data fetch failed (session likely expired):', err);
+      setSessionExpired(true);
     } finally {
       setLoading(false);
     }
@@ -2592,6 +2457,24 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   // VIEW 2: TENANT ADMIN DASHBOARD (Strictly Isolated to this Tenant)
   // Left Sidebar Frame matching Super Admin Console Layout & Theme
   // ============================================================================
+  if (sessionExpired) {
+    return (
+      <div style={{ width: '100vw', height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-dark, #07090E)', color: '#e2e8f0' }}>
+        <div style={{ textAlign: 'center', maxWidth: 440, padding: '2rem', background: 'rgba(15,23,42,0.6)', border: '1px solid rgba(124,58,237,0.4)', borderRadius: 16 }}>
+          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🔒</div>
+          <h2 style={{ margin: '0 0 0.5rem' }}>Your session has expired</h2>
+          <p style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1.25rem' }}>
+            Please sign in again to load your live cryptographic inventory. (We don't show cached or sample data when the session expires.)
+          </p>
+          <button
+            onClick={() => { try { sessionStorage.removeItem('quarkshield_token'); localStorage.removeItem('quarkshield_token'); } catch { /* ignore */ } if (onLogout) onLogout(); else window.location.href = '/'; }}
+            style={{ fontWeight: 600, fontSize: '0.95rem', padding: '0.65rem 1.4rem', borderRadius: 10, color: '#fff', background: '#7c3aed', border: '1px solid #8b5cf6', cursor: 'pointer' }}
+          >Sign in again</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{
       display: 'flex',
@@ -3214,10 +3097,18 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         <div style={{ fontSize: '1.85rem', fontWeight: 800, color: '#38bdf8', marginTop: '0.25rem' }}>
                           {machines.length}
                         </div>
-                        <div style={{ fontSize: '0.76rem', color: '#4ade80', marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
-                          <CheckCircle2 size={12} />
-                          <span>100% Active & Reporting</span>
-                        </div>
+                        {(() => {
+                          const onlineCount = machines.filter(m => m.status === 'online').length;
+                          const total = machines.length;
+                          const allOnline = total > 0 && onlineCount === total;
+                          const color = allOnline ? '#4ade80' : (onlineCount === 0 ? '#f87171' : '#fbbf24');
+                          return (
+                            <div style={{ fontSize: '0.76rem', color, marginTop: '0.2rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                              <CheckCircle2 size={12} />
+                              <span>{onlineCount} of {total} reporting{total > 0 && !allOnline ? ` · ${total - onlineCount} offline` : ''}</span>
+                            </div>
+                          );
+                        })()}
                       </div>
                       <div style={{ background: 'rgba(56, 189, 248, 0.12)', padding: '0.65rem', borderRadius: '8px', color: '#38bdf8' }}>
                         <Laptop size={22} />
@@ -3445,21 +3336,27 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 </span>
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem' }}>
-                                <span style={{
-                                  fontSize: '0.72rem',
-                                  fontWeight: 600,
-                                  color: '#4ade80',
-                                  background: 'rgba(34, 197, 94, 0.12)',
-                                  padding: '0.15rem 0.45rem',
-                                  borderRadius: '4px',
-                                  border: '1px solid rgba(34, 197, 94, 0.25)',
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '0.3rem'
-                                }}>
-                                  <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80' }}></span>
-                                  Online
-                                </span>
+                                {(() => {
+                                  const isOnline = m.status === 'online';
+                                  const dot = isOnline ? '#4ade80' : '#94a3b8';
+                                  return (
+                                    <span style={{
+                                      fontSize: '0.72rem',
+                                      fontWeight: 600,
+                                      color: isOnline ? '#4ade80' : '#94a3b8',
+                                      background: isOnline ? 'rgba(34, 197, 94, 0.12)' : 'rgba(148, 163, 184, 0.12)',
+                                      padding: '0.15rem 0.45rem',
+                                      borderRadius: '4px',
+                                      border: `1px solid ${isOnline ? 'rgba(34, 197, 94, 0.25)' : 'rgba(148, 163, 184, 0.25)'}`,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.3rem'
+                                    }}>
+                                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: dot }}></span>
+                                      {isOnline ? 'Online' : 'Offline'}
+                                    </span>
+                                  );
+                                })()}
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem', textAlign: 'right' }}>
                                 <button
@@ -6688,24 +6585,29 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                     </span>
                                   </td>
                                   <td style={{ padding: '0.6rem 0.5rem' }}>
-                                    <span style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '0.35rem',
-                                      fontSize: '0.74rem',
-                                      fontWeight: 600,
-                                      color: '#4ade80',
-                                      background: 'rgba(34, 197, 94, 0.1)',
-                                      padding: '0.15rem 0.45rem',
-                                      borderRadius: '4px',
-                                      border: '1px solid rgba(34, 197, 94, 0.25)'
-                                    }}>
-                                      <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#4ade80' }} />
-                                      Online
-                                    </span>
+                                    {(() => {
+                                      const isOnline = m.status === 'online';
+                                      return (
+                                        <span style={{
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '0.35rem',
+                                          fontSize: '0.74rem',
+                                          fontWeight: 600,
+                                          color: isOnline ? '#4ade80' : '#94a3b8',
+                                          background: isOnline ? 'rgba(34, 197, 94, 0.1)' : 'rgba(148, 163, 184, 0.1)',
+                                          padding: '0.15rem 0.45rem',
+                                          borderRadius: '4px',
+                                          border: `1px solid ${isOnline ? 'rgba(34, 197, 94, 0.25)' : 'rgba(148, 163, 184, 0.25)'}`
+                                        }}>
+                                          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: isOnline ? '#4ade80' : '#94a3b8' }} />
+                                          {isOnline ? 'Online' : 'Offline'}
+                                        </span>
+                                      );
+                                    })()}
                                   </td>
                                   <td style={{ padding: '0.6rem 0.5rem', color: 'var(--text-muted, #94a3b8)', fontSize: '0.76rem', fontFamily: 'monospace' }}>
-                                    {m.lastSeen ? new Date(m.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Recently'}
+                                    {m.lastSeen ? new Date(m.lastSeen).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown'}
                                   </td>
                                   <td style={{ padding: '0.6rem 0.5rem', textAlign: 'right' }}>
                                     <button

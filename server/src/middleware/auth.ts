@@ -13,7 +13,10 @@ import pool from '../config/db';
  */
 
 export const SESSION_COOKIE = 'qs_session';
-const DEFAULT_TTL = '12h';
+// Session lifetime. 12h was too short and caused frequent mid-use expiry (the recurring
+// ?session=expired). 7 days with the httpOnly cookie is a reasonable tenant-portal TTL.
+const DEFAULT_TTL = '7d';
+const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 const getSecret = (): string => {
   const s = process.env.JWT_SECRET;
@@ -68,7 +71,7 @@ export const setSessionCookie = (res: Response, token: string): void => {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     domain,
-    maxAge: 12 * 60 * 60 * 1000,
+    maxAge: SESSION_MAX_AGE_MS,
     path: '/',
   });
 };

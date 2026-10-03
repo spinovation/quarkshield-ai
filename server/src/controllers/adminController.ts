@@ -3033,7 +3033,10 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         m.arch,
         m.ip,
         m.agent_version as "agentVersion",
-        m.status,
+        -- Derive real status from last_seen (the stored status was hard-set to 'online'
+        -- at every ingest and never flipped back). A fleet agent syncs ~daily, so treat a
+        -- machine not seen in 24h as offline/stale.
+        CASE WHEN m.last_seen > NOW() - INTERVAL '24 hours' THEN 'online' ELSE 'offline' END AS status,
         m.risk_level as "riskLevel",
         m.quantum_risk_score as "quantumRiskScore",
         m.asset_count as "assetCount",
