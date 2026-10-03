@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import crypto from 'crypto';
 import pool from '../config/db';
-import { resolveWriteTenant, canAccessTenant } from '../middleware/auth';
+import { canAccessTenant, isSuperRole } from '../middleware/auth';
 import { buildSSP, buildPOAM, ProjectRecord, ControlRow, Posture } from '../lib/oscal';
 import {
   FRAMEWORKS, isFramework, controlsForFramework, autoStatus, CRYPTO_CONTROLS, Framework, ControlStatus,
@@ -13,6 +13,27 @@ import {
  * from the catalog with a CBOM-derived status; the assessor edits status/owner/%/target,
  * and the SSP/POA&M are generated from those control rows.
  */
+
+/**
+ * Robust tenant resolution (BILL-4c). A stale session token can be missing its tenant
+ * claim (minted before the tenant was attached), which broke project creation with a 400.
+ * Super roles use the requested tenant; a tenant user uses the session tenant, and if that
+ * is empty we look it up from the DB by their AUTHENTICATED email (secure — never trusts a
+ * client-supplied tenant for a non-super), so a stale token no longer blocks writes.
+ */
+const resolveTenant = async (req: Request): Promise<string> => {
+  if (isSuperRole(req.user?.role)) {
+    return ((req.body?.tenantName || req.query?.tenant || '') as string).toString().trim();
+  }
+  let t = (req.user?.tenant || '').toString().trim();
+  if (!t && req.user?.email) {
+    try {
+      const r = await pool.query('SELECT tenant_name FROM tenant_users WHERE LOWER(email) = LOWER($1) LIMIT 1', [req.user.email]);
+      t = (r.rows[0]?.tenant_name || '').toString().trim();
+    } catch { /* fall through */ }
+  }
+  return t;
+};
 
 const cleanArr = (v: any): string[] | null => {
   if (!Array.isArray(v)) return null;
@@ -63,7 +84,7 @@ export const getFrameworks = async (_req: Request, res: Response) => {
 // ---- Projects CRUD ----
 export const listProjects = async (req: Request, res: Response) => {
   try {
-    const tenant = resolveWriteTenant(req, (req.query.tenant as string) || null);
+    const tenant = await resolveTenant(req);
     const r = await pool.query(
       `SELECT p.id, p.tenant_name AS "tenantName", p.name, p.description, p.framework,
               p.system_id AS "systemId", p.impact_level AS "impactLevel",
@@ -85,8 +106,8 @@ export const listProjects = async (req: Request, res: Response) => {
 export const createProject = async (req: Request, res: Response) => {
   const db = await pool.connect();
   try {
-    const tenant = resolveWriteTenant(req, req.body.tenantName || null);
-    if (!tenant) return res.status(400).json({ error: 'Tenant could not be resolved' });
+    const tenant = await resolveTenant(req);
+    if (!tenant) return res.status(400).json({ error: 'Tenant could not be resolved — please sign out and back in.' });
     const name = (req.body.name || '').toString().trim();
     if (!name) return res.status(400).json({ error: 'Project name is required' });
     const framework: Framework = isFramework(req.body.framework) ? req.body.framework : 'nist-800-53r5';
