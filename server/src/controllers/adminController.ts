@@ -3032,6 +3032,10 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         m.os,
         m.arch,
         m.ip,
+        m.public_ip as "publicIp",
+        m.geo_city as "geoCity",
+        m.geo_region as "geoRegion",
+        m.geo_country as "geoCountry",
         m.agent_version as "agentVersion",
         -- Derive real status from last_seen (the stored status was hard-set to 'online'
         -- at every ingest and never flipped back). A fleet agent syncs ~daily, so treat a

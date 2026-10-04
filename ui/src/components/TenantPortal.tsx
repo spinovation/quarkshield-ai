@@ -60,7 +60,8 @@ import {
   Filter,
   Package,
   Network,
-  CreditCard
+  CreditCard,
+  MapPin
 } from 'lucide-react';
 import { TenantUserManagement } from './TenantUserManagement';
 import { EnterprisePkiVaults } from './EnterprisePkiVaults';
@@ -154,6 +155,10 @@ interface FleetMachine {
   os: string;
   arch: string;
   ip: string;
+  publicIp?: string;
+  geoCity?: string;
+  geoRegion?: string;
+  geoCountry?: string;
   agentVersion: string;
   status: string;
   riskLevel: string;
@@ -3262,7 +3267,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           <th style={{ padding: '0.75rem 0.5rem' }}>Workstation / Host</th>
                           <th style={{ padding: '0.75rem 0.5rem' }}>Hardware UUID</th>
                           <th style={{ padding: '0.75rem 0.5rem' }}>Platform / OS</th>
-                          <th style={{ padding: '0.75rem 0.5rem' }}>IP Address</th>
+                          <th style={{ padding: '0.75rem 0.5rem' }}>IP / Location</th>
                           <th style={{ padding: '0.75rem 0.5rem' }}>Discovered Assets</th>
                           <th style={{ padding: '0.75rem 0.5rem' }}>Quantum Score</th>
                           <th style={{ padding: '0.75rem 0.5rem' }}>Status</th>
@@ -3316,8 +3321,21 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                   {isMac ? 'macOS (arm64)' : isWin ? 'Windows (x64)' : m.os}
                                 </span>
                               </td>
-                              <td style={{ padding: '0.85rem 0.5rem', fontFamily: 'monospace', color: 'var(--text-secondary, #94a3b8)' }}>
-                                {m.ip}
+                              <td style={{ padding: '0.85rem 0.5rem', color: 'var(--text-secondary, #94a3b8)' }}>
+                                <div style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
+                                  {m.ip} <span style={{ fontSize: '0.64rem', color: '#64748b' }}>LAN</span>
+                                </div>
+                                {m.publicIp && (
+                                  <div style={{ fontFamily: 'monospace', fontSize: '0.74rem', color: '#64748b', marginTop: '0.15rem' }}>
+                                    {m.publicIp} <span style={{ fontSize: '0.62rem' }}>public</span>
+                                  </div>
+                                )}
+                                {(m.geoCity || m.geoCountry) && (
+                                  <div style={{ fontSize: '0.72rem', color: '#38bdf8', marginTop: '0.15rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                    <MapPin size={11} />
+                                    {[m.geoCity, m.geoRegion, m.geoCountry].filter(Boolean).join(', ')}
+                                  </div>
+                                )}
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem', color: '#ffffff', fontWeight: 600 }}>
                                 {m.assetCount} assets ({m.vulnerableCount} vulnerable)

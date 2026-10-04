@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
 import { canAccessTenant } from '../middleware/auth';
+import { geoLocateMachine } from '../lib/downloadTracker';
 
 // ==========================================
 // 1. FLEET TOKENS
@@ -148,6 +149,10 @@ export const getFleetMachines = async (req: Request, res: Response) => {
         m.os,
         m.arch,
         m.ip,
+        m.public_ip as "publicIp",
+        m.geo_city as "geoCity",
+        m.geo_region as "geoRegion",
+        m.geo_country as "geoCountry",
         m.agent_version as "agentVersion",
         -- DEF-37: a machine with no telemetry for > 30 min is reported offline
         -- (nothing else ever transitions it back to offline after ingest).
@@ -916,6 +921,11 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     if (tokenRow.id) {
       await pool.query('UPDATE fleet_tokens SET status = $1, last_sync = CURRENT_TIMESTAMP WHERE id = $2', ['active', tokenRow.id]);
     }
+
+    // BILL-7: record + geolocate the machine's PUBLIC egress IP (from Cloudflare
+    // headers on this report). Fire-and-forget; the stored `ip` above stays the
+    // agent's local interface address.
+    geoLocateMachine(req, machineId);
 
     // Capture the previous asset fingerprints BEFORE replacing them, so we can
     // record what changed since the last scan (DEF-36 drift detection).

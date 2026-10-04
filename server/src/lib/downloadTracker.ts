@@ -55,6 +55,60 @@ const geoEnrich = async (id: string, ip: string): Promise<void> => {
   }
 };
 
+/**
+ * BILL-7: capture + geolocate an enrolled machine's PUBLIC egress IP. Called
+ * fire-and-forget from the telemetry ingest. The machine's stored `ip` is its LOCAL
+ * interface address (not geolocatable); the public IP comes from Cloudflare headers on
+ * the report request. We only hit ip-api when the public IP actually changed (or geo is
+ * still unresolved), so daily reports don't hammer the lookup service.
+ */
+export const geoLocateMachine = (req: Request, machineId: string): void => {
+  (async () => {
+    try {
+      const ip = clientIp(req);
+      const country = ((req.headers['cf-ipcountry'] as string) || '').toUpperCase().slice(0, 2).replace(/[^A-Z]/g, '') || null;
+      // Always record the public IP + Cloudflare country (cheap, no external call).
+      const prev = await pool.query(
+        `UPDATE fleet_machines
+            SET public_ip = $1,
+                geo_country = COALESCE($2, geo_country)
+          WHERE id = $3
+        RETURNING public_ip, geo_city, geo_country`,
+        [ip || null, country, machineId]
+      );
+      const row = prev.rows[0];
+      if (!row) return;
+      if (process.env.QS_GEO_DISABLE === '1' || isPrivateIp(ip)) return;
+      // Skip the external lookup if we already have a city for this exact IP.
+      if (row.geo_city && row.public_ip === ip) return;
+
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 2500);
+      try {
+        const r = await fetch(
+          `http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,countryCode,regionName,city`,
+          { signal: ctrl.signal }
+        );
+        if (!r.ok) return;
+        const d: any = await r.json();
+        if (d.status !== 'success') return;
+        await pool.query(
+          `UPDATE fleet_machines
+              SET geo_city = $1, geo_region = $2,
+                  geo_country = COALESCE(NULLIF($3,''), geo_country),
+                  geo_updated_at = NOW()
+            WHERE id = $4`,
+          [d.city || null, d.regionName || null, d.countryCode || null, machineId]
+        );
+      } finally {
+        clearTimeout(timer);
+      }
+    } catch {
+      /* best-effort only — never break telemetry ingest */
+    }
+  })();
+};
+
 export const logDownload = (req: Request, file: string): void => {
   (async () => {
     try {

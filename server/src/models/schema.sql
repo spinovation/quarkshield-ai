@@ -604,6 +604,16 @@ ALTER TABLE fleet_tokens ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS license_key VARCHAR(255);
 
+-- Public IP + geolocation for enrolled endpoints (BILL-7). The `ip` column holds the
+-- agent's LOCAL interface address (192.168.x / 169.254.x — not geolocatable). The
+-- server captures the PUBLIC egress IP from Cloudflare headers on each telemetry
+-- report and resolves city/region/country via ip-api (QS_GEO_DISABLE=1 to skip).
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS public_ip VARCHAR(64);
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_city VARCHAR(120);
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_region VARCHAR(120);
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_country VARCHAR(4);
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_updated_at TIMESTAMP WITH TIME ZONE;
+
 -- TOTP 2FA recovery-code hashes (two_factor_secret already exists on both tables)
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
 ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
