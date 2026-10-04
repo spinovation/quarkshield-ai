@@ -949,23 +949,37 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		}()
 	}
 
-	// Background Automated Daily Sync Worker
+	// Background worker: on-demand command polling (DEF-38) + automated daily sync.
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			cfg := LoadEnrollmentConfig()
-			if !cfg.AutoSyncEnabled || cfg.Token == "" {
+			if cfg.Token == "" {
 				continue
 			}
 
-			shouldSync := false
-			if cfg.LastSyncTime == "" {
-				shouldSync = true
-			} else {
-				lastT, err := time.Parse(time.RFC3339, cfg.LastSyncTime)
-				if err != nil || time.Since(lastT) >= time.Duration(cfg.SyncIntervalMin)*time.Minute {
+			// On-demand poll: honor an admin "Pull Telemetry" (scan_and_sync) request
+			// within ~2 min while the app is running, independent of the daily timer and
+			// of AutoSyncEnabled (an operator-initiated pull should always be serviced).
+			forceSync := false
+			if cmds, err := FetchAgentCommands(cfg.ServerURL, cfg.Token); err == nil {
+				for _, c := range cmds {
+					if c == "scan_and_sync" {
+						forceSync = true
+					}
+				}
+			}
+
+			shouldSync := forceSync
+			if !shouldSync && cfg.AutoSyncEnabled {
+				if cfg.LastSyncTime == "" {
 					shouldSync = true
+				} else {
+					lastT, err := time.Parse(time.RFC3339, cfg.LastSyncTime)
+					if err != nil || time.Since(lastT) >= time.Duration(cfg.SyncIntervalMin)*time.Minute {
+						shouldSync = true
+					}
 				}
 			}
 

@@ -1105,7 +1105,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         body: JSON.stringify({ priority: 'high' })
       });
       if (res.ok) {
-        alert(`Telemetry pull dispatched to ${hostname}. The workstation agent will sync its latest scan immediately.`);
+        alert(`Telemetry pull queued for ${hostname}. The agent picks up on-demand requests while the QuarkShield app is running (within ~2 min); if the app is closed it will sync at its next scheduled run. Status updates once the endpoint reports back.`);
         fetchTenantData();
       } else {
         alert(`Failed to dispatch pull request to ${hostname}.`);
