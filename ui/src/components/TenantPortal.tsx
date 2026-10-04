@@ -1118,6 +1118,31 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     }
   };
 
+  const [bulkPulling, setBulkPulling] = useState<string | null>(null); // null | 'ALL' | country code
+  const handlePullBulk = async (country?: string) => {
+    const scopeLabel = country ? country : 'all endpoints';
+    if (!window.confirm(`Queue a telemetry pull for ${scopeLabel}? Each agent runs it on its next check-in while the QuarkShield app is open.`)) return;
+    setBulkPulling(country || 'ALL');
+    try {
+      const res = await fetch(`/api/fleet/pull-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(country ? { country } : {})
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(`${d.message || `Pull queued for ${scopeLabel}.`} Endpoints update as they report back (while the app is running).`);
+        fetchTenantData();
+      } else {
+        alert(`Failed to queue bulk pull: ${d.error || res.status}`);
+      }
+    } catch (e) {
+      alert(`Bulk pull error: ${e}`);
+    } finally {
+      setBulkPulling(null);
+    }
+  };
+
   useEffect(() => {
     fetchTenantData();
   }, [cleanSlug]);
@@ -3253,6 +3278,22 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                   {!unknown && v.online > 0 ? ` · ${v.online} online` : ''}
                                 </div>
                               </div>
+                              {!unknown && (
+                                <button
+                                  onClick={() => handlePullBulk(cc)}
+                                  disabled={bulkPulling !== null}
+                                  title={`Pull all endpoints in ${cc}`}
+                                  style={{
+                                    marginLeft: '0.3rem', background: 'transparent',
+                                    border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8',
+                                    borderRadius: '6px', padding: '0.25rem 0.4rem',
+                                    cursor: bulkPulling !== null ? 'wait' : 'pointer',
+                                    display: 'inline-flex', alignItems: 'center'
+                                  }}
+                                >
+                                  <RefreshCw size={12} className={bulkPulling === cc ? 'animate-spin' : ''} />
+                                </button>
+                              )}
                             </div>
                           );
                         })}
@@ -3279,6 +3320,27 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       </p>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                      <button
+                        onClick={() => handlePullBulk()}
+                        disabled={bulkPulling !== null || machines.length === 0}
+                        title="Queue an on-demand telemetry pull for every enrolled endpoint"
+                        style={{
+                          background: 'rgba(56, 189, 248, 0.12)',
+                          border: '1px solid rgba(56, 189, 248, 0.3)',
+                          color: '#38bdf8',
+                          padding: '0.4rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: bulkPulling !== null ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          opacity: machines.length === 0 ? 0.5 : 1
+                        }}
+                      >
+                        <RefreshCw size={14} className={bulkPulling === 'ALL' ? 'animate-spin' : ''} /> Pull All
+                      </button>
                       <button
                         onClick={() => setScheduleModalOpen(true)}
                         style={{
@@ -3916,6 +3978,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                             <th style={{ padding: '0.65rem 0.5rem' }}>Algorithm</th>
                             <th style={{ padding: '0.65rem 0.5rem' }}>Key Size</th>
                             <th style={{ padding: '0.65rem 0.5rem' }}>Discovered On</th>
+                            <th style={{ padding: '0.65rem 0.5rem' }}>Last Updated</th>
                             <th style={{ padding: '0.65rem 0.5rem' }}>Quantum Vulnerability</th>
                           </tr>
                         </thead>
@@ -4001,6 +4064,23 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                     <span>{a.hostname || 'Workstation'}</span>
                                   </span>
                                 )}
+                              </td>
+                              <td style={{ padding: '0.7rem 0.5rem', color: 'var(--text-muted, #94a3b8)', fontSize: '0.76rem', whiteSpace: 'nowrap' }}>
+                                {(() => {
+                                  if (!a.createdAt) return <span style={{ color: '#64748b' }}>—</span>;
+                                  const d = new Date(a.createdAt);
+                                  const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+                                  const rel = mins < 1 ? 'just now'
+                                    : mins < 60 ? `${mins}m ago`
+                                    : mins < 1440 ? `${Math.floor(mins / 60)}h ago`
+                                    : `${Math.floor(mins / 1440)}d ago`;
+                                  const stale = mins >= 1440 * 7; // >7 days
+                                  return (
+                                    <span title={d.toLocaleString()} style={{ color: stale ? '#fbbf24' : 'var(--text-muted, #94a3b8)' }}>
+                                      {rel}
+                                    </span>
+                                  );
+                                })()}
                               </td>
                               <td style={{ padding: '0.7rem 0.5rem' }}>
                                 {a.isVulnerable ? (

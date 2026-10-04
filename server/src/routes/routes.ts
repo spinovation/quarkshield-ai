@@ -14,6 +14,7 @@ import {
   getPowerShellInstallerScript,
   ingestTelemetry,
   enqueuePullCommand,
+  enqueueBulkPullCommand,
   getTenantDailySnapshots,
   getFleetDrift,
   agentFetchCommands
@@ -170,6 +171,7 @@ router.delete('/fleet/tokens/:id', requireAuth, requireTenantAccess, revokeFleet
 router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines);
 router.delete('/fleet/machines/:id', requireAuth, requireTenantAccess, deleteFleetMachine);
 router.post('/fleet/machines/:machineId/pull', requireAuth, requireTenantAccess, enqueuePullCommand);
+router.post('/fleet/pull-bulk', requireAuth, requireTenantAccess, enqueueBulkPullCommand);
 router.get('/tenant/:tenant/daily-snapshots', requireAuth, requireTenantAccess, getTenantDailySnapshots);
 router.get('/fleet/drift', requireAuth, requireTenantAccess, getFleetDrift);
 router.get('/fleet/cbom', requireAuth, requireTenantAccess, getFleetCBOM);

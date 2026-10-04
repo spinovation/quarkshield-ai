@@ -1430,8 +1430,27 @@ export const GitRepoAuditor: React.FC<{ onAssetsChanged?: () => void }> = ({ onA
                 <div style={{ color: 'var(--text-secondary)', fontSize: '0.78rem', marginBottom: '0.4rem' }}>
                   Branch: {item.branch} • {item.totalAssets} crypto assets ({item.vulnerableCount} vulnerable)
                 </div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>
-                  {new Date(item.scannedAt).toLocaleString()}
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  {(() => {
+                    const d = new Date(item.scannedAt);
+                    const mins = Math.floor((Date.now() - d.getTime()) / 60000);
+                    const rel = mins < 1 ? 'just now'
+                      : mins < 60 ? `${mins}m ago`
+                      : mins < 1440 ? `${Math.floor(mins / 60)}h ago`
+                      : `${Math.floor(mins / 1440)}d ago`;
+                    // history is ordered newest-first, so the first row per repoUrl is its latest scan
+                    const isLatest = history.find(h => h.repoUrl === item.repoUrl)?.id === item.id;
+                    return (
+                      <>
+                        <span title={d.toLocaleString()}>{d.toLocaleString()} · {rel}</span>
+                        {isLatest && (
+                          <span style={{ background: 'rgba(34, 197, 94, 0.15)', color: '#4ade80', border: '1px solid rgba(34, 197, 94, 0.3)', borderRadius: '4px', padding: '0.05rem 0.35rem', fontSize: '0.64rem', fontWeight: 700 }}>
+                            LATEST IN CBOM
+                          </span>
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             ))}

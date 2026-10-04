@@ -1190,6 +1190,71 @@ export const getFleetDrift = async (req: Request, res: Response) => {
   }
 };
 
+// Enqueue a bulk on-demand pull for the whole fleet, or a region/country subset.
+// Body: { country?: "US" }  (optional — omit to pull every enrolled endpoint).
+// Each agent honors it on its next poll while the QuarkShield app is running.
+export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved for bulk pull.' });
+    }
+    const country = (req.body?.country || '').toString().trim().toUpperCase() || null;
+
+    // Scope machines to the tenant (same normalization as the portal), optional geo filter.
+    const params: any[] = [tenant];
+    let geoClause = '';
+    if (country) {
+      params.push(country);
+      geoClause = ` AND UPPER(COALESCE(m.geo_country, '')) = $${params.length}`;
+    }
+    const machines = await pool.query(
+      `SELECT m.id
+         FROM fleet_machines m
+         LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE (LOWER(m.tenant_name) = LOWER($1)
+            OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+            OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+          ${geoClause}`,
+      params
+    );
+    if (machines.rowCount === 0) {
+      return res.json({ success: true, queued: 0, country, message: 'No matching endpoints to pull.' });
+    }
+
+    // One pending scan_and_sync per machine; skip machines that already have a
+    // pending pull so repeated clicks don't pile up duplicate commands.
+    const values: string[] = [];
+    const vParams: any[] = [];
+    let i = 1;
+    for (const row of machines.rows) {
+      const cid = 'cmd-' + crypto.randomBytes(8).toString('hex');
+      values.push(`($${i++}, $${i++}, 'scan_and_sync', 'pending')`);
+      vParams.push(cid, row.id);
+    }
+    await pool.query(
+      `INSERT INTO fleet_commands (id, machine_id, command, status)
+       SELECT v.id, v.machine_id, v.command, v.status
+         FROM (VALUES ${values.join(',')}) AS v(id, machine_id, command, status)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM fleet_commands fc
+           WHERE fc.machine_id = v.machine_id AND fc.command = 'scan_and_sync' AND fc.status = 'pending'
+        )`,
+      vParams
+    );
+
+    res.json({
+      success: true,
+      queued: machines.rowCount,
+      country,
+      message: `On-demand sync queued for ${machines.rowCount} endpoint(s)${country ? ' in ' + country : ''}.`
+    });
+  } catch (err: any) {
+    console.error('Error queuing bulk pull command:', err);
+    res.status(500).json({ error: 'Failed to queue bulk pull.' });
+  }
+};
+
 // DEF-38: the host agent polls this to pick up on-demand commands (e.g. an
 // admin-triggered "scan now"). Authenticated by the fleet enrollment token;
 // resolves the agent's machine and returns + marks its pending commands.
