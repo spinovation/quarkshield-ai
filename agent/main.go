@@ -376,6 +376,7 @@ func main() {
 	probeFlag := flag.String("probe", "", "Active outbound TCP/TLS socket probe against target (e.g. microsoft.com:443)")
 	adcsFlag := flag.Bool("adcs", false, "Discover Active Directory Certificate Services (Windows) and report the CA inventory to the server")
 	pollFlag := flag.Bool("poll", false, "Check the server for pending on-demand commands (e.g. scan-now) and act on them")
+	daemonFlag := flag.Bool("daemon", false, "Run as a persistent background service: continuously poll for on-demand commands and perform scheduled syncs (works with no GUI open)")
 
 	flag.StringVar(pathFlag, "p", ".", "Target directory path (shorthand)")
 	flag.StringVar(serverFlag, "s", "https://quarkshield.ai", "Server URL (shorthand)")
@@ -415,6 +416,78 @@ func main() {
 	} else if strings.HasPrefix(strings.ToUpper(tokenVal), "QS-") {
 		if _, err := ActivateLicense(tokenVal); err == nil {
 			fmt.Println("✓ Local license successfully activated from license key.")
+		}
+	}
+
+	// Persistent background service (DEF-39): headless, always-on loop that polls for
+	// on-demand commands (admin "Pull Telemetry" / bulk pull) every 2 min AND performs
+	// the scheduled daily sync — so pulls land even when no GUI app is open. Installed
+	// via launchd (macOS), systemd (Linux), or a Windows scheduled task/service.
+	if *daemonFlag {
+		token := strings.TrimSpace(*tokenFlag)
+		if token == "" {
+			token = strings.TrimSpace(*licenseFlag)
+		}
+		if token == "" {
+			if cfg := LoadEnrollmentConfig(); cfg.Token != "" {
+				token = cfg.Token
+			}
+		}
+		if token == "" {
+			fmt.Println("❌ --daemon requires a fleet enrollment token (--token) or a prior enrollment.")
+			os.Exit(1)
+		}
+		server := strings.TrimSpace(*serverFlag)
+		if server == "" {
+			server = "https://quarkshield.ai"
+		}
+		hn, _ := os.Hostname()
+		fmt.Println("🛡️  QuarkShield agent started in persistent daemon mode (command polling + scheduled sync).")
+
+		runSync := func(reason string) {
+			fmt.Printf("📡 %s — scanning and syncing...\n", reason)
+			findings, _, scanErr := RunScan(true, "")
+			if scanErr != nil {
+				fmt.Printf("❌ Scan failed: %v\n", scanErr)
+				return
+			}
+			lic := GetLicenseInfo()
+			if err := SendFleetTelemetry(server, token, hn, runtime.GOOS, runtime.GOARCH, "", findings, lic.LicenseKey, lic.TenantName); err != nil {
+				fmt.Printf("❌ Telemetry failed: %v\n", err)
+				return
+			}
+			fmt.Printf("✅ Synced %d assets.\n", len(findings))
+		}
+
+		lastSync := time.Time{}
+		if cfg := LoadEnrollmentConfig(); cfg.LastSyncTime != "" {
+			if t, err := time.Parse(time.RFC3339, cfg.LastSyncTime); err == nil {
+				lastSync = t
+			}
+		}
+
+		ticker := time.NewTicker(2 * time.Minute)
+		for {
+			// 1. On-demand commands queued by an admin (Pull Telemetry / bulk pull).
+			if cmds, err := FetchAgentCommands(server, token); err == nil {
+				for _, c := range cmds {
+					if c == "scan_and_sync" {
+						runSync("On-demand pull requested by server")
+						lastSync = time.Now()
+					}
+				}
+			}
+			// 2. Scheduled sync (daily by default; honors the enrollment config interval).
+			cfg := LoadEnrollmentConfig()
+			interval := cfg.SyncIntervalMin
+			if interval <= 0 {
+				interval = 1440
+			}
+			if cfg.AutoSyncEnabled && (lastSync.IsZero() || time.Since(lastSync) >= time.Duration(interval)*time.Minute) {
+				runSync("Scheduled sync")
+				lastSync = time.Now()
+			}
+			<-ticker.C
 		}
 	}
 

@@ -5,6 +5,7 @@ import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
 import { canAccessTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
+import { effectiveRegionSql, REGIONS } from '../lib/regions';
 
 // ==========================================
 // 1. FLEET TOKENS
@@ -1200,11 +1201,16 @@ export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Tenant could not be resolved for bulk pull.' });
     }
     const country = (req.body?.country || '').toString().trim().toUpperCase() || null;
+    const region = (req.body?.region || '').toString().trim().toUpperCase() || null;
 
-    // Scope machines to the tenant (same normalization as the portal), optional geo filter.
+    // Scope machines to the tenant (same normalization as the portal), optional
+    // geo filter by country OR by effective region (manual override, else geo-derived).
     const params: any[] = [tenant];
     let geoClause = '';
-    if (country) {
+    if (region) {
+      params.push(region);
+      geoClause = ` AND ${effectiveRegionSql('m.region', 'm.geo_country')} = $${params.length}`;
+    } else if (country) {
       params.push(country);
       geoClause = ` AND UPPER(COALESCE(m.geo_country, '')) = $${params.length}`;
     }
@@ -1243,15 +1249,43 @@ export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
       vParams
     );
 
+    const scope = region || country || null;
     res.json({
       success: true,
       queued: machines.rowCount,
       country,
-      message: `On-demand sync queued for ${machines.rowCount} endpoint(s)${country ? ' in ' + country : ''}.`
+      region,
+      message: `On-demand sync queued for ${machines.rowCount} endpoint(s)${scope ? ' in ' + scope : ''}.`
     });
   } catch (err: any) {
     console.error('Error queuing bulk pull command:', err);
     res.status(500).json({ error: 'Failed to queue bulk pull.' });
+  }
+};
+
+// Set (or clear) a machine's manual region override (DEF-40). Body: { region }
+// where region is AMER/EMEA/APAC, or '' / null to clear and fall back to geo.
+export const setMachineRegion = async (req: Request, res: Response) => {
+  try {
+    const { machineId } = req.params;
+    const raw = (req.body?.region ?? '').toString().trim().toUpperCase();
+    if (raw && !(REGIONS as readonly string[]).includes(raw)) {
+      return res.status(400).json({ error: `region must be one of ${REGIONS.join(', ')} (or empty to clear).` });
+    }
+    const owner = await pool.query(
+      `SELECT COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name) AS tenant
+         FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE m.id = $1`,
+      [machineId]
+    );
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant)) {
+      return res.status(404).json({ error: 'Fleet machine not found.' });
+    }
+    await pool.query('UPDATE fleet_machines SET region = $1 WHERE id = $2', [raw || null, machineId]);
+    res.json({ success: true, machineId, region: raw || null });
+  } catch (err: any) {
+    console.error('Error setting machine region:', err);
+    res.status(500).json({ error: 'Failed to set region.' });
   }
 };
 

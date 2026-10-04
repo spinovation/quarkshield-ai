@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DEF-39: QuarkShield persistent agent (macOS LaunchAgent).
+  Runs the scanner in headless daemon mode at login and keeps it alive, so admin
+  "Pull Telemetry" / bulk pulls are honored within ~2 min even when the QuarkShield
+  app is closed. The daemon reads the enrollment token from ~/.quarkshield.
+
+  Install (per user):
+    cp ai.quarkshield.agent.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/ai.quarkshield.agent.plist
+  Uninstall:
+    launchctl unload -w ~/Library/LaunchAgents/ai.quarkshield.agent.plist
+    rm ~/Library/LaunchAgents/ai.quarkshield.agent.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ai.quarkshield.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Applications/QuarkShield.app/Contents/MacOS/quarkshield-scanner</string>
+        <string>--daemon</string>
+        <string>--server</string>
+        <string>https://quarkshield.ai</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+    <key>ProcessType</key>
+    <string>Background</string>
+    <key>StandardOutPath</key>
+    <string>/tmp/quarkshield-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/quarkshield-agent.err</string>
+</dict>
+</plist>

@@ -159,6 +159,8 @@ interface FleetMachine {
   geoCity?: string;
   geoRegion?: string;
   geoCountry?: string;
+  region?: string | null;
+  effectiveRegion?: string;
   agentVersion: string;
   status: string;
   riskLevel: string;
@@ -1118,20 +1120,21 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     }
   };
 
-  const [bulkPulling, setBulkPulling] = useState<string | null>(null); // null | 'ALL' | country code
-  const handlePullBulk = async (country?: string) => {
-    const scopeLabel = country ? country : 'all endpoints';
-    if (!window.confirm(`Queue a telemetry pull for ${scopeLabel}? Each agent runs it on its next check-in while the QuarkShield app is open.`)) return;
-    setBulkPulling(country || 'ALL');
+  const [bulkPulling, setBulkPulling] = useState<string | null>(null); // null | 'ALL' | country | region code
+  const handlePullBulk = async (opts?: { country?: string; region?: string }) => {
+    const key = opts?.region || opts?.country || 'ALL';
+    const scopeLabel = opts?.region ? `region ${opts.region}` : opts?.country ? opts.country : 'all endpoints';
+    if (!window.confirm(`Queue a telemetry pull for ${scopeLabel}? Each agent runs it on its next check-in while the QuarkShield app is open (or, with the persistent service, even when it's closed).`)) return;
+    setBulkPulling(key);
     try {
       const res = await fetch(`/api/fleet/pull-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(country ? { country } : {})
+        body: JSON.stringify(opts?.region ? { region: opts.region } : opts?.country ? { country: opts.country } : {})
       });
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
-        alert(`${d.message || `Pull queued for ${scopeLabel}.`} Endpoints update as they report back (while the app is running).`);
+        alert(`${d.message || `Pull queued for ${scopeLabel}.`} Endpoints update as they report back.`);
         fetchTenantData();
       } else {
         alert(`Failed to queue bulk pull: ${d.error || res.status}`);
@@ -1140,6 +1143,24 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       alert(`Bulk pull error: ${e}`);
     } finally {
       setBulkPulling(null);
+    }
+  };
+
+  const handleSetRegion = async (machineId: string, region: string) => {
+    try {
+      const res = await fetch(`/api/fleet/machines/${machineId}/region`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ region })
+      });
+      if (res.ok) {
+        fetchTenantData();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        alert(`Failed to set region: ${d.error || res.status}`);
+      }
+    } catch (e) {
+      alert(`Region update error: ${e}`);
     }
   };
 
@@ -3241,6 +3262,18 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   });
                   const entries = Object.entries(byCountry).sort((a, b) => b[1].total - a[1].total);
                   const resolved = entries.filter(([k]) => k !== 'UNKNOWN').length;
+                  // Region rollup (DEF-40): group by effective region (manual override, else geo-derived).
+                  const byRegion: Record<string, { total: number; online: number }> = {};
+                  machines.forEach(m => {
+                    const key = (m.effectiveRegion || 'UNKNOWN').toUpperCase();
+                    if (!byRegion[key]) byRegion[key] = { total: 0, online: 0 };
+                    byRegion[key].total++;
+                    if (m.status === 'online') byRegion[key].online++;
+                  });
+                  const regionOrder = ['AMER', 'EMEA', 'APAC', 'UNKNOWN'];
+                  const regionEntries = Object.entries(byRegion).sort(
+                    (a, b) => regionOrder.indexOf(a[0]) - regionOrder.indexOf(b[0])
+                  );
                   return (
                     <div style={{
                       background: 'rgba(255, 255, 255, 0.025)',
@@ -3255,6 +3288,51 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           · {resolved} {resolved === 1 ? 'country' : 'countries'} resolved from public IP
                         </span>
                       </div>
+
+                      {/* By region (DEF-40) */}
+                      <div style={{ fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em', marginBottom: '0.4rem' }}>By region · schedule a pull</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginBottom: '1rem' }}>
+                        {regionEntries.map(([r, v]) => {
+                          const unknown = r === 'UNKNOWN';
+                          return (
+                            <div key={r} title={`${v.online} online · ${v.total - v.online} offline`}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                background: unknown ? 'rgba(148, 163, 184, 0.08)' : 'rgba(168, 85, 247, 0.1)',
+                                border: `1px solid ${unknown ? 'rgba(148, 163, 184, 0.22)' : 'rgba(168, 85, 247, 0.3)'}`,
+                                borderRadius: '9px', padding: '0.5rem 0.8rem'
+                              }}>
+                              <div>
+                                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: unknown ? '#cbd5e1' : '#d8b4fe' }}>
+                                  {unknown ? 'Unassigned' : r}
+                                </div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)' }}>
+                                  {v.total} {v.total === 1 ? 'endpoint' : 'endpoints'}{v.online > 0 ? ` · ${v.online} online` : ''}
+                                </div>
+                              </div>
+                              {!unknown && (
+                                <button
+                                  onClick={() => handlePullBulk({ region: r })}
+                                  disabled={bulkPulling !== null}
+                                  title={`Pull all endpoints in ${r}`}
+                                  style={{
+                                    marginLeft: '0.3rem', background: 'transparent',
+                                    border: '1px solid rgba(168, 85, 247, 0.4)', color: '#c084fc',
+                                    borderRadius: '6px', padding: '0.25rem 0.4rem',
+                                    cursor: bulkPulling !== null ? 'wait' : 'pointer',
+                                    display: 'inline-flex', alignItems: 'center'
+                                  }}
+                                >
+                                  <RefreshCw size={12} className={bulkPulling === r ? 'animate-spin' : ''} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* By country */}
+                      <div style={{ fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em', marginBottom: '0.4rem' }}>By country</div>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
                         {entries.map(([cc, v]) => {
                           const unknown = cc === 'UNKNOWN';
@@ -3280,7 +3358,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                               </div>
                               {!unknown && (
                                 <button
-                                  onClick={() => handlePullBulk(cc)}
+                                  onClick={() => handlePullBulk({ country: cc })}
                                   disabled={bulkPulling !== null}
                                   title={`Pull all endpoints in ${cc}`}
                                   style={{
@@ -3323,7 +3401,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       <button
                         onClick={() => handlePullBulk()}
                         disabled={bulkPulling !== null || machines.length === 0}
-                        title="Queue an on-demand telemetry pull for every enrolled endpoint"
+                        title="Queue an on-demand telemetry pull for every enrolled endpoint (DEF-39/40)"
                         style={{
                           background: 'rgba(56, 189, 248, 0.12)',
                           border: '1px solid rgba(56, 189, 248, 0.3)',
@@ -3459,6 +3537,24 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                     {[m.geoCity, m.geoRegion, m.geoCountry].filter(Boolean).join(', ')}
                                   </div>
                                 )}
+                                <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                  <span>Region:</span>
+                                  <select
+                                    value={m.region || ''}
+                                    onChange={(e) => handleSetRegion(m.id, e.target.value)}
+                                    title={m.region ? 'Manual override' : `Auto from geo${m.effectiveRegion ? ': ' + m.effectiveRegion : ''}`}
+                                    style={{
+                                      background: 'rgba(255,255,255,0.04)', color: m.region ? '#d8b4fe' : '#94a3b8',
+                                      border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px',
+                                      fontSize: '0.68rem', padding: '0.05rem 0.2rem', cursor: 'pointer'
+                                    }}
+                                  >
+                                    <option value="">Auto{m.effectiveRegion && m.effectiveRegion !== 'UNKNOWN' ? ` (${m.effectiveRegion})` : ''}</option>
+                                    <option value="AMER">AMER</option>
+                                    <option value="EMEA">EMEA</option>
+                                    <option value="APAC">APAC</option>
+                                  </select>
+                                </div>
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem', color: '#ffffff', fontWeight: 600 }}>
                                 {m.assetCount} assets ({m.vulnerableCount} vulnerable)
