@@ -614,9 +614,21 @@ ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_region VARCHAR(120);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_country VARCHAR(4);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_updated_at TIMESTAMP WITH TIME ZONE;
 
--- Manual region override (DEF-40): AMER/EMEA/APAC. When set, it wins over the
--- geo-derived region for grouping and region-scoped bulk pulls.
+-- Manual region override (DEF-40, superseded by Groups/DEF-42 — kept harmless).
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS region VARCHAR(16);
+
+-- Workstation Groups (DEF-42): admin-managed named buckets (Engineering, Finance,
+-- a region name, …). A machine's effective group = its explicit group_name override,
+-- else its enrollment token's group tag (fleet_tokens.name), else 'Default'.
+CREATE TABLE IF NOT EXISTS fleet_groups (
+  id           VARCHAR(100) PRIMARY KEY,
+  tenant_name  VARCHAR(255) NOT NULL,
+  name         VARCHAR(120) NOT NULL,
+  created_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fleet_groups_tenant_name
+  ON fleet_groups (LOWER(tenant_name), LOWER(name));
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS group_name VARCHAR(120);
 
 -- Recurring pull schedules (DEF-41): admin-defined daily auto-pulls per tenant,
 -- optionally scoped to a region. A server-side worker enqueues scan_and_sync for
@@ -624,7 +636,8 @@ ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS region VARCHAR(16);
 CREATE TABLE IF NOT EXISTS pull_schedules (
   id           VARCHAR(100) PRIMARY KEY,
   tenant_name  VARCHAR(255) NOT NULL,
-  region       VARCHAR(16),            -- NULL = all endpoints for the tenant
+  region       VARCHAR(16),            -- legacy (DEF-41); superseded by group_name
+  group_name   VARCHAR(120),           -- NULL = all endpoints for the tenant
   hour         SMALLINT NOT NULL,      -- 0-23 in `timezone`
   minute       SMALLINT NOT NULL DEFAULT 0,
   timezone     VARCHAR(64) NOT NULL DEFAULT 'UTC',  -- IANA tz
@@ -633,6 +646,7 @@ CREATE TABLE IF NOT EXISTS pull_schedules (
   created_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_pull_schedules_tenant ON pull_schedules(LOWER(tenant_name));
+ALTER TABLE pull_schedules ADD COLUMN IF NOT EXISTS group_name VARCHAR(120);
 
 -- TOTP 2FA recovery-code hashes (two_factor_secret already exists on both tables)
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;

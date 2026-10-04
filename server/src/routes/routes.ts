@@ -15,7 +15,10 @@ import {
   ingestTelemetry,
   enqueuePullCommand,
   enqueueBulkPullCommand,
-  setMachineRegion,
+  setMachineGroup,
+  listFleetGroups,
+  createFleetGroup,
+  deleteFleetGroup,
   listPullSchedules,
   createPullSchedule,
   deletePullSchedule,
@@ -177,7 +180,10 @@ router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines
 router.delete('/fleet/machines/:id', requireAuth, requireTenantAccess, deleteFleetMachine);
 router.post('/fleet/machines/:machineId/pull', requireAuth, requireTenantAccess, enqueuePullCommand);
 router.post('/fleet/pull-bulk', requireAuth, requireTenantAccess, enqueueBulkPullCommand);
-router.post('/fleet/machines/:machineId/region', requireAuth, requireTenantAccess, setMachineRegion);
+router.post('/fleet/machines/:machineId/group', requireAuth, requireTenantAccess, setMachineGroup);
+router.get('/fleet/groups', requireAuth, requireTenantAccess, listFleetGroups);
+router.post('/fleet/groups', requireAuth, requireTenantAccess, createFleetGroup);
+router.delete('/fleet/groups/:name', requireAuth, requireTenantAccess, deleteFleetGroup);
 router.get('/fleet/pull-schedules', requireAuth, requireTenantAccess, listPullSchedules);
 router.post('/fleet/pull-schedules', requireAuth, requireTenantAccess, createPullSchedule);
 router.delete('/fleet/pull-schedules/:id', requireAuth, requireTenantAccess, deletePullSchedule);

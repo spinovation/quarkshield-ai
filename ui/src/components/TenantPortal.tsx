@@ -159,8 +159,7 @@ interface FleetMachine {
   geoCity?: string;
   geoRegion?: string;
   geoCountry?: string;
-  region?: string | null;
-  effectiveRegion?: string;
+  group?: string;
   agentVersion: string;
   status: string;
   riskLevel: string;
@@ -548,7 +547,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     });
   }, [assets, machines, stats]);
 
-  const [settingsSubTab, setSettingsSubTab] = useState<'profile' | 'users' | 'license' | 'stakeholders'>('profile');
+  const [settingsSubTab, setSettingsSubTab] = useState<'profile' | 'users' | 'license' | 'stakeholders' | 'groups'>('profile');
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState<boolean>(true);
   const [deploymentTierTab, setDeploymentTierTab] = useState<'tier1' | 'tier2' | 'tier3' | 'desktop'>('tier1');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
@@ -718,7 +717,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const isSettingsActive = activeTab === 'settings' || activeTab === 'profile' || activeTab === 'users' || activeTab === 'license' || activeTab === 'planner';
   // Integrations & Gateways is a container tab whose content is the Git / PKI / Proxy sub-tabs
   const isIntegrationsTab = activeTab === 'git' || activeTab === 'pki' || activeTab === 'proxy';
-  const effectiveSettingsTab: 'profile' | 'users' | 'license' | 'stakeholders' =
+  const effectiveSettingsTab: 'profile' | 'users' | 'license' | 'stakeholders' | 'groups' =
     activeTab === 'profile' ? 'profile' :
     activeTab === 'users' ? 'users' :
     activeTab === 'license' ? 'license' :
@@ -1120,17 +1119,17 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     }
   };
 
-  const [bulkPulling, setBulkPulling] = useState<string | null>(null); // null | 'ALL' | country | region code
-  const handlePullBulk = async (opts?: { country?: string; region?: string }) => {
-    const key = opts?.region || opts?.country || 'ALL';
-    const scopeLabel = opts?.region ? `region ${opts.region}` : opts?.country ? opts.country : 'all endpoints';
+  const [bulkPulling, setBulkPulling] = useState<string | null>(null); // null | 'ALL' | group name
+  const handlePullBulk = async (opts?: { group?: string }) => {
+    const key = opts?.group || 'ALL';
+    const scopeLabel = opts?.group ? `group "${opts.group}"` : 'all endpoints';
     if (!window.confirm(`Queue a telemetry pull for ${scopeLabel}? Each agent runs it on its next check-in while the QuarkShield app is open (or, with the persistent service, even when it's closed).`)) return;
     setBulkPulling(key);
     try {
       const res = await fetch(`/api/fleet/pull-bulk`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(opts?.region ? { region: opts.region } : opts?.country ? { country: opts.country } : {})
+        body: JSON.stringify(opts?.group ? { group: opts.group } : {})
       });
       const d = await res.json().catch(() => ({}));
       if (res.ok) {
@@ -1146,10 +1145,78 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     }
   };
 
+  // Workstation Groups (DEF-42)
+  const [fleetGroups, setFleetGroups] = useState<{ name: string; count: number }[]>([]);
+  const [groupFilter, setGroupFilter] = useState<string>('');  // '' = all
+  const [newGroupName, setNewGroupName] = useState<string>('');
+  const [fleetSort, setFleetSort] = useState<{ key: string; dir: 'asc' | 'desc' }>({ key: 'host', dir: 'asc' });
+  const toggleFleetSort = (key: string) =>
+    setFleetSort(s => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const sortedFilteredMachines = (): FleetMachine[] => {
+    let list = machines;
+    if (groupFilter) list = list.filter(m => (m.group || 'Default') === groupFilter);
+    const { key, dir } = fleetSort;
+    const val = (m: FleetMachine): string | number => {
+      switch (key) {
+        case 'group': return (m.group || 'Default').toLowerCase();
+        case 'uuid': return (m.hardwareUuid || '').toLowerCase();
+        case 'os': return (m.os || '').toLowerCase();
+        case 'ip': return m.ip || '';
+        case 'assets': return m.assetCount || 0;
+        case 'score': return m.quantumRiskScore || 0;
+        case 'status': return m.status || '';
+        default: return (m.computerName || m.hostname || '').toLowerCase(); // 'host'
+      }
+    };
+    return [...list].sort((a, b) => {
+      const av = val(a), bv = val(b);
+      if (av < bv) return dir === 'asc' ? -1 : 1;
+      if (av > bv) return dir === 'asc' ? 1 : -1;
+      return 0;
+    });
+  };
+  const sortArrow = (key: string) => (fleetSort.key === key ? (fleetSort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+  const fetchFleetGroups = async () => {
+    try {
+      const res = await fetch('/api/fleet/groups');
+      if (res.ok) setFleetGroups(await res.json());
+    } catch { /* non-fatal */ }
+  };
+  const handleCreateGroup = async () => {
+    const name = newGroupName.trim();
+    if (!name) return;
+    try {
+      const res = await fetch('/api/fleet/groups', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) { setNewGroupName(''); fetchFleetGroups(); }
+      else alert(`Failed to create group: ${d.error || res.status}`);
+    } catch (e) { alert(`Group error: ${e}`); }
+  };
+  const handleDeleteGroup = async (name: string) => {
+    if (!window.confirm(`Delete group "${name}"? Its workstations fall back to their enrollment tag or Default.`)) return;
+    try {
+      const res = await fetch(`/api/fleet/groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (res.ok) { fetchFleetGroups(); fetchTenantData(); }
+    } catch { /* non-fatal */ }
+  };
+  const handleSetGroup = async (machineId: string, group: string) => {
+    try {
+      const res = await fetch(`/api/fleet/machines/${machineId}/group`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ group })
+      });
+      if (res.ok) { fetchTenantData(); fetchFleetGroups(); }
+      else { const d = await res.json().catch(() => ({})); alert(`Failed to move: ${d.error || res.status}`); }
+    } catch (e) { alert(`Group update error: ${e}`); }
+  };
+
   // Recurring pull schedules (DEF-41)
   const [pullSchedules, setPullSchedules] = useState<any[]>([]);
   const [schedForm, setSchedForm] = useState({
-    region: '', hour: '2', minute: '0',
+    group: '', hour: '2', minute: '0',
     timezone: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } })()
   });
   const fetchPullSchedules = async () => {
@@ -1163,7 +1230,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       const res = await fetch('/api/fleet/pull-schedules', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          region: schedForm.region || undefined,
+          group: schedForm.group || undefined,
           hour: parseInt(schedForm.hour, 10),
           minute: parseInt(schedForm.minute, 10),
           timezone: schedForm.timezone
@@ -1190,27 +1257,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     } catch { /* non-fatal */ }
   };
 
-  const handleSetRegion = async (machineId: string, region: string) => {
-    try {
-      const res = await fetch(`/api/fleet/machines/${machineId}/region`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ region })
-      });
-      if (res.ok) {
-        fetchTenantData();
-      } else {
-        const d = await res.json().catch(() => ({}));
-        alert(`Failed to set region: ${d.error || res.status}`);
-      }
-    } catch (e) {
-      alert(`Region update error: ${e}`);
-    }
-  };
-
   useEffect(() => {
     fetchTenantData();
     fetchPullSchedules();
+    fetchFleetGroups();
   }, [cleanSlug]);
 
   const completeTenantLogin = (data?: any) => {
@@ -2873,7 +2923,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     {[
                       { subId: 'profile' as const, label: 'Profile', icon: User },
                       { subId: 'users' as const, label: 'Team & 2FA', icon: Users },
-                      { subId: 'license' as const, label: 'License', icon: Key }
+                      { subId: 'license' as const, label: 'License', icon: Key },
+                      { subId: 'groups' as const, label: 'Groups', icon: Layers }
                     ].map(sub => {
                       const SubIcon = sub.icon;
                       // Only highlight a sub-item when Settings is the ACTIVE section —
@@ -3291,140 +3342,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   </div>
                 </div>
 
-                {/* Endpoint Locations — per-country rollup (BILL-7) */}
-                {machines.length > 0 && (() => {
-                  const ccFlag = (cc: string) =>
-                    cc && cc.length === 2
-                      ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65))
-                      : '🏳️';
-                  const byCountry: Record<string, { total: number; online: number }> = {};
-                  machines.forEach(m => {
-                    const cc = (m.geoCountry || '').toUpperCase();
-                    const key = cc || 'UNKNOWN';
-                    if (!byCountry[key]) byCountry[key] = { total: 0, online: 0 };
-                    byCountry[key].total++;
-                    if (m.status === 'online') byCountry[key].online++;
-                  });
-                  const entries = Object.entries(byCountry).sort((a, b) => b[1].total - a[1].total);
-                  const resolved = entries.filter(([k]) => k !== 'UNKNOWN').length;
-                  // Region rollup (DEF-40): group by effective region (manual override, else geo-derived).
-                  const byRegion: Record<string, { total: number; online: number }> = {};
-                  machines.forEach(m => {
-                    const key = (m.effectiveRegion || 'UNKNOWN').toUpperCase();
-                    if (!byRegion[key]) byRegion[key] = { total: 0, online: 0 };
-                    byRegion[key].total++;
-                    if (m.status === 'online') byRegion[key].online++;
-                  });
-                  const regionOrder = ['AMER', 'EMEA', 'APAC', 'UNKNOWN'];
-                  const regionEntries = Object.entries(byRegion).sort(
-                    (a, b) => regionOrder.indexOf(a[0]) - regionOrder.indexOf(b[0])
-                  );
-                  return (
-                    <div style={{
-                      background: 'rgba(255, 255, 255, 0.025)',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      borderRadius: '12px',
-                      padding: '1.25rem 1.5rem'
-                    }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.9rem' }}>
-                        <Globe size={17} color="#38bdf8" />
-                        <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#ffffff' }}>Endpoint Locations</h3>
-                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted, #94a3b8)' }}>
-                          · {resolved} {resolved === 1 ? 'country' : 'countries'} resolved from public IP
-                        </span>
-                      </div>
-
-                      {/* By region (DEF-40) */}
-                      <div style={{ fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em', marginBottom: '0.4rem' }}>By region · schedule a pull</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginBottom: '1rem' }}>
-                        {regionEntries.map(([r, v]) => {
-                          const unknown = r === 'UNKNOWN';
-                          return (
-                            <div key={r} title={`${v.online} online · ${v.total - v.online} offline`}
-                              style={{
-                                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                background: unknown ? 'rgba(148, 163, 184, 0.08)' : 'rgba(168, 85, 247, 0.1)',
-                                border: `1px solid ${unknown ? 'rgba(148, 163, 184, 0.22)' : 'rgba(168, 85, 247, 0.3)'}`,
-                                borderRadius: '9px', padding: '0.5rem 0.8rem'
-                              }}>
-                              <div>
-                                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: unknown ? '#cbd5e1' : '#d8b4fe' }}>
-                                  {unknown ? 'Unassigned' : r}
-                                </div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)' }}>
-                                  {v.total} {v.total === 1 ? 'endpoint' : 'endpoints'}{v.online > 0 ? ` · ${v.online} online` : ''}
-                                </div>
-                              </div>
-                              {!unknown && (
-                                <button
-                                  onClick={() => handlePullBulk({ region: r })}
-                                  disabled={bulkPulling !== null}
-                                  title={`Pull all endpoints in ${r}`}
-                                  style={{
-                                    marginLeft: '0.3rem', background: 'transparent',
-                                    border: '1px solid rgba(168, 85, 247, 0.4)', color: '#c084fc',
-                                    borderRadius: '6px', padding: '0.25rem 0.4rem',
-                                    cursor: bulkPulling !== null ? 'wait' : 'pointer',
-                                    display: 'inline-flex', alignItems: 'center'
-                                  }}
-                                >
-                                  <RefreshCw size={12} className={bulkPulling === r ? 'animate-spin' : ''} />
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* By country */}
-                      <div style={{ fontSize: '0.68rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em', marginBottom: '0.4rem' }}>By country</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
-                        {entries.map(([cc, v]) => {
-                          const unknown = cc === 'UNKNOWN';
-                          return (
-                            <div key={cc} title={unknown
-                              ? 'Public IP not yet resolved — populates on the endpoint’s next check-in'
-                              : `${v.online} online · ${v.total - v.online} offline`}
-                              style={{
-                                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                background: unknown ? 'rgba(148, 163, 184, 0.08)' : 'rgba(56, 189, 248, 0.08)',
-                                border: `1px solid ${unknown ? 'rgba(148, 163, 184, 0.22)' : 'rgba(56, 189, 248, 0.25)'}`,
-                                borderRadius: '9px', padding: '0.5rem 0.8rem'
-                              }}>
-                              <span style={{ fontSize: '1.15rem', lineHeight: 1 }}>{unknown ? '🌐' : ccFlag(cc)}</span>
-                              <div>
-                                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: unknown ? '#cbd5e1' : '#e0f2fe' }}>
-                                  {unknown ? 'Unresolved' : cc}
-                                </div>
-                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)' }}>
-                                  {v.total} {v.total === 1 ? 'endpoint' : 'endpoints'}
-                                  {!unknown && v.online > 0 ? ` · ${v.online} online` : ''}
-                                </div>
-                              </div>
-                              {!unknown && (
-                                <button
-                                  onClick={() => handlePullBulk({ country: cc })}
-                                  disabled={bulkPulling !== null}
-                                  title={`Pull all endpoints in ${cc}`}
-                                  style={{
-                                    marginLeft: '0.3rem', background: 'transparent',
-                                    border: '1px solid rgba(56, 189, 248, 0.3)', color: '#38bdf8',
-                                    borderRadius: '6px', padding: '0.25rem 0.4rem',
-                                    cursor: bulkPulling !== null ? 'wait' : 'pointer',
-                                    display: 'inline-flex', alignItems: 'center'
-                                  }}
-                                >
-                                  <RefreshCw size={12} className={bulkPulling === cc ? 'animate-spin' : ''} />
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })()}
-
                 {/* Scheduled Pulls (DEF-41) */}
                 <div style={{
                   background: 'rgba(255, 255, 255, 0.025)',
@@ -3436,7 +3353,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     <Clock size={17} color="#c084fc" />
                     <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#ffffff' }}>Scheduled Pulls</h3>
                     <span style={{ fontSize: '0.74rem', color: 'var(--text-muted, #94a3b8)' }}>
-                      · auto-queue a telemetry pull daily, by region
+                      · auto-queue a telemetry pull daily, by group
                     </span>
                   </div>
 
@@ -3450,12 +3367,12 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         }}>
                           <span style={{
                             fontSize: '0.74rem', fontWeight: 700,
-                            color: s.region ? '#d8b4fe' : '#38bdf8',
-                            background: s.region ? 'rgba(168,85,247,0.12)' : 'rgba(56,189,248,0.12)',
-                            border: `1px solid ${s.region ? 'rgba(168,85,247,0.3)' : 'rgba(56,189,248,0.3)'}`,
+                            color: s.group ? '#d8b4fe' : '#38bdf8',
+                            background: s.group ? 'rgba(168,85,247,0.12)' : 'rgba(56,189,248,0.12)',
+                            border: `1px solid ${s.group ? 'rgba(168,85,247,0.3)' : 'rgba(56,189,248,0.3)'}`,
                             borderRadius: '5px', padding: '0.1rem 0.45rem'
                           }}>
-                            {s.region || 'ALL REGIONS'}
+                            {s.group || 'ALL ENDPOINTS'}
                           </span>
                           <span style={{ fontSize: '0.85rem', color: '#ffffff', fontWeight: 600, fontFamily: 'monospace' }}>
                             {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')}
@@ -3496,13 +3413,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   {/* Add-schedule row */}
                   <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.6rem', flexWrap: 'wrap' }}>
                     <label style={{ fontSize: '0.68rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                      Region
-                      <select value={schedForm.region} onChange={e => setSchedForm({ ...schedForm, region: e.target.value })}
+                      Group
+                      <select value={schedForm.group} onChange={e => setSchedForm({ ...schedForm, group: e.target.value })}
                         style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '5px', padding: '0.3rem 0.4rem', fontSize: '0.8rem' }}>
-                        <option value="">All regions</option>
-                        <option value="AMER">AMER</option>
-                        <option value="EMEA">EMEA</option>
-                        <option value="APAC">APAC</option>
+                        <option value="">All endpoints</option>
+                        {fleetGroups.map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
                       </select>
                     </label>
                     <label style={{ fontSize: '0.68rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
@@ -3622,27 +3537,77 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     </div>
                   </div>
 
+                  {/* One-click filter by Group (DEF-42) */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem', alignItems: 'center' }}>
+                    <span style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', fontWeight: 700, marginRight: '0.2rem' }}>Filter:</span>
+                    {(() => {
+                      const chip = (label: string, value: string, count?: number) => {
+                        const active = groupFilter === value;
+                        return (
+                          <button key={value || '__all'} onClick={() => setGroupFilter(value)}
+                            style={{
+                              fontSize: '0.74rem', fontWeight: 600, cursor: 'pointer',
+                              color: active ? '#0b1120' : '#cbd5e1',
+                              background: active ? '#38bdf8' : 'rgba(255,255,255,0.05)',
+                              border: `1px solid ${active ? '#38bdf8' : 'rgba(255,255,255,0.12)'}`,
+                              borderRadius: '999px', padding: '0.2rem 0.7rem'
+                            }}>
+                            {label}{typeof count === 'number' ? ` · ${count}` : ''}
+                          </button>
+                        );
+                      };
+                      return (
+                        <>
+                          {chip(`All`, '', machines.length)}
+                          {fleetGroups.map(g => chip(g.name, g.name, g.count))}
+                        </>
+                      );
+                    })()}
+                  </div>
+
                   <div style={{ overflowX: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.85rem' }}>
                       <thead>
                         <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', color: 'var(--text-muted, #94a3b8)', fontSize: '0.75rem', textTransform: 'uppercase' }}>
-                          <th style={{ padding: '0.75rem 0.5rem' }}>Workstation / Host</th>
-                          <th style={{ padding: '0.75rem 0.5rem' }}>Hardware UUID</th>
-                          <th style={{ padding: '0.75rem 0.5rem' }}>Platform / OS</th>
-                          <th style={{ padding: '0.75rem 0.5rem' }}>IP / Location</th>
-                          <th style={{ padding: '0.75rem 0.5rem' }}>Discovered Assets</th>
-                          <th style={{ padding: '0.75rem 0.5rem' }}>Quantum Score</th>
-                          <th style={{ padding: '0.75rem 0.5rem' }}>Status</th>
+                          <th onClick={() => toggleFleetSort('group')} style={{ padding: '0.75rem 0.5rem', cursor: 'pointer', userSelect: 'none' }}>Group{sortArrow('group')}</th>
+                          <th onClick={() => toggleFleetSort('host')} style={{ padding: '0.75rem 0.5rem', cursor: 'pointer', userSelect: 'none' }}>Workstation / Host{sortArrow('host')}</th>
+                          <th onClick={() => toggleFleetSort('uuid')} style={{ padding: '0.75rem 0.5rem', cursor: 'pointer', userSelect: 'none' }}>Hardware UUID{sortArrow('uuid')}</th>
+                          <th onClick={() => toggleFleetSort('os')} style={{ padding: '0.75rem 0.5rem', cursor: 'pointer', userSelect: 'none' }}>Platform / OS{sortArrow('os')}</th>
+                          <th onClick={() => toggleFleetSort('ip')} style={{ padding: '0.75rem 0.5rem', cursor: 'pointer', userSelect: 'none' }}>IP / Location{sortArrow('ip')}</th>
+                          <th onClick={() => toggleFleetSort('assets')} style={{ padding: '0.75rem 0.5rem', cursor: 'pointer', userSelect: 'none' }}>Discovered Assets{sortArrow('assets')}</th>
+                          <th onClick={() => toggleFleetSort('score')} style={{ padding: '0.75rem 0.5rem', cursor: 'pointer', userSelect: 'none' }}>Quantum Score{sortArrow('score')}</th>
+                          <th onClick={() => toggleFleetSort('status')} style={{ padding: '0.75rem 0.5rem', cursor: 'pointer', userSelect: 'none' }}>Status{sortArrow('status')}</th>
                           <th style={{ padding: '0.75rem 0.5rem', textAlign: 'right' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {machines.map(m => {
+                        {sortedFilteredMachines().map(m => {
                           const isMac = m.os === 'darwin';
                           const isWin = m.os === 'windows';
                           const displayName = m.computerName || m.hostname;
                           return (
                             <tr key={m.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)' }}>
+                              <td style={{ padding: '0.85rem 0.5rem' }}>
+                                <select
+                                  value={(m.group && m.group !== 'Default') ? m.group : ''}
+                                  onChange={(e) => handleSetGroup(m.id, e.target.value)}
+                                  title="Move this workstation to a group"
+                                  style={{
+                                    background: 'rgba(168,85,247,0.08)', color: m.group && m.group !== 'Default' ? '#d8b4fe' : '#94a3b8',
+                                    border: '1px solid rgba(168,85,247,0.25)', borderRadius: '5px',
+                                    fontSize: '0.74rem', fontWeight: 600, padding: '0.2rem 0.3rem', cursor: 'pointer', maxWidth: '140px'
+                                  }}
+                                >
+                                  <option value="">Default</option>
+                                  {fleetGroups.filter(g => g.name.toLowerCase() !== 'default').map(g => (
+                                    <option key={g.name} value={g.name}>{g.name}</option>
+                                  ))}
+                                  {/* Preserve the machine's current group even if not yet in the list */}
+                                  {m.group && m.group !== 'Default' && !fleetGroups.some(g => g.name === m.group) && (
+                                    <option value={m.group}>{m.group}</option>
+                                  )}
+                                </select>
+                              </td>
                               <td style={{ padding: '0.85rem 0.5rem', fontWeight: 600, color: '#ffffff' }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                   <Laptop size={15} color={isMac ? '#38bdf8' : isWin ? '#c084fc' : '#4ade80'} />
@@ -3698,24 +3663,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                     {[m.geoCity, m.geoRegion, m.geoCountry].filter(Boolean).join(', ')}
                                   </div>
                                 )}
-                                <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.3rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                                  <span>Region:</span>
-                                  <select
-                                    value={m.region || ''}
-                                    onChange={(e) => handleSetRegion(m.id, e.target.value)}
-                                    title={m.region ? 'Manual override' : `Auto from geo${m.effectiveRegion ? ': ' + m.effectiveRegion : ''}`}
-                                    style={{
-                                      background: 'rgba(255,255,255,0.04)', color: m.region ? '#d8b4fe' : '#94a3b8',
-                                      border: '1px solid rgba(255,255,255,0.12)', borderRadius: '4px',
-                                      fontSize: '0.68rem', padding: '0.05rem 0.2rem', cursor: 'pointer'
-                                    }}
-                                  >
-                                    <option value="">Auto{m.effectiveRegion && m.effectiveRegion !== 'UNKNOWN' ? ` (${m.effectiveRegion})` : ''}</option>
-                                    <option value="AMER">AMER</option>
-                                    <option value="EMEA">EMEA</option>
-                                    <option value="APAC">APAC</option>
-                                  </select>
-                                </div>
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem', color: '#ffffff', fontWeight: 600 }}>
                                 {m.assetCount} assets ({m.vulnerableCount} vulnerable)
@@ -5713,6 +5660,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       { id: 'profile' as const, label: 'Profile', icon: User, badge: 'Personal & Logs' },
                       { id: 'users' as const, label: 'Team & 2FA', icon: Users, badge: 'RBAC' },
                       { id: 'license' as const, label: 'License', icon: Key, badge: `${activeLicenses.length} Active` },
+                      { id: 'groups' as const, label: 'Groups', icon: Layers, badge: `${fleetGroups.length}` },
                       { id: 'stakeholders' as const, label: 'Report Stakeholders', icon: Users, badge: 'Email' }
                     ].map(tab => {
                       const Icon = tab.icon;
@@ -6570,6 +6518,93 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   </div>
                 )}
 
+                {/* SUBTAB: GROUPS (DEF-42) */}
+                {effectiveSettingsTab === 'groups' && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                    <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.5rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                        <Layers size={18} color="#c084fc" />
+                        <h2 style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, color: '#fff' }}>Workstation Groups</h2>
+                      </div>
+                      <p style={{ fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)', margin: '0 0 1.1rem 0' }}>
+                        Organize endpoints into groups (e.g. Engineering, Finance, a region). Pick a group when enrolling,
+                        move workstations between groups, and schedule pulls per group. Unassigned endpoints are in <strong style={{ color: '#cbd5e1' }}>Default</strong>.
+                      </p>
+
+                      {/* Create group */}
+                      <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1.1rem', flexWrap: 'wrap' }}>
+                        <input
+                          value={newGroupName}
+                          onChange={e => setNewGroupName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleCreateGroup(); }}
+                          placeholder="New group name (e.g. Finance)"
+                          style={{ flex: '1 1 220px', background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '6px', padding: '0.45rem 0.6rem', fontSize: '0.85rem' }}
+                        />
+                        <button onClick={handleCreateGroup}
+                          style={{ background: 'rgba(168,85,247,0.15)', border: '1px solid rgba(168,85,247,0.35)', color: '#c084fc', padding: '0.45rem 0.9rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                          <Plus size={14} /> Create group
+                        </button>
+                      </div>
+
+                      {/* Groups list */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', marginBottom: '0.5rem' }}>
+                        {fleetGroups.map(g => (
+                          <div key={g.name} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '9px', padding: '0.5rem 0.8rem' }}>
+                            <div>
+                              <div style={{ fontSize: '0.86rem', fontWeight: 700, color: g.name.toLowerCase() === 'default' ? '#cbd5e1' : '#d8b4fe' }}>{g.name}</div>
+                              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)' }}>{g.count} {g.count === 1 ? 'workstation' : 'workstations'}</div>
+                            </div>
+                            {g.name.toLowerCase() !== 'default' && (
+                              <button onClick={() => handleDeleteGroup(g.name)} title="Delete group"
+                                style={{ background: 'transparent', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171', borderRadius: '6px', padding: '0.2rem 0.4rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }}>
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Move workstations between groups */}
+                    <div style={{ background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '12px', padding: '1.5rem' }}>
+                      <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.9rem 0', color: '#fff' }}>Assign Workstations</h3>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '0.84rem' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-muted, #94a3b8)', fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Workstation / Host</th>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Platform</th>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Status</th>
+                              <th style={{ padding: '0.6rem 0.5rem' }}>Group</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {machines.map(m => (
+                              <tr key={m.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                <td style={{ padding: '0.6rem 0.5rem', color: '#fff', fontWeight: 600 }}>{m.computerName || m.hostname}</td>
+                                <td style={{ padding: '0.6rem 0.5rem', color: 'var(--text-secondary, #94a3b8)', textTransform: 'uppercase', fontSize: '0.72rem' }}>{m.os}</td>
+                                <td style={{ padding: '0.6rem 0.5rem' }}>
+                                  <span style={{ fontSize: '0.72rem', fontWeight: 600, color: m.status === 'online' ? '#4ade80' : '#94a3b8' }}>
+                                    {m.status === 'online' ? 'Online' : 'Offline'}
+                                  </span>
+                                </td>
+                                <td style={{ padding: '0.6rem 0.5rem' }}>
+                                  <select value={(m.group && m.group !== 'Default') ? m.group : ''} onChange={e => handleSetGroup(m.id, e.target.value)}
+                                    style={{ background: 'rgba(168,85,247,0.08)', color: m.group && m.group !== 'Default' ? '#d8b4fe' : '#94a3b8', border: '1px solid rgba(168,85,247,0.25)', borderRadius: '5px', fontSize: '0.78rem', fontWeight: 600, padding: '0.25rem 0.4rem', cursor: 'pointer' }}>
+                                    <option value="">Default</option>
+                                    {fleetGroups.filter(g => g.name.toLowerCase() !== 'default').map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
+                                    {m.group && m.group !== 'Default' && !fleetGroups.some(g => g.name === m.group) && <option value={m.group}>{m.group}</option>}
+                                  </select>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {/* SUBTAB 3: LICENSE (Strictly titled "License", no "& Quota") */}
                 {effectiveSettingsTab === 'license' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -6900,6 +6935,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           <thead>
                             <tr style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.08)', textAlign: 'left', color: 'var(--text-muted, #94a3b8)', fontSize: '0.74rem', textTransform: 'uppercase' }}>
                               <th style={{ padding: '0.5rem' }}>Workstation / Host</th>
+                              <th style={{ padding: '0.5rem' }}>Group</th>
                               <th style={{ padding: '0.5rem' }}>Hardware UUID</th>
                               <th style={{ padding: '0.5rem' }}>Platform / OS</th>
                               <th style={{ padding: '0.5rem' }}>IP Address</th>
@@ -6938,10 +6974,16 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                           </div>
                                         )}
                                       </div>
-                                      {m.groupName && (
-                                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted, #94a3b8)' }}>({m.groupName})</span>
-                                      )}
                                     </div>
+                                  </td>
+                                  <td style={{ padding: '0.6rem 0.5rem' }}>
+                                    <select value={(m.group && m.group !== 'Default') ? m.group : ''} onChange={e => handleSetGroup(m.id, e.target.value)}
+                                      title="Move this workstation to a group"
+                                      style={{ background: 'rgba(168,85,247,0.08)', color: m.group && m.group !== 'Default' ? '#d8b4fe' : '#94a3b8', border: '1px solid rgba(168,85,247,0.25)', borderRadius: '5px', fontSize: '0.74rem', fontWeight: 600, padding: '0.2rem 0.3rem', cursor: 'pointer', maxWidth: '130px' }}>
+                                      <option value="">Default</option>
+                                      {fleetGroups.filter(g => g.name.toLowerCase() !== 'default').map(g => <option key={g.name} value={g.name}>{g.name}</option>)}
+                                      {m.group && m.group !== 'Default' && !fleetGroups.some(g => g.name === m.group) && <option value={m.group}>{m.group}</option>}
+                                    </select>
                                   </td>
                                   <td style={{ padding: '0.6rem 0.5rem' }}>
                                     <span style={{
@@ -7194,12 +7236,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     marginBottom: '1.25rem'
                   }}>
                     <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, color: '#cbd5e1', marginBottom: '0.4rem' }}>
-                      Workstation Group / Environment Tag
+                      Workstation Group
                     </label>
                     <div style={{ display: 'flex', gap: '0.75rem' }}>
                       <input
                         type="text"
-                        placeholder="e.g. Engineering, Executive Laptops, DevOps Servers"
+                        list="qs-group-options"
+                        placeholder="Pick a group or type a new one (e.g. Engineering, Finance)"
                         value={newTokenGroup}
                         onChange={e => setNewTokenGroup(e.target.value)}
                         style={{
@@ -7213,6 +7256,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           outline: 'none'
                         }}
                       />
+                      <datalist id="qs-group-options">
+                        {fleetGroups.filter(g => g.name.toLowerCase() !== 'default').map(g => (
+                          <option key={g.name} value={g.name} />
+                        ))}
+                      </datalist>
                       <button
                         onClick={handleGenerateToken}
                         disabled={isGeneratingToken || !newTokenGroup.trim()}

@@ -67,6 +67,51 @@ EOF
   echo "✓ Desktop application launcher registered."
 fi
 
+# ---------------------------------------------------------------------------
+# DEF-39: install the persistent daemon as a systemd service so admin "Pull
+# Telemetry" / bulk pulls and scheduled syncs run continuously (no GUI needed).
+# Token comes from $1 or $QS_TOKEN; without one, we skip and print how to enable.
+# ---------------------------------------------------------------------------
+QS_TOKEN="${1:-${QS_TOKEN:-}}"
+if command -v systemctl >/dev/null 2>&1 && { [ "$(id -u)" -eq 0 ] || [ -n "${SUDO}" ]; }; then
+  if [ -n "$QS_TOKEN" ]; then
+    EXEC="$INSTALL_DIR/quarkshield-scanner --daemon --server https://quarkshield.ai --token $QS_TOKEN"
+  else
+    # No token on the command line — the daemon will read the enrollment config
+    # written by a prior `quarkshield-scanner` run for this user.
+    EXEC="$INSTALL_DIR/quarkshield-scanner --daemon --server https://quarkshield.ai"
+  fi
+  echo "🛠️  Installing persistent daemon (systemd service quarkshield)..."
+  $SUDO tee /etc/systemd/system/quarkshield.service >/dev/null << EOF
+[Unit]
+Description=QuarkShield Post-Quantum Guard Cryptographic Auditor (persistent daemon)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=$EXEC
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  $SUDO systemctl daemon-reload
+  $SUDO systemctl enable --now quarkshield.service 2>/dev/null && \
+    echo "✓ Daemon enabled & started (journalctl -u quarkshield -f to watch)." || \
+    echo "⚠️ Service installed but not started — enroll first, then: $SUDO systemctl restart quarkshield"
+  if [ -z "$QS_TOKEN" ]; then
+    echo "   ℹ️  No token provided. Enroll once (quarkshield-scanner --token <TOKEN> --quick --register),"
+    echo "      then: $SUDO systemctl restart quarkshield"
+  fi
+else
+  echo "ℹ️  systemd not available or not root — skipping persistent-daemon install."
+  echo "    To run the daemon manually: quarkshield-scanner --daemon --token <TOKEN>"
+fi
+
 echo "=================================================="
 echo "✅ QuarkShield Linux Agent successfully installed!"
 echo "   Command: quarkshield-scanner"

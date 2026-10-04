@@ -3,11 +3,15 @@ Description=QuarkShield Post-Quantum Guard Cryptographic Auditor
 After=network.target
 
 [Service]
+# DEF-39: persistent daemon. Polls the server for on-demand pulls every 2 min and
+# runs the scheduled daily sync, so admin "Pull Telemetry" / bulk pulls land even
+# with no GUI open. The token is read from the enrollment config written at install
+# (~/.quarkshield) for this User; the installer may instead append --token <TOKEN>.
 Type=simple
 User=root
-ExecStart=/usr/local/bin/quarkshield-scanner --server https://quarkshield.ai --poll --register --quick
+ExecStart=/usr/local/bin/quarkshield-scanner --daemon --server https://quarkshield.ai
 Restart=always
-RestartSec=60
+RestartSec=30
 StandardOutput=journal
 StandardError=journal
 

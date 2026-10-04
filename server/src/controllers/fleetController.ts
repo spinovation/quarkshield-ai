@@ -5,7 +5,10 @@ import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
 import { canAccessTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
-import { effectiveRegionSql, REGIONS } from '../lib/regions';
+
+// A machine's effective group: explicit override, else its enrollment token tag, else Default.
+// Requires the query to alias fleet_machines as m and LEFT JOIN fleet_tokens as t.
+const EFFECTIVE_GROUP = "COALESCE(NULLIF(m.group_name, ''), NULLIF(t.name, ''), 'Default')";
 
 // ==========================================
 // 1. FLEET TOKENS
@@ -108,6 +111,8 @@ export const createFleetToken = async (req: Request, res: Response) => {
       RETURNING id, name, token, status, tenant_name as "tenantName", license_key as "licenseKey", created_at as "createdAt";
     `;
     const result = await pool.query(queryText, [id, name.trim(), token, assignedTenant, assignedLicense]);
+    // DEF-42: surface this token's group tag in the tenant's Groups list.
+    try { await ensureGroupRow(assignedTenant, name.trim()); } catch { /* non-fatal */ }
     res.status(201).json({ ...result.rows[0], machineCount: 0 });
   } catch (err: any) {
     console.error('Error creating fleet token:', err);
@@ -154,6 +159,7 @@ export const getFleetMachines = async (req: Request, res: Response) => {
         m.geo_city as "geoCity",
         m.geo_region as "geoRegion",
         m.geo_country as "geoCountry",
+        ${EFFECTIVE_GROUP} as "group",
         m.agent_version as "agentVersion",
         -- DEF-37: a machine with no telemetry for > 30 min is reported offline
         -- (nothing else ever transitions it back to offline after ingest).
@@ -1199,19 +1205,15 @@ export const getFleetDrift = async (req: Request, res: Response) => {
 // number of machines matched. Used by the HTTP handler AND the recurring scheduler.
 export const enqueuePullsForScope = async (
   tenant: string,
-  opts: { region?: string | null; country?: string | null }
+  opts: { group?: string | null }
 ): Promise<number> => {
-  const region = (opts.region || '').toString().trim().toUpperCase() || null;
-  const country = (opts.country || '').toString().trim().toUpperCase() || null;
+  const group = (opts.group || '').toString().trim() || null;
 
   const params: any[] = [tenant];
-  let geoClause = '';
-  if (region) {
-    params.push(region);
-    geoClause = ` AND ${effectiveRegionSql('m.region', 'm.geo_country')} = $${params.length}`;
-  } else if (country) {
-    params.push(country);
-    geoClause = ` AND UPPER(COALESCE(m.geo_country, '')) = $${params.length}`;
+  let groupClause = '';
+  if (group) {
+    params.push(group);
+    groupClause = ` AND LOWER(${EFFECTIVE_GROUP}) = LOWER($${params.length})`;
   }
   const machines = await pool.query(
     `SELECT m.id
@@ -1220,7 +1222,7 @@ export const enqueuePullsForScope = async (
       WHERE (LOWER(m.tenant_name) = LOWER($1)
           OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
           OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
-        ${geoClause}`,
+        ${groupClause}`,
     params
   );
   if (machines.rowCount === 0) return 0;
@@ -1252,18 +1254,15 @@ export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
     if (!tenant || !canAccessTenant(req, tenant)) {
       return res.status(403).json({ error: 'Tenant could not be resolved for bulk pull.' });
     }
-    const country = (req.body?.country || '').toString().trim().toUpperCase() || null;
-    const region = (req.body?.region || '').toString().trim().toUpperCase() || null;
-    const queued = await enqueuePullsForScope(tenant, { region, country });
-    const scope = region || country || null;
+    const group = (req.body?.group || '').toString().trim() || null;
+    const queued = await enqueuePullsForScope(tenant, { group });
     res.json({
       success: true,
       queued,
-      country,
-      region,
+      group,
       message: queued === 0
         ? 'No matching endpoints to pull.'
-        : `On-demand sync queued for ${queued} endpoint(s)${scope ? ' in ' + scope : ''}.`
+        : `On-demand sync queued for ${queued} endpoint(s)${group ? ' in group ' + group : ''}.`
     });
   } catch (err: any) {
     console.error('Error queuing bulk pull command:', err);
@@ -1279,11 +1278,11 @@ export const listPullSchedules = async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Tenant could not be resolved.' });
     }
     const { rows } = await pool.query(
-      `SELECT id, tenant_name as "tenantName", region, hour, minute, timezone, enabled,
+      `SELECT id, tenant_name as "tenantName", group_name as "group", hour, minute, timezone, enabled,
               last_run_at as "lastRunAt", created_at as "createdAt"
          FROM pull_schedules
         WHERE LOWER(tenant_name) = LOWER($1)
-        ORDER BY region NULLS FIRST, hour, minute`,
+        ORDER BY group_name NULLS FIRST, hour, minute`,
       [tenant]
     );
     res.json(rows);
@@ -1301,23 +1300,21 @@ export const createPullSchedule = async (req: Request, res: Response) => {
     }
     const hour = parseInt(String(req.body?.hour), 10);
     const minute = parseInt(String(req.body?.minute ?? 0), 10);
-    const region = (req.body?.region || '').toString().trim().toUpperCase() || null;
+    const group = (req.body?.group || '').toString().trim() || null;
     const timezone = (req.body?.timezone || 'UTC').toString().trim() || 'UTC';
     if (!(hour >= 0 && hour <= 23) || !(minute >= 0 && minute <= 59)) {
       return res.status(400).json({ error: 'hour must be 0-23 and minute 0-59.' });
-    }
-    if (region && !(REGIONS as readonly string[]).includes(region)) {
-      return res.status(400).json({ error: `region must be one of ${REGIONS.join(', ')} or empty (all).` });
     }
     // Validate the timezone is one Intl accepts (rejects typos before they silently fall back).
     try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }); }
     catch { return res.status(400).json({ error: `Unknown timezone: ${timezone}` }); }
 
+    const groupVal = group && group.toLowerCase() !== 'default' ? group : null;
     const id = 'sch-' + crypto.randomBytes(8).toString('hex');
     await pool.query(
-      `INSERT INTO pull_schedules (id, tenant_name, region, hour, minute, timezone, enabled)
+      `INSERT INTO pull_schedules (id, tenant_name, group_name, hour, minute, timezone, enabled)
        VALUES ($1, $2, $3, $4, $5, $6, true)`,
-      [id, tenant, region, hour, minute, timezone]
+      [id, tenant, groupVal, hour, minute, timezone]
     );
     res.json({ success: true, id });
   } catch (err: any) {
@@ -1365,15 +1362,114 @@ export const togglePullSchedule = async (req: Request, res: Response) => {
   }
 };
 
-// Set (or clear) a machine's manual region override (DEF-40). Body: { region }
-// where region is AMER/EMEA/APAC, or '' / null to clear and fall back to geo.
-export const setMachineRegion = async (req: Request, res: Response) => {
+// ---- Workstation Groups (DEF-42) ----
+
+// Ensure a (tenant, name) group row exists. Case-insensitive, no-op if present.
+const ensureGroupRow = async (tenant: string, name: string): Promise<void> => {
+  const clean = (name || '').trim();
+  if (!clean || clean.toLowerCase() === 'default') return;
+  const id = 'grp-' + crypto.randomBytes(8).toString('hex');
+  await pool.query(
+    `INSERT INTO fleet_groups (id, tenant_name, name)
+       SELECT $1, $2, $3
+      WHERE NOT EXISTS (
+        SELECT 1 FROM fleet_groups WHERE LOWER(tenant_name) = LOWER($2) AND LOWER(name) = LOWER($3)
+      )`,
+    [id, tenant, clean]
+  );
+};
+
+// GET /api/fleet/groups — admin-created groups UNION groups currently in use, with counts.
+export const listFleetGroups = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const { rows } = await pool.query(
+      `WITH used AS (
+         SELECT ${EFFECTIVE_GROUP} AS name, COUNT(*)::int AS cnt
+           FROM fleet_machines m
+           LEFT JOIN fleet_tokens t ON m.token_id = t.id
+          WHERE (LOWER(m.tenant_name) = LOWER($1)
+              OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($1,' ',''))
+              OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+          GROUP BY 1
+       ),
+       defined AS (
+         SELECT name FROM fleet_groups WHERE LOWER(tenant_name) = LOWER($1)
+         UNION SELECT 'Default'
+       )
+       SELECT COALESCE(d.name, u.name) AS name, COALESCE(u.cnt, 0) AS count
+         FROM defined d
+         FULL OUTER JOIN used u ON LOWER(d.name) = LOWER(u.name)
+        ORDER BY (LOWER(COALESCE(d.name, u.name)) = 'default') DESC, 1`,
+      [tenant]
+    );
+    res.json(rows);
+  } catch (err: any) {
+    console.error('Error listing groups:', err);
+    res.status(500).json({ error: 'Failed to list groups.' });
+  }
+};
+
+// POST /api/fleet/groups { name }
+export const createFleetGroup = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const name = (req.body?.name || '').toString().trim();
+    if (!name) return res.status(400).json({ error: 'Group name is required.' });
+    if (name.length > 120) return res.status(400).json({ error: 'Group name too long.' });
+    if (name.toLowerCase() === 'default') return res.status(400).json({ error: '"Default" is reserved.' });
+    await ensureGroupRow(tenant, name);
+    res.json({ success: true, name });
+  } catch (err: any) {
+    console.error('Error creating group:', err);
+    res.status(500).json({ error: 'Failed to create group.' });
+  }
+};
+
+// DELETE /api/fleet/groups/:name — remove the definition; member machines fall back
+// to their token tag / Default (their group_name override is cleared).
+export const deleteFleetGroup = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const name = (req.params.name || '').toString().trim();
+    if (!name || name.toLowerCase() === 'default') {
+      return res.status(400).json({ error: 'Cannot delete this group.' });
+    }
+    await pool.query(
+      'DELETE FROM fleet_groups WHERE LOWER(tenant_name) = LOWER($1) AND LOWER(name) = LOWER($2)',
+      [tenant, name]
+    );
+    await pool.query(
+      'UPDATE fleet_machines SET group_name = NULL WHERE LOWER(COALESCE(group_name,\'\')) = LOWER($1) AND (LOWER(tenant_name) = LOWER($2) OR LOWER(REPLACE(tenant_name,\' \',\'\')) = LOWER(REPLACE($2,\' \',\'\')))',
+      [name, tenant]
+    );
+    // Also detach pull schedules targeting this group.
+    await pool.query(
+      'UPDATE pull_schedules SET group_name = NULL WHERE LOWER(tenant_name) = LOWER($1) AND LOWER(COALESCE(group_name,\'\')) = LOWER($2)',
+      [tenant, name]
+    );
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting group:', err);
+    res.status(500).json({ error: 'Failed to delete group.' });
+  }
+};
+
+// POST /api/fleet/machines/:machineId/group { group } — move a machine to a group.
+// Empty/"Default" clears the override (falls back to token tag / Default).
+export const setMachineGroup = async (req: Request, res: Response) => {
   try {
     const { machineId } = req.params;
-    const raw = (req.body?.region ?? '').toString().trim().toUpperCase();
-    if (raw && !(REGIONS as readonly string[]).includes(raw)) {
-      return res.status(400).json({ error: `region must be one of ${REGIONS.join(', ')} (or empty to clear).` });
-    }
+    const raw = (req.body?.group ?? '').toString().trim();
     const owner = await pool.query(
       `SELECT COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name) AS tenant
          FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
@@ -1383,11 +1479,14 @@ export const setMachineRegion = async (req: Request, res: Response) => {
     if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant)) {
       return res.status(404).json({ error: 'Fleet machine not found.' });
     }
-    await pool.query('UPDATE fleet_machines SET region = $1 WHERE id = $2', [raw || null, machineId]);
-    res.json({ success: true, machineId, region: raw || null });
+    const tenant = owner.rows[0].tenant;
+    const val = raw && raw.toLowerCase() !== 'default' ? raw : null;
+    if (val) await ensureGroupRow(tenant, val);
+    await pool.query('UPDATE fleet_machines SET group_name = $1 WHERE id = $2', [val, machineId]);
+    res.json({ success: true, machineId, group: val || 'Default' });
   } catch (err: any) {
-    console.error('Error setting machine region:', err);
-    res.status(500).json({ error: 'Failed to set region.' });
+    console.error('Error setting machine group:', err);
+    res.status(500).json({ error: 'Failed to set group.' });
   }
 };
 

@@ -4,7 +4,6 @@ import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
 import { signSession, setSessionCookie, clearSessionCookie, isSuperRole } from '../middleware/auth';
 import { assertPublicHost } from '../utils/ssrf';
-import { effectiveRegionSql } from '../lib/regions';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
 /**
@@ -3037,8 +3036,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         m.geo_city as "geoCity",
         m.geo_region as "geoRegion",
         m.geo_country as "geoCountry",
-        m.region as "region",
-        ${effectiveRegionSql('m.region', 'm.geo_country')} as "effectiveRegion",
+        COALESCE(NULLIF(m.group_name, ''), NULLIF(t.name, ''), 'Default') as "group",
         m.agent_version as "agentVersion",
         -- Derive real status from last_seen (the stored status was hard-set to 'online'
         -- at every ingest and never flipped back). A fleet agent syncs ~daily, so treat a
