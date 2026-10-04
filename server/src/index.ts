@@ -11,6 +11,7 @@ import { bootstrapAdmin } from './config/bootstrap';
 import routes from './routes/routes';
 import { attachUser } from './middleware/auth';
 import { logDownload } from './lib/downloadTracker';
+import { startPullScheduler } from './lib/pullScheduler';
 
 dotenv.config();
 
@@ -140,6 +141,9 @@ import https from 'https';
 
 // Helper to start both HTTP and HTTPS listeners
 const startServers = () => {
+  // DEF-41: start the recurring pull scheduler (60s worker) once the app boots.
+  startPullScheduler();
+
   // 1. Start HTTP Server
   app.listen(port, () => {
     console.log(`=======================================================`);

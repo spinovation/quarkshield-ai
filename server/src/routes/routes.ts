@@ -16,6 +16,10 @@ import {
   enqueuePullCommand,
   enqueueBulkPullCommand,
   setMachineRegion,
+  listPullSchedules,
+  createPullSchedule,
+  deletePullSchedule,
+  togglePullSchedule,
   getTenantDailySnapshots,
   getFleetDrift,
   agentFetchCommands
@@ -174,6 +178,10 @@ router.delete('/fleet/machines/:id', requireAuth, requireTenantAccess, deleteFle
 router.post('/fleet/machines/:machineId/pull', requireAuth, requireTenantAccess, enqueuePullCommand);
 router.post('/fleet/pull-bulk', requireAuth, requireTenantAccess, enqueueBulkPullCommand);
 router.post('/fleet/machines/:machineId/region', requireAuth, requireTenantAccess, setMachineRegion);
+router.get('/fleet/pull-schedules', requireAuth, requireTenantAccess, listPullSchedules);
+router.post('/fleet/pull-schedules', requireAuth, requireTenantAccess, createPullSchedule);
+router.delete('/fleet/pull-schedules/:id', requireAuth, requireTenantAccess, deletePullSchedule);
+router.patch('/fleet/pull-schedules/:id', requireAuth, requireTenantAccess, togglePullSchedule);
 router.get('/tenant/:tenant/daily-snapshots', requireAuth, requireTenantAccess, getTenantDailySnapshots);
 router.get('/fleet/drift', requireAuth, requireTenantAccess, getFleetDrift);
 router.get('/fleet/cbom', requireAuth, requireTenantAccess, getFleetCBOM);

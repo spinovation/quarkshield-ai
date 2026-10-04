@@ -614,6 +614,26 @@ ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_region VARCHAR(120);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_country VARCHAR(4);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS geo_updated_at TIMESTAMP WITH TIME ZONE;
 
+-- Manual region override (DEF-40): AMER/EMEA/APAC. When set, it wins over the
+-- geo-derived region for grouping and region-scoped bulk pulls.
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS region VARCHAR(16);
+
+-- Recurring pull schedules (DEF-41): admin-defined daily auto-pulls per tenant,
+-- optionally scoped to a region. A server-side worker enqueues scan_and_sync for
+-- the matching machines when the local (timezone) clock reaches hour:minute.
+CREATE TABLE IF NOT EXISTS pull_schedules (
+  id           VARCHAR(100) PRIMARY KEY,
+  tenant_name  VARCHAR(255) NOT NULL,
+  region       VARCHAR(16),            -- NULL = all endpoints for the tenant
+  hour         SMALLINT NOT NULL,      -- 0-23 in `timezone`
+  minute       SMALLINT NOT NULL DEFAULT 0,
+  timezone     VARCHAR(64) NOT NULL DEFAULT 'UTC',  -- IANA tz
+  enabled      BOOLEAN NOT NULL DEFAULT true,
+  last_run_at  TIMESTAMP WITH TIME ZONE,
+  created_at   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_pull_schedules_tenant ON pull_schedules(LOWER(tenant_name));
+
 -- TOTP 2FA recovery-code hashes (two_factor_secret already exists on both tables)
 ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;
 ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS two_factor_recovery_codes TEXT;

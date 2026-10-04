@@ -30,10 +30,45 @@ func detachConsole() {
 // ensureBackgroundService is a no-op on Windows for now — the persistent daemon
 // there is TODO (register a Scheduled Task / Windows service in the installer).
 // The GUI's own 2-min command poller still services Pull Telemetry while open.
-func ensureBackgroundService(serverURL string) {}
+const winTaskName = "QuarkShieldAgent"
 
-// removeBackgroundService is a no-op on Windows (no LaunchAgent to remove).
-func removeBackgroundService() {}
+// ensureBackgroundService (DEF-39, Windows) registers a logon-triggered Scheduled
+// Task that runs the agent in --daemon mode, so admin Pull Telemetry / bulk pulls and
+// scheduled syncs keep running even with the GUI closed. Mirrors the macOS LaunchAgent.
+// Runs in the user session (/RL LIMITED), reading the enrollment token from config.
+func ensureBackgroundService(serverURL string) {
+	exePath, err := os.Executable()
+	if err != nil || exePath == "" {
+		return
+	}
+	if serverURL == "" {
+		serverURL = "https://quarkshield.ai"
+	}
+	// schtasks /TR wants one string; keep the exe path quoted. Go escapes the inner
+	// quotes when it builds schtasks.exe's command line.
+	tr := fmt.Sprintf(`"%s" --daemon --server %s`, exePath, serverURL)
+	schtasks := winSystem32("schtasks.exe")
+
+	create := exec.Command(schtasks, "/Create", "/TN", winTaskName, "/TR", tr, "/SC", "ONLOGON", "/RL", "LIMITED", "/F")
+	hideConsole(create)
+	_ = create.Run()
+
+	// Start immediately so it doesn't wait for the next logon.
+	run := exec.Command(schtasks, "/Run", "/TN", winTaskName)
+	hideConsole(run)
+	_ = run.Run()
+}
+
+// removeBackgroundService (Windows) stops + deletes the Scheduled Task on uninstall.
+func removeBackgroundService() {
+	schtasks := winSystem32("schtasks.exe")
+	end := exec.Command(schtasks, "/End", "/TN", winTaskName)
+	hideConsole(end)
+	_ = end.Run()
+	del := exec.Command(schtasks, "/Delete", "/TN", winTaskName, "/F")
+	hideConsole(del)
+	_ = del.Run()
+}
 
 // createDesktopAndStartMenuShortcuts installs .lnk shortcuts on user's Desktop and Start Menu
 func createDesktopAndStartMenuShortcuts() {

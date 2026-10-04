@@ -424,6 +424,8 @@ func main() {
 	// the scheduled daily sync — so pulls land even when no GUI app is open. Installed
 	// via launchd (macOS), systemd (Linux), or a Windows scheduled task/service.
 	if *daemonFlag {
+		// Hide any console window when launched as a background service (no-op off Windows).
+		detachConsole()
 		token := strings.TrimSpace(*tokenFlag)
 		if token == "" {
 			token = strings.TrimSpace(*licenseFlag)

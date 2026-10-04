@@ -1194,6 +1194,58 @@ export const getFleetDrift = async (req: Request, res: Response) => {
 // Enqueue a bulk on-demand pull for the whole fleet, or a region/country subset.
 // Body: { country?: "US" }  (optional — omit to pull every enrolled endpoint).
 // Each agent honors it on its next poll while the QuarkShield app is running.
+// Reusable core: enqueue a pending scan_and_sync for every tenant machine matching an
+// optional region/country scope, de-duping against existing pending pulls. Returns the
+// number of machines matched. Used by the HTTP handler AND the recurring scheduler.
+export const enqueuePullsForScope = async (
+  tenant: string,
+  opts: { region?: string | null; country?: string | null }
+): Promise<number> => {
+  const region = (opts.region || '').toString().trim().toUpperCase() || null;
+  const country = (opts.country || '').toString().trim().toUpperCase() || null;
+
+  const params: any[] = [tenant];
+  let geoClause = '';
+  if (region) {
+    params.push(region);
+    geoClause = ` AND ${effectiveRegionSql('m.region', 'm.geo_country')} = $${params.length}`;
+  } else if (country) {
+    params.push(country);
+    geoClause = ` AND UPPER(COALESCE(m.geo_country, '')) = $${params.length}`;
+  }
+  const machines = await pool.query(
+    `SELECT m.id
+       FROM fleet_machines m
+       LEFT JOIN fleet_tokens t ON m.token_id = t.id
+      WHERE (LOWER(m.tenant_name) = LOWER($1)
+          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+          OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+        ${geoClause}`,
+    params
+  );
+  if (machines.rowCount === 0) return 0;
+
+  const values: string[] = [];
+  const vParams: any[] = [];
+  let i = 1;
+  for (const row of machines.rows) {
+    const cid = 'cmd-' + crypto.randomBytes(8).toString('hex');
+    values.push(`($${i++}, $${i++}, 'scan_and_sync', 'pending')`);
+    vParams.push(cid, row.id);
+  }
+  await pool.query(
+    `INSERT INTO fleet_commands (id, machine_id, command, status)
+     SELECT v.id, v.machine_id, v.command, v.status
+       FROM (VALUES ${values.join(',')}) AS v(id, machine_id, command, status)
+      WHERE NOT EXISTS (
+        SELECT 1 FROM fleet_commands fc
+         WHERE fc.machine_id = v.machine_id AND fc.command = 'scan_and_sync' AND fc.status = 'pending'
+      )`,
+    vParams
+  );
+  return machines.rowCount ?? 0;
+};
+
 export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
   try {
     const tenant = getEffectiveTenant(req);
@@ -1202,64 +1254,114 @@ export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
     }
     const country = (req.body?.country || '').toString().trim().toUpperCase() || null;
     const region = (req.body?.region || '').toString().trim().toUpperCase() || null;
-
-    // Scope machines to the tenant (same normalization as the portal), optional
-    // geo filter by country OR by effective region (manual override, else geo-derived).
-    const params: any[] = [tenant];
-    let geoClause = '';
-    if (region) {
-      params.push(region);
-      geoClause = ` AND ${effectiveRegionSql('m.region', 'm.geo_country')} = $${params.length}`;
-    } else if (country) {
-      params.push(country);
-      geoClause = ` AND UPPER(COALESCE(m.geo_country, '')) = $${params.length}`;
-    }
-    const machines = await pool.query(
-      `SELECT m.id
-         FROM fleet_machines m
-         LEFT JOIN fleet_tokens t ON m.token_id = t.id
-        WHERE (LOWER(m.tenant_name) = LOWER($1)
-            OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-            OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
-          ${geoClause}`,
-      params
-    );
-    if (machines.rowCount === 0) {
-      return res.json({ success: true, queued: 0, country, message: 'No matching endpoints to pull.' });
-    }
-
-    // One pending scan_and_sync per machine; skip machines that already have a
-    // pending pull so repeated clicks don't pile up duplicate commands.
-    const values: string[] = [];
-    const vParams: any[] = [];
-    let i = 1;
-    for (const row of machines.rows) {
-      const cid = 'cmd-' + crypto.randomBytes(8).toString('hex');
-      values.push(`($${i++}, $${i++}, 'scan_and_sync', 'pending')`);
-      vParams.push(cid, row.id);
-    }
-    await pool.query(
-      `INSERT INTO fleet_commands (id, machine_id, command, status)
-       SELECT v.id, v.machine_id, v.command, v.status
-         FROM (VALUES ${values.join(',')}) AS v(id, machine_id, command, status)
-        WHERE NOT EXISTS (
-          SELECT 1 FROM fleet_commands fc
-           WHERE fc.machine_id = v.machine_id AND fc.command = 'scan_and_sync' AND fc.status = 'pending'
-        )`,
-      vParams
-    );
-
+    const queued = await enqueuePullsForScope(tenant, { region, country });
     const scope = region || country || null;
     res.json({
       success: true,
-      queued: machines.rowCount,
+      queued,
       country,
       region,
-      message: `On-demand sync queued for ${machines.rowCount} endpoint(s)${scope ? ' in ' + scope : ''}.`
+      message: queued === 0
+        ? 'No matching endpoints to pull.'
+        : `On-demand sync queued for ${queued} endpoint(s)${scope ? ' in ' + scope : ''}.`
     });
   } catch (err: any) {
     console.error('Error queuing bulk pull command:', err);
     res.status(500).json({ error: 'Failed to queue bulk pull.' });
+  }
+};
+
+// ---- Recurring pull schedules (DEF-41) ----
+export const listPullSchedules = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const { rows } = await pool.query(
+      `SELECT id, tenant_name as "tenantName", region, hour, minute, timezone, enabled,
+              last_run_at as "lastRunAt", created_at as "createdAt"
+         FROM pull_schedules
+        WHERE LOWER(tenant_name) = LOWER($1)
+        ORDER BY region NULLS FIRST, hour, minute`,
+      [tenant]
+    );
+    res.json(rows);
+  } catch (err: any) {
+    console.error('Error listing pull schedules:', err);
+    res.status(500).json({ error: 'Failed to list schedules.' });
+  }
+};
+
+export const createPullSchedule = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const hour = parseInt(String(req.body?.hour), 10);
+    const minute = parseInt(String(req.body?.minute ?? 0), 10);
+    const region = (req.body?.region || '').toString().trim().toUpperCase() || null;
+    const timezone = (req.body?.timezone || 'UTC').toString().trim() || 'UTC';
+    if (!(hour >= 0 && hour <= 23) || !(minute >= 0 && minute <= 59)) {
+      return res.status(400).json({ error: 'hour must be 0-23 and minute 0-59.' });
+    }
+    if (region && !(REGIONS as readonly string[]).includes(region)) {
+      return res.status(400).json({ error: `region must be one of ${REGIONS.join(', ')} or empty (all).` });
+    }
+    // Validate the timezone is one Intl accepts (rejects typos before they silently fall back).
+    try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }); }
+    catch { return res.status(400).json({ error: `Unknown timezone: ${timezone}` }); }
+
+    const id = 'sch-' + crypto.randomBytes(8).toString('hex');
+    await pool.query(
+      `INSERT INTO pull_schedules (id, tenant_name, region, hour, minute, timezone, enabled)
+       VALUES ($1, $2, $3, $4, $5, $6, true)`,
+      [id, tenant, region, hour, minute, timezone]
+    );
+    res.json({ success: true, id });
+  } catch (err: any) {
+    console.error('Error creating pull schedule:', err);
+    res.status(500).json({ error: 'Failed to create schedule.' });
+  }
+};
+
+export const deletePullSchedule = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const { id } = req.params;
+    const r = await pool.query(
+      'DELETE FROM pull_schedules WHERE id = $1 AND LOWER(tenant_name) = LOWER($2)',
+      [id, tenant]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Schedule not found.' });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting pull schedule:', err);
+    res.status(500).json({ error: 'Failed to delete schedule.' });
+  }
+};
+
+export const togglePullSchedule = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const { id } = req.params;
+    const enabled = !!req.body?.enabled;
+    const r = await pool.query(
+      'UPDATE pull_schedules SET enabled = $1 WHERE id = $2 AND LOWER(tenant_name) = LOWER($3)',
+      [enabled, id, tenant]
+    );
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Schedule not found.' });
+    res.json({ success: true, enabled });
+  } catch (err: any) {
+    console.error('Error toggling pull schedule:', err);
+    res.status(500).json({ error: 'Failed to update schedule.' });
   }
 };
 

@@ -1146,6 +1146,50 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     }
   };
 
+  // Recurring pull schedules (DEF-41)
+  const [pullSchedules, setPullSchedules] = useState<any[]>([]);
+  const [schedForm, setSchedForm] = useState({
+    region: '', hour: '2', minute: '0',
+    timezone: (() => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; } })()
+  });
+  const fetchPullSchedules = async () => {
+    try {
+      const res = await fetch('/api/fleet/pull-schedules');
+      if (res.ok) setPullSchedules(await res.json());
+    } catch { /* non-fatal */ }
+  };
+  const handleAddSchedule = async () => {
+    try {
+      const res = await fetch('/api/fleet/pull-schedules', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          region: schedForm.region || undefined,
+          hour: parseInt(schedForm.hour, 10),
+          minute: parseInt(schedForm.minute, 10),
+          timezone: schedForm.timezone
+        })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) fetchPullSchedules();
+      else alert(`Failed to add schedule: ${d.error || res.status}`);
+    } catch (e) { alert(`Schedule error: ${e}`); }
+  };
+  const handleDeleteSchedule = async (id: string) => {
+    try {
+      const res = await fetch(`/api/fleet/pull-schedules/${id}`, { method: 'DELETE' });
+      if (res.ok) fetchPullSchedules();
+    } catch { /* non-fatal */ }
+  };
+  const handleToggleSchedule = async (id: string, enabled: boolean) => {
+    try {
+      const res = await fetch(`/api/fleet/pull-schedules/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled })
+      });
+      if (res.ok) fetchPullSchedules();
+    } catch { /* non-fatal */ }
+  };
+
   const handleSetRegion = async (machineId: string, region: string) => {
     try {
       const res = await fetch(`/api/fleet/machines/${machineId}/region`, {
@@ -1166,6 +1210,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
   useEffect(() => {
     fetchTenantData();
+    fetchPullSchedules();
   }, [cleanSlug]);
 
   const completeTenantLogin = (data?: any) => {
@@ -3379,6 +3424,122 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     </div>
                   );
                 })()}
+
+                {/* Scheduled Pulls (DEF-41) */}
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.025)',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '12px',
+                  padding: '1.25rem 1.5rem'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.9rem' }}>
+                    <Clock size={17} color="#c084fc" />
+                    <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#ffffff' }}>Scheduled Pulls</h3>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--text-muted, #94a3b8)' }}>
+                      · auto-queue a telemetry pull daily, by region
+                    </span>
+                  </div>
+
+                  {pullSchedules.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.9rem' }}>
+                      {pullSchedules.map((s: any) => (
+                        <div key={s.id} style={{
+                          display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap',
+                          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                          borderRadius: '8px', padding: '0.5rem 0.8rem'
+                        }}>
+                          <span style={{
+                            fontSize: '0.74rem', fontWeight: 700,
+                            color: s.region ? '#d8b4fe' : '#38bdf8',
+                            background: s.region ? 'rgba(168,85,247,0.12)' : 'rgba(56,189,248,0.12)',
+                            border: `1px solid ${s.region ? 'rgba(168,85,247,0.3)' : 'rgba(56,189,248,0.3)'}`,
+                            borderRadius: '5px', padding: '0.1rem 0.45rem'
+                          }}>
+                            {s.region || 'ALL REGIONS'}
+                          </span>
+                          <span style={{ fontSize: '0.85rem', color: '#ffffff', fontWeight: 600, fontFamily: 'monospace' }}>
+                            {String(s.hour).padStart(2, '0')}:{String(s.minute).padStart(2, '0')}
+                          </span>
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)' }}>{s.timezone} · daily</span>
+                          {s.lastRunAt && (
+                            <span style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                              last run {new Date(s.lastRunAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <button
+                              onClick={() => handleToggleSchedule(s.id, !s.enabled)}
+                              style={{
+                                fontSize: '0.7rem', fontWeight: 600, cursor: 'pointer',
+                                color: s.enabled ? '#4ade80' : '#94a3b8',
+                                background: s.enabled ? 'rgba(34,197,94,0.12)' : 'rgba(148,163,184,0.12)',
+                                border: `1px solid ${s.enabled ? 'rgba(34,197,94,0.3)' : 'rgba(148,163,184,0.3)'}`,
+                                borderRadius: '5px', padding: '0.15rem 0.5rem'
+                              }}>
+                              {s.enabled ? 'Enabled' : 'Paused'}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteSchedule(s.id)}
+                              title="Delete schedule"
+                              style={{
+                                background: 'transparent', border: '1px solid rgba(239,68,68,0.3)', color: '#f87171',
+                                borderRadius: '5px', padding: '0.15rem 0.4rem', cursor: 'pointer', display: 'inline-flex', alignItems: 'center'
+                              }}>
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Add-schedule row */}
+                  <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    <label style={{ fontSize: '0.68rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                      Region
+                      <select value={schedForm.region} onChange={e => setSchedForm({ ...schedForm, region: e.target.value })}
+                        style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '5px', padding: '0.3rem 0.4rem', fontSize: '0.8rem' }}>
+                        <option value="">All regions</option>
+                        <option value="AMER">AMER</option>
+                        <option value="EMEA">EMEA</option>
+                        <option value="APAC">APAC</option>
+                      </select>
+                    </label>
+                    <label style={{ fontSize: '0.68rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                      Time
+                      <span style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                        <select value={schedForm.hour} onChange={e => setSchedForm({ ...schedForm, hour: e.target.value })}
+                          style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '5px', padding: '0.3rem 0.3rem', fontSize: '0.8rem' }}>
+                          {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{String(h).padStart(2, '0')}</option>)}
+                        </select>
+                        <span style={{ color: '#64748b' }}>:</span>
+                        <select value={schedForm.minute} onChange={e => setSchedForm({ ...schedForm, minute: e.target.value })}
+                          style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '5px', padding: '0.3rem 0.3rem', fontSize: '0.8rem' }}>
+                          {['0', '15', '30', '45'].map(m => <option key={m} value={m}>{m.padStart(2, '0')}</option>)}
+                        </select>
+                      </span>
+                    </label>
+                    <label style={{ fontSize: '0.68rem', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '0.2rem', flex: '1 1 160px' }}>
+                      Timezone
+                      <input value={schedForm.timezone} onChange={e => setSchedForm({ ...schedForm, timezone: e.target.value })}
+                        placeholder="e.g. America/New_York"
+                        style={{ background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.15)', borderRadius: '5px', padding: '0.3rem 0.4rem', fontSize: '0.8rem' }} />
+                    </label>
+                    <button
+                      onClick={handleAddSchedule}
+                      style={{
+                        background: 'rgba(168, 85, 247, 0.15)', border: '1px solid rgba(168, 85, 247, 0.35)', color: '#c084fc',
+                        padding: '0.4rem 0.85rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer',
+                        display: 'inline-flex', alignItems: 'center', gap: '0.4rem'
+                      }}>
+                      <Plus size={14} /> Add schedule
+                    </button>
+                  </div>
+                  <p style={{ fontSize: '0.68rem', color: '#64748b', margin: '0.6rem 0 0 0' }}>
+                    Each run queues a pull for the matching endpoints. Agents apply it on their next check-in —
+                    continuously with the persistent service, otherwise when the app is open.
+                  </p>
+                </div>
 
                 {/* Enrolled Workstations Preview Card */}
                 <div style={{
