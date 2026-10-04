@@ -3200,6 +3200,67 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   </div>
                 </div>
 
+                {/* Endpoint Locations — per-country rollup (BILL-7) */}
+                {machines.length > 0 && (() => {
+                  const ccFlag = (cc: string) =>
+                    cc && cc.length === 2
+                      ? String.fromCodePoint(...[...cc.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65))
+                      : '🏳️';
+                  const byCountry: Record<string, { total: number; online: number }> = {};
+                  machines.forEach(m => {
+                    const cc = (m.geoCountry || '').toUpperCase();
+                    const key = cc || 'UNKNOWN';
+                    if (!byCountry[key]) byCountry[key] = { total: 0, online: 0 };
+                    byCountry[key].total++;
+                    if (m.status === 'online') byCountry[key].online++;
+                  });
+                  const entries = Object.entries(byCountry).sort((a, b) => b[1].total - a[1].total);
+                  const resolved = entries.filter(([k]) => k !== 'UNKNOWN').length;
+                  return (
+                    <div style={{
+                      background: 'rgba(255, 255, 255, 0.025)',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: '12px',
+                      padding: '1.25rem 1.5rem'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.9rem' }}>
+                        <Globe size={17} color="#38bdf8" />
+                        <h3 style={{ fontSize: '1rem', fontWeight: 700, margin: 0, color: '#ffffff' }}>Endpoint Locations</h3>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted, #94a3b8)' }}>
+                          · {resolved} {resolved === 1 ? 'country' : 'countries'} resolved from public IP
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem' }}>
+                        {entries.map(([cc, v]) => {
+                          const unknown = cc === 'UNKNOWN';
+                          return (
+                            <div key={cc} title={unknown
+                              ? 'Public IP not yet resolved — populates on the endpoint’s next check-in'
+                              : `${v.online} online · ${v.total - v.online} offline`}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                background: unknown ? 'rgba(148, 163, 184, 0.08)' : 'rgba(56, 189, 248, 0.08)',
+                                border: `1px solid ${unknown ? 'rgba(148, 163, 184, 0.22)' : 'rgba(56, 189, 248, 0.25)'}`,
+                                borderRadius: '9px', padding: '0.5rem 0.8rem'
+                              }}>
+                              <span style={{ fontSize: '1.15rem', lineHeight: 1 }}>{unknown ? '🌐' : ccFlag(cc)}</span>
+                              <div>
+                                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: unknown ? '#cbd5e1' : '#e0f2fe' }}>
+                                  {unknown ? 'Unresolved' : cc}
+                                </div>
+                                <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)' }}>
+                                  {v.total} {v.total === 1 ? 'endpoint' : 'endpoints'}
+                                  {!unknown && v.online > 0 ? ` · ${v.online} online` : ''}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* Enrolled Workstations Preview Card */}
                 <div style={{
                   background: 'rgba(255, 255, 255, 0.025)',
