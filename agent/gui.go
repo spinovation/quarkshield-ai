@@ -949,6 +949,15 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		}()
 	}
 
+	// DEF-39: once enrolled, install/refresh the persistent background service
+	// (macOS LaunchAgent) so pulls + scheduled syncs keep running when the app is
+	// closed. No-op on Windows; Linux uses systemd via install-linux.sh.
+	go func() {
+		if c := LoadEnrollmentConfig(); c.Token != "" {
+			ensureBackgroundService(c.ServerURL)
+		}
+	}()
+
 	// Background worker: on-demand command polling (DEF-38) + automated daily sync.
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)

@@ -601,6 +601,7 @@ func main() {
 
 	// Handle Uninstall
 	if *uninstallFlag {
+		removeBackgroundService()
 		unregisterWindowsUninstall()
 		fmt.Println("==================================================")
 		fmt.Println(" 🛡️ QuarkShield Post-Quantum Guard")

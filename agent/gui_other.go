@@ -16,6 +16,76 @@ import (
 func hideConsole(cmd *exec.Cmd) {}
 func detachConsole()            {}
 
+// ensureBackgroundService (DEF-39, macOS) installs + loads a per-user LaunchAgent so
+// the agent keeps polling for on-demand pulls and running scheduled syncs even when
+// the GUI app is closed. The plist runs THIS executable with --daemon; the daemon
+// reads the enrollment token from ~/.quarkshield. No-op on Linux (install-linux.sh
+// handles systemd there).
+func ensureBackgroundService(serverURL string) {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	exePath, err := os.Executable()
+	if err != nil || exePath == "" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	if serverURL == "" {
+		serverURL = "https://quarkshield.ai"
+	}
+	laDir := filepath.Join(home, "Library", "LaunchAgents")
+	_ = os.MkdirAll(laDir, 0755)
+	plistPath := filepath.Join(laDir, "ai.quarkshield.agent.plist")
+	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>ai.quarkshield.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>%s</string>
+        <string>--daemon</string>
+        <string>--server</string>
+        <string>%s</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>30</integer>
+    <key>ProcessType</key><string>Background</string>
+    <key>StandardOutPath</key><string>/tmp/quarkshield-agent.log</string>
+    <key>StandardErrorPath</key><string>/tmp/quarkshield-agent.err</string>
+</dict>
+</plist>
+`, exePath, serverURL)
+	existing, _ := os.ReadFile(plistPath)
+	if string(existing) != plist {
+		if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
+			return
+		}
+		_ = exec.Command("launchctl", "unload", plistPath).Run()
+	}
+	// (Re)load — harmless if already loaded.
+	_ = exec.Command("launchctl", "load", "-w", plistPath).Run()
+}
+
+// removeBackgroundService (macOS) unloads + deletes the LaunchAgent on uninstall so
+// launchd stops trying to run a removed binary. No-op elsewhere.
+func removeBackgroundService() {
+	if runtime.GOOS != "darwin" {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return
+	}
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", "ai.quarkshield.agent.plist")
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	_ = os.Remove(plistPath)
+}
+
 // createDesktopAndStartMenuShortcuts creates Linux XDG desktop entry
 func createDesktopAndStartMenuShortcuts() {
 	if runtime.GOOS != "linux" {

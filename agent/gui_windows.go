@@ -27,6 +27,14 @@ func detachConsole() {
 	_, _, _ = freeConsole.Call()
 }
 
+// ensureBackgroundService is a no-op on Windows for now — the persistent daemon
+// there is TODO (register a Scheduled Task / Windows service in the installer).
+// The GUI's own 2-min command poller still services Pull Telemetry while open.
+func ensureBackgroundService(serverURL string) {}
+
+// removeBackgroundService is a no-op on Windows (no LaunchAgent to remove).
+func removeBackgroundService() {}
+
 // createDesktopAndStartMenuShortcuts installs .lnk shortcuts on user's Desktop and Start Menu
 func createDesktopAndStartMenuShortcuts() {
 	exePath, err := os.Executable()
