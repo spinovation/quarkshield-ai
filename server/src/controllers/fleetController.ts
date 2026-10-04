@@ -1369,11 +1369,13 @@ const ensureGroupRow = async (tenant: string, name: string): Promise<void> => {
   const clean = (name || '').trim();
   if (!clean || clean.toLowerCase() === 'default') return;
   const id = 'grp-' + crypto.randomBytes(8).toString('hex');
+  // Explicit casts: $2/$3 appear both as insert values and inside LOWER(), so Postgres
+  // needs the type pinned or it errors "inconsistent types deduced for parameter".
   await pool.query(
     `INSERT INTO fleet_groups (id, tenant_name, name)
-       SELECT $1, $2, $3
+       SELECT $1::varchar, $2::varchar, $3::varchar
       WHERE NOT EXISTS (
-        SELECT 1 FROM fleet_groups WHERE LOWER(tenant_name) = LOWER($2) AND LOWER(name) = LOWER($3)
+        SELECT 1 FROM fleet_groups WHERE LOWER(tenant_name) = LOWER($2::varchar) AND LOWER(name) = LOWER($3::varchar)
       )`,
     [id, tenant, clean]
   );
@@ -1448,8 +1450,17 @@ export const deleteFleetGroup = async (req: Request, res: Response) => {
       'DELETE FROM fleet_groups WHERE LOWER(tenant_name) = LOWER($1) AND LOWER(name) = LOWER($2)',
       [tenant, name]
     );
+    // Move every machine whose EFFECTIVE group is this one (explicit override OR its
+    // enrollment token tag) to Default, so the deleted group truly disappears.
     await pool.query(
-      'UPDATE fleet_machines SET group_name = NULL WHERE LOWER(COALESCE(group_name,\'\')) = LOWER($1) AND (LOWER(tenant_name) = LOWER($2) OR LOWER(REPLACE(tenant_name,\' \',\'\')) = LOWER(REPLACE($2,\' \',\'\')))',
+      `UPDATE fleet_machines SET group_name = 'Default'
+         WHERE id IN (
+           SELECT m.id FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
+            WHERE (LOWER(m.tenant_name) = LOWER($2)
+                OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($2,' ',''))
+                OR (LOWER($2) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+              AND LOWER(${EFFECTIVE_GROUP}) = LOWER($1)
+         )`,
       [name, tenant]
     );
     // Also detach pull schedules targeting this group.
@@ -1480,10 +1491,12 @@ export const setMachineGroup = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Fleet machine not found.' });
     }
     const tenant = owner.rows[0].tenant;
-    const val = raw && raw.toLowerCase() !== 'default' ? raw : null;
-    if (val) await ensureGroupRow(tenant, val);
+    // Store the chosen group authoritatively. '' -> 'Default' (stored literally so it
+    // overrides the enrollment token tag). EFFECTIVE_GROUP maps 'Default' back to Default.
+    const val = raw || 'Default';
+    if (val.toLowerCase() !== 'default') await ensureGroupRow(tenant, val);
     await pool.query('UPDATE fleet_machines SET group_name = $1 WHERE id = $2', [val, machineId]);
-    res.json({ success: true, machineId, group: val || 'Default' });
+    res.json({ success: true, machineId, group: val });
   } catch (err: any) {
     console.error('Error setting machine group:', err);
     res.status(500).json({ error: 'Failed to set group.' });

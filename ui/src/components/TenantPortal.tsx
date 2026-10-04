@@ -1200,7 +1200,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     try {
       const res = await fetch(`/api/fleet/groups/${encodeURIComponent(name)}`, { method: 'DELETE' });
       if (res.ok) { fetchFleetGroups(); fetchTenantData(); }
-    } catch { /* non-fatal */ }
+      else { const d = await res.json().catch(() => ({})); alert(`Failed to delete group: ${d.error || res.status}`); }
+    } catch (e) { alert(`Delete error: ${e}`); }
   };
   const handleSetGroup = async (machineId: string, group: string) => {
     try {
