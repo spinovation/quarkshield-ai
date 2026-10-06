@@ -1697,32 +1697,19 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         setTenantTokens(prev => [data, ...prev.filter(t => t.id !== data.id)]);
         fetchTenantData();
       } else {
-        const fallbackTok = {
-          id: `tok-${Date.now().toString(16)}`,
-          name: newTokenGroup.trim(),
-          token: `pqc_agent_${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 10)}`,
-          tenantName: client.displayName || cleanSlug,
-          licenseKey: activeLicense,
-          machineCount: 0,
-          createdAt: new Date().toISOString()
-        };
-        setGeneratedTokenData(fallbackTok);
-        setTenantTokens(prev => [fallbackTok, ...prev]);
+        // Never fabricate a token. A fake client-side token would be shown as a
+        // success, copied into an agent, and rejected by the server with a 401
+        // (the token was never persisted). Surface the real failure instead.
+        if (res.status === 401 || res.status === 403) {
+          setSessionExpired(true);
+        } else {
+          const d = await res.json().catch(() => ({} as any));
+          alert(`Failed to generate enrollment token: ${d.error || `server returned ${res.status}`}. Please try again.`);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to generate enrollment token:', err);
-      const activeLicense = licenses.find(l => l.status === 'active')?.licenseKey || `QS-${(client.customerId || cleanSlug).toUpperCase()}-ACTIVE`;
-      const fallbackTok = {
-        id: `tok-${Date.now().toString(16)}`,
-        name: newTokenGroup.trim(),
-        token: `pqc_agent_${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 10)}`,
-        tenantName: client.displayName || cleanSlug,
-        licenseKey: activeLicense,
-        machineCount: 0,
-        createdAt: new Date().toISOString()
-      };
-      setGeneratedTokenData(fallbackTok);
-      setTenantTokens(prev => [fallbackTok, ...prev]);
+      alert(`Failed to generate enrollment token: ${err?.message || 'network error'}. Please check your connection and try again.`);
     } finally {
       setIsGeneratingToken(false);
     }
