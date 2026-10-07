@@ -192,8 +192,8 @@ func processCertBytes(certBytes []byte, storePath string, seen map[string]bool) 
 		complianceViolations = []string{"CNSA 2.0", "NIST FIPS 203 (ML-KEM)", "EO 14028"}
 	} else if isSignature && !isKeyEstablishment {
 		funcTag = "Authentication / Digital Signature"
-		quantumThreat = "Shor's Algorithm (Signature Forgery & Spoofing)"
-		explainer = "Linux certificate utilized for Authentication / Code Signing / Signatures. ⚠️ Future Shor's Risk: No immediate HNDL session recording; signatures can be forged once a CRQC exists."
+		quantumThreat = "Shor's Algorithm — Future Signature Forgery"
+		explainer = "Linux certificate used for Authentication / Code Signing / Signatures — an integrity / impersonation risk, NOT a confidentiality / HNDL one. No session data is exposed today; once a CRQC exists, Shor's algorithm could forge signatures or impersonate this identity. Migrate signatures to ML-DSA (FIPS 204)."
 		complianceViolations = []string{"CNSA 2.0", "NIST FIPS 204 (ML-DSA)", "EO 14028"}
 	} else if isKeyEstablishment && isSignature {
 		funcTag = "Dual: Key Establishment (HNDL) & Authentication (Shor's)"

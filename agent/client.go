@@ -148,7 +148,7 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 		OS:           osName,
 		Arch:         archName,
 		IP:           ip,
-		AgentVersion: "2.2.0",
+		AgentVersion: "2.2.1",
 		Token:        token,
 		LicenseKey:   licenseKey,
 		TenantName:   tenantName,

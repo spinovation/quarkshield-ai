@@ -61,18 +61,10 @@ Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Issuer -match "Intune" } 
 		}
 	}
 
-	// 3. Database Root CAs (e.g. db_root_ca_*.cer)
+	// 3. Database Root CAs (e.g. db_root_ca_*.cer) → canonical 4-phase cert remediation
+	//    with database-specific hardening (sslmode=verify-full) and verification (psql).
 	if strings.Contains(lowerName, "db_root") || strings.Contains(lowerName, "root_ca") || strings.Contains(lowerName, "database") {
-		return RemediationPlan{
-			Recommendation: "Establish dual-root trust store for database cluster. Configure clients with 'sslmode=verify-full' and plan migration to hybrid composite ML-DSA/RSA root prior to 2030.",
-			Steps: []string{
-				"Append post-quantum root certificate to the database server CA bundle (ca.crt / truststore.jks).",
-				"Update database client connection strings to require TLS 1.3 verification (sslmode=verify-full).",
-				"Transition database drivers (JDBC, ODBC, pgx) to use Post-Quantum hybrid providers (liboqs / Bouncy Castle).",
-			},
-			CodeSnippet: `# Verify database root certificate expiration and signature algorithm:
-openssl x509 -in "` + path + `" -text -noout | grep -E "(Issuer|Algorithm|Not After)"`,
-		}
+		return buildCertRemediation(algorithm, keySize, name, path, lowerName, lowerPath, isKeyEstablishment, isSignature, true)
 	}
 
 	// 4. Plaintext Private Keys on Disk (Chain.pem, id_rsa, *.key)
@@ -155,57 +147,104 @@ ssh-keygen -t sntrup761x25519-sha512@openssh.com -f "$HOME\.ssh\id_pqc" -C "quan
 		}
 	}
 
-	// 8. Functional Certificate Triaging (FIPS 203 ML-KEM vs FIPS 204 ML-DSA)
+	// 8. All remaining X.509 certificate findings → canonical 4-phase PQC remediation,
+	//    tailored to the cert's function (FIPS 204 ML-DSA signatures vs FIPS 203 ML-KEM
+	//    key establishment — never conflated). Covers signature, key-establishment,
+	//    dual-purpose and undetermined-usage certs.
+	return buildCertRemediation(algorithm, keySize, name, path, lowerName, lowerPath, isKeyEstablishment, isSignature, false)
+}
+
+// buildCertRemediation produces the canonical four-phase, FIPS-203/204-separated PQC
+// remediation shared by every X.509 certificate finding (database root CAs, signature
+// certs, key-establishment certs, generic/undetermined certs).
+//
+// Design rules (so the output survives review by a crypto architect / an AI check):
+//   - TLS hardening (TLS 1.3, chain + hostname validation, sslmode=verify-full) is a
+//     PREREQUISITE, explicitly NOT presented as PQC.
+//   - FIPS 203 (ML-KEM) = key establishment; FIPS 204 (ML-DSA) = signatures. Never mixed.
+//   - PQC steps are CONDITIONAL on the full stack (engine → TLS lib → each client driver)
+//     supporting it — no blanket "install liboqs/Bouncy Castle".
+//   - Verification is done on a LIVE connection, not just the static certificate file.
+func buildCertRemediation(algorithm string, keySize int, name, path, lowerName, lowerPath string, isKeyEstablishment, isSignature, isDatabase bool) RemediationPlan {
 	algoText := algorithm
 	if keySize > 0 {
 		algoText = fmt.Sprintf("%s-%d", algorithm, keySize)
 	}
 
-	if isKeyEstablishment && !isSignature {
-		return RemediationPlan{
-			Recommendation: fmt.Sprintf("🚨 CRITICAL HNDL EXPOSURE: %s is used for Key Establishment / Encryption. Upgrade to NIST FIPS 203 (ML-KEM-768) hybrid key exchange immediately to block retroactive quantum decryption.", algoText),
-			Steps: []string{
-				"Configure TLS termination endpoints and client applications to negotiate X25519MLKEM768 (FIPS 203) hybrid key encapsulation.",
-				"In Java / Spring Boot microservices, autowire PqcStarterLib HybridHandshakeOrchestrator to enforce hybrid session secrets.",
-				"Mandate minimum 256-bit symmetric session ciphers (TLS_AES_256_GCM_SHA384) to eliminate Grover's 64-bit vulnerability.",
-			},
-			CodeSnippet: `// Spring Boot (PqcStarterLib) Remediation: NIST FIPS 203 ML-KEM Session Key Exchange
-@Autowired
-private HybridHandshakeOrchestrator pqcHandshake;
-
-// Protects session traffic against Harvest Now, Decrypt Later (HNDL):
-HandshakeSession session = pqcHandshake.establishHybridSession("service-endpoint");
-byte[] sharedSecret = session.getDerivedKey(); // HKDF(ECDHE-P384 || Kyber-768)`,
-		}
+	// Tailor the function description, risk framing and migration target to the cert's
+	// actual key usage. Complementary-function reminders are included without conflation.
+	var funcDesc, riskDesc, migrateStep string
+	switch {
+	case isSignature && !isKeyEstablishment:
+		funcDesc = "digital-signature / authentication (a certificate/CA-impersonation and integrity risk, NOT an immediate data-interception / HNDL risk)"
+		riskDesc = "Once a CRQC exists, Shor's algorithm could forge signatures or impersonate this certificate's identity."
+		migrateStep = "Phase 3 — PQC migration (only where the full stack supports it): migrate the certificate/CA signature to ML-DSA (FIPS 204) or an approved composite-hybrid signature. If this certificate also secures a TLS endpoint, separately move that endpoint's key establishment to ML-KEM (FIPS 203) / a hybrid group. Deploy the matching certificates and trust chain, then validate interoperability with every client."
+	case isKeyEstablishment && !isSignature:
+		funcDesc = "key-establishment / encryption (an active Harvest-Now-Decrypt-Later confidentiality risk)"
+		riskDesc = "Traffic recorded today can be retroactively decrypted once a CRQC exists."
+		migrateStep = "Phase 3 — PQC migration (only where the full stack supports it): migrate the TLS key establishment to ML-KEM (FIPS 203) or a hybrid group (e.g. X25519MLKEM768), and migrate the certificate's own signature to ML-DSA (FIPS 204). Deploy the matching certificates and trust chain, then validate interoperability with every client."
+	case isKeyEstablishment && isSignature:
+		funcDesc = "both key-establishment AND digital-signature (subject to both HNDL confidentiality capture and future signature forgery)"
+		riskDesc = "Recorded traffic is retroactively decryptable, and signatures/identity are forgeable, once a CRQC exists."
+		migrateStep = "Phase 3 — PQC migration (only where the full stack supports it): migrate signatures to ML-DSA (FIPS 204) AND key establishment to ML-KEM (FIPS 203) / a hybrid group (e.g. X25519MLKEM768). Deploy the matching certificates and trust chain, then validate interoperability with every client."
+	default:
+		funcDesc = "an undetermined function — treat as both signature and key-establishment until the certificate's key usage is confirmed"
+		riskDesc = "Treat as exposed to both future signature forgery and (where used for key exchange) Harvest-Now-Decrypt-Later."
+		migrateStep = "Phase 3 — PQC migration (only where the full stack supports it): confirm the certificate's usage, then migrate signatures to ML-DSA (FIPS 204) and/or key establishment to ML-KEM (FIPS 203) / a hybrid group accordingly. Deploy the matching certificates and trust chain, then validate interoperability with every client."
 	}
 
-	if isSignature && !isKeyEstablishment {
-		return RemediationPlan{
-			Recommendation: fmt.Sprintf("⚠️ SHOR'S FORGERY RISK: %s is used for Authentication / Digital Signatures. Upgrade to NIST FIPS 204 (ML-DSA-65) to protect against future quantum signature forgery and CA spoofing.", algoText),
-			Steps: []string{
-				"Plan PKI transition to NIST FIPS 204 (ML-DSA) or FIPS 205 (SLH-DSA) digital signatures prior to CRQC realization.",
-				"In Spring Boot microservices, replace RS256/ES256 JWT filters with DilithiumJwtFilter for quantum-safe identity verification.",
-				"Issue dual-signature / composite X.509 certificates to maintain backward compatibility with legacy classical clients.",
-			},
-			CodeSnippet: `// Spring Boot (PqcStarterLib) Remediation: NIST FIPS 204 ML-DSA Digital Signature
-@Autowired
-private DilithiumSigningEngine dilithiumSigner;
-
-// Generates quantum-safe signature immune to Shor's factorization:
-byte[] signature = dilithiumSigner.signString(privateKey, payload);
-boolean valid = dilithiumSigner.verifyString(publicKey, payload, signature);`,
-		}
+	subject := "This certificate"
+	if isDatabase {
+		subject = "This database root CA"
 	}
+
+	rec := fmt.Sprintf("%s (%s) uses a classical algorithm (RSA/ECDSA) vulnerable to Shor's algorithm on a future CRQC. Function: %s. %s Remediate in phases. IMPORTANT: enforcing TLS 1.3 + full certificate validation (and adding a PQC root to the trust store) are hardening prerequisites — they do NOT by themselves make the connection quantum-resistant. The entire path must be PQC-capable: CA signature → certificate signature (ML-DSA, FIPS 204) and TLS key establishment (ML-KEM, FIPS 203, or a hybrid group). FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA) address different functions — do not conflate them.", subject, algoText, funcDesc, riskDesc)
+
+	hardeningStep := "Phase 1 — Hardening (prerequisite, NOT yet PQC): require TLS 1.3 where supported (TLS 1.2 minimum), enforce full certificate-chain + hostname validation, and remove trust in expired/weak/unneeded CAs. Confirm this certificate's signature algorithm and expiry."
+	readinessStep := "Phase 2 — PQC readiness assessment: determine whether the serving stack, its TLS library, and EACH client support PQC/hybrid TLS (capabilities differ widely — do NOT assume a single provider like liboqs / Bouncy Castle applies everywhere). Identify where the chain is RSA/ECDSA-only and whether key establishment is classical or hybrid."
+	if isDatabase {
+		hardeningStep = "Phase 1 — Hardening (prerequisite, NOT yet PQC): require TLS 1.3 where the DB supports it (TLS 1.2 minimum), enforce full chain + hostname validation (PostgreSQL: sslmode=verify-full with the correct sslrootcert), and remove trust in expired/weak/unneeded CAs. Confirm this certificate's signature algorithm and expiry."
+		readinessStep = "Phase 2 — PQC readiness assessment: determine whether this specific database engine, its TLS library, and EACH client driver support PQC/hybrid TLS (capabilities differ widely across libpq, JDBC, ODBC, SQL Server, Oracle, MySQL — do NOT assume a single provider like liboqs / Bouncy Castle applies everywhere). Identify where the chain is RSA/ECDSA-only and whether key establishment is classical or hybrid."
+	}
+	verifyStep := "Phase 4 — Verification: prove it on a LIVE connection — confirm the negotiated certificate algorithm, chain trust, TLS version, TLS signature algorithm, and key-exchange/KEM — not just the static certificate file."
+
+	// Inspection command: a Windows cert-store provider path cannot be read by
+	// `openssl x509 -in` (it expects a file), so use Get-ChildItem there instead.
+	inspectCmd := `openssl x509 -in "` + path + `" -noout -text | grep -E "(Signature Algorithm|Public Key Algorithm|Public-Key|Issuer|Subject|Not Before|Not After)"`
+	if runtime.GOOS == "windows" && (strings.Contains(path, "certificate::") || strings.Contains(lowerPath, "currentuser") || strings.Contains(lowerPath, "localmachine")) {
+		inspectCmd = "Get-ChildItem Cert: -Recurse | Where-Object { $_.Thumbprint } | Format-List Subject, Issuer, Thumbprint, SignatureAlgorithm, NotBefore, NotAfter, PublicKey"
+	}
+
+	// Live-verification port: default 443, or a database port inferred from the cert name.
+	port := "443"
+	hostPlaceholder := "<host>"
+	psqlLine := ""
+	if isDatabase {
+		hostPlaceholder = "<db-host>"
+		port = "5432" // PostgreSQL default
+		if strings.Contains(lowerName, "mysql") || strings.Contains(lowerName, "maria") {
+			port = "3306"
+		} else if strings.Contains(lowerName, "mssql") || strings.Contains(lowerName, "sqlserver") {
+			port = "1433"
+		} else if strings.Contains(lowerName, "oracle") {
+			port = "2484"
+		}
+		psqlLine = "\n\n# (3) POSTGRES client check — confirm full verification against the intended CA bundle:\n# psql \"host=<db-host> port=" + port + " sslmode=verify-full sslrootcert=ca.crt\" -c \"SHOW ssl;\""
+	}
+
+	snippet := "# (1) INSPECT the certificate (algorithm, key size, validity) — inspection only, does NOT prove what the server uses:\n" +
+		inspectCmd +
+		"\n\n# (2) VERIFY the LIVE TLS session actually negotiated (proves cert-in-use, chain, TLS version and\n" +
+		"#     key-exchange group). Replace " + hostPlaceholder + " with the real endpoint:\n" +
+		"openssl s_client -connect " + hostPlaceholder + ":" + port + " -servername " + hostPlaceholder + " -tls1_3 -showcerts </dev/null 2>/dev/null \\\n" +
+		"  | grep -E \"(Protocol|Cipher|Server Temp Key|Peer signature|Verify return code)\"\n" +
+		"#     \"Server Temp Key: X25519MLKEM768\" would confirm hybrid PQC key exchange is actually in use." +
+		psqlLine
 
 	return RemediationPlan{
-		Recommendation: fmt.Sprintf("Upgrade %s certificate to dual-certificate architecture supporting NIST FIPS 204 (ML-DSA) and hybrid key encapsulation (FIPS 203 ML-KEM) to block Harvest Now Decrypt Later (HNDL).", algoText),
-		Steps: []string{
-			"Audit certificate consumers (web servers, load balancers, client applications) for PQC readiness.",
-			"Deploy hybrid composite certificate (X.509 with ML-DSA + RSA extension) to maintain backward compatibility.",
-			"Configure TLS termination endpoints to negotiate X25519MLKEM768 hybrid key exchange to defend data in transit against HNDL.",
-		},
-		CodeSnippet: `# OpenSSL 3.3+ command to inspect certificate parameters and key usage:
-openssl x509 -in "` + path + `" -noout -text | grep -E "(Signature Algorithm|Subject|Key Usage|Extended Key Usage)"`,
+		Recommendation: rec,
+		Steps:          []string{hardeningStep, readinessStep, migrateStep, verifyStep},
+		CodeSnippet:    snippet,
 	}
 }
 

@@ -348,8 +348,8 @@ func AuditPEMCertificate(pemString string, label string, path string) AuditResul
 				complianceViolations = []string{"CNSA 2.0", "NIST FIPS 203 (ML-KEM)", "EO 14028"}
 			} else if isSignature && !isKeyEstablishment {
 				funcTag = "Authentication / Digital Signature"
-				quantumThreat = "Shor's Algorithm (Signature Forgery & Spoofing)"
-				explainer = "Certificate utilized for Authentication / Digital Signature. ⚠️ Future Shor's Risk: No immediate HNDL data interception; signatures can be forged once a CRQC exists."
+				quantumThreat = "Shor's Algorithm — Future Signature Forgery"
+				explainer = "Certificate used for Authentication / Digital Signature — this is an integrity / impersonation risk, NOT a confidentiality / HNDL one. No data-in-transit is exposed today; once a CRQC exists, Shor's algorithm could forge signatures or impersonate this certificate's identity. Migrate signatures to ML-DSA (FIPS 204)."
 				complianceViolations = []string{"CNSA 2.0", "NIST FIPS 204 (ML-DSA)", "EO 14028"}
 			} else if isKeyEstablishment && isSignature {
 				funcTag = "Dual: Key Establishment (HNDL) & Authentication (Shor's)"
@@ -861,8 +861,8 @@ func AuditDERCertificate(cert *x509.Certificate, fileName string, path string) A
 		complianceViolations = []string{"CNSA 2.0", "NIST FIPS 203 (ML-KEM)", "EO 14028"}
 	} else if isSignature && !isKeyEstablishment {
 		funcTag = "Authentication / Digital Signature"
-		quantumThreat = "Shor's Algorithm (Signature Forgery & Spoofing)"
-		explainer = "Certificate utilized for Authentication / Digital Signature. ⚠️ Future Shor's Risk: No immediate HNDL data interception; signatures can be forged once a CRQC exists."
+		quantumThreat = "Shor's Algorithm — Future Signature Forgery"
+		explainer = "Certificate used for Authentication / Digital Signature — this is an integrity / impersonation risk, NOT a confidentiality / HNDL one. No data-in-transit is exposed today; once a CRQC exists, Shor's algorithm could forge signatures or impersonate this certificate's identity. Migrate signatures to ML-DSA (FIPS 204)."
 		complianceViolations = []string{"CNSA 2.0", "NIST FIPS 204 (ML-DSA)", "EO 14028"}
 	} else if isKeyEstablishment && isSignature {
 		funcTag = "Dual: Key Establishment (HNDL) & Authentication (Shor's)"

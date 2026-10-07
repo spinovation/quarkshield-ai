@@ -12,7 +12,7 @@
 #define MyAppURL "https://quarkshield.ai"
 #define MyAppExeName "quarkshield-scanner.exe"
 #ifndef MyAppVersion
-  #define MyAppVersion "2.2.0"
+  #define MyAppVersion "2.2.1"
 #endif
 
 [Setup]
