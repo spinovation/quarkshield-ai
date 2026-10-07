@@ -424,7 +424,7 @@ func auditGitPackage() (AuditResult, bool) {
 	res.CveDetails = "Audited against NIST NVD & CISA KEV (0 Known Exploits). Git SSH signing and SHA-256 enabled."
 	res.QuantumThreat = "SHA-1 to SHA-256 Transition"
 	res.Description = fmt.Sprintf("%s. Source control engine supporting SSH signing and SHA-256 object formats.", versionStr)
-	res.Recommendation = "Configure Git to sign commits using SSH keys backed by ML-DSA or ed25519."
+	res.Recommendation = "Configure Git to sign commits using post-quantum SSH keys (ML-DSA / sntrup761x25519 via OpenSSH 9.8+). Note: ed25519 is NOT quantum-safe and should not be relied on for PQC."
 	res.Explainer = "Git 2.28+ supports SSH commit signing, allowing direct integration with post-quantum signing agents."
 	res.ComplianceViolations = []string{}
 

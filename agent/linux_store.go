@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // AuditPlatformSystemStores audits Linux trust stores and system security policies
@@ -218,11 +219,6 @@ func processCertBytes(certBytes []byte, storePath string, seen map[string]bool) 
 	desc := fmt.Sprintf("Linux trust store asset (%s). Subject: %s. Issuer: %s. Expiry: %s. Functional Role: %s.",
 		storePath, subjectName, issuerName, expiry, funcTag)
 
-	dispSubject := subjectName
-	if len(dispSubject) > 40 {
-		dispSubject = dispSubject[:40] + "..."
-	}
-
 	shortID := fp
 	if len(shortID) > 8 {
 		shortID = shortID[:8]
@@ -230,22 +226,50 @@ func processCertBytes(certBytes []byte, storePath string, seen map[string]bool) 
 
 	plan := GenerateRemediationWithUsage("certificate", algo, keySize, subjectName, desc, storePath, isKeyEstablishment, isSignature)
 
+	vulnerable := algoIsQuantumVulnerable(algo)
+	// The Linux trust store (/etc/ssl/certs, /etc/pki, ca-bundle.*) is composed of
+	// PUBLIC CA roots/intermediates — trust anchors the operator does not own and
+	// cannot re-key. Treat them (and expired certs) as informational inventory.
+	ls := strings.ToLower(storePath)
+	isTrustAnchor := (issuerName != "" && issuerName == subjectName) ||
+		strings.Contains(ls, "/etc/ssl") || strings.Contains(ls, "/etc/pki") ||
+		strings.Contains(ls, "ca-certificates") || strings.Contains(ls, "ca-bundle") ||
+		strings.Contains(ls, "ca-trust") || strings.Contains(ls, "anchors")
+	isExpired := cert.NotAfter.Before(time.Now())
+	status := certStatus(vulnerable)
+	recommendation := plan.Recommendation
+	expl := explainer
+	if isTrustAnchor {
+		if riskLevel == "high" || riskLevel == "critical" {
+			riskLevel = "low"
+		}
+		status = "Trust Anchor (informational)"
+		recommendation = "Inventory/awareness only — this is a public trust-anchor (root/intermediate CA) in the system trust store. You do not own this key and cannot re-key it; the CA operator is responsible for its post-quantum migration. Remove it only if your organization no longer needs to trust this CA."
+		expl = "Root/intermediate CA certificates use classical algorithms a future quantum computer could forge, but they are public trust anchors managed by the CA — not operator-owned keys requiring re-key."
+	}
+	if isExpired {
+		if riskLevel == "high" || riskLevel == "critical" {
+			riskLevel = "low"
+		}
+		desc += fmt.Sprintf(" NOTE: EXPIRED on %s — retained only to validate previously-issued signatures; no active key-establishment exposure.", expiry)
+	}
+
 	return &AuditResult{
 		ID:                   fmt.Sprintf("lin-cert-%s", shortID),
 		Type:                 "certificate",
-		Name:                 fmt.Sprintf("Linux Trust Store: %s", dispSubject),
-		Path:                 storePath,
+		Name:                 fmt.Sprintf("Linux Trust Store: %s", subjectName),
+		Path:                 fmt.Sprintf("%s — SHA-256 FP: %s", storePath, fp),
 		Algorithm:            fmt.Sprintf("%s-%d", algo, keySize),
 		KeySize:              keySize,
 		QuantumThreat:        quantumThreat,
-		IsVulnerable:         algoIsQuantumVulnerable(algo),
+		IsVulnerable:         vulnerable,
 		RiskLevel:            riskLevel,
-		Status:               certStatus(algoIsQuantumVulnerable(algo)),
+		Status:               status,
 		Description:          desc,
-		Recommendation:       plan.Recommendation,
+		Recommendation:       recommendation,
 		RemediationSteps:     plan.Steps,
 		CodeSnippet:          plan.CodeSnippet,
-		Explainer:            explainer,
+		Explainer:            expl,
 		ComplianceViolations: complianceViolations,
 	}
 }
@@ -264,17 +288,17 @@ func AuditLinuxTLSConfig() []AuditResult {
 				riskLevel = "critical"
 			}
 			results = append(results, AuditResult{
-				ID:                   "lin-crypto-policy",
-				Type:                 "config",
-				Name:                 "Linux System Crypto Policy: " + policy,
-				Path:                 cryptoPolicyPath,
-				Algorithm:            fmt.Sprintf("System Crypto Policy (%s)", policy),
-				QuantumThreat:        "Harvest Now, Decrypt Later (HNDL) & Weak Cryptography",
-				IsVulnerable:         true,
-				RiskLevel:            riskLevel,
-				Status:               "Quantum Vulnerable",
-				Description:          fmt.Sprintf("System cryptographic policy in %s is currently set to '%s', permitting classical and non-PQC cipher suites.", cryptoPolicyPath, policy),
-				Recommendation:       "Update Linux system crypto policy to 'FUTURE' or 'FIPS' to disallow legacy cryptography.",
+				ID:             "lin-crypto-policy",
+				Type:           "config",
+				Name:           "Linux System Crypto Policy: " + policy,
+				Path:           cryptoPolicyPath,
+				Algorithm:      fmt.Sprintf("System Crypto Policy (%s)", policy),
+				QuantumThreat:  "Harvest Now, Decrypt Later (HNDL) & Weak Cryptography",
+				IsVulnerable:   true,
+				RiskLevel:      riskLevel,
+				Status:         "Quantum Vulnerable",
+				Description:    fmt.Sprintf("System cryptographic policy in %s is currently set to '%s', permitting classical and non-PQC cipher suites.", cryptoPolicyPath, policy),
+				Recommendation: "Update Linux system crypto policy to 'FUTURE' or 'FIPS' to disallow legacy cryptography.",
 				RemediationSteps: []string{
 					"Run elevated terminal command: sudo update-crypto-policies --set FUTURE",
 					"Verify active policy: update-crypto-policies --show",
@@ -301,17 +325,17 @@ func AuditLinuxTLSConfig() []AuditResult {
 				lower := strings.ToLower(trimmed)
 				if strings.Contains(lower, "diffie-hellman-group1") || strings.Contains(lower, "3des") || strings.Contains(lower, "arcfour") {
 					results = append(results, AuditResult{
-						ID:                   fmt.Sprintf("lin-sshd-cfg-%d", lineNum+1),
-						Type:                 "config",
-						Name:                 "Linux SSH Daemon Config: Legacy Ciphers",
-						Path:                 sshdPath,
-						Algorithm:            "Legacy SSH Cipher/KEX",
-						QuantumThreat:        "Harvest Now, Decrypt Later (HNDL) & Shor's Algorithm",
-						IsVulnerable:         true,
-						RiskLevel:            "critical",
-						Status:               "Quantum Vulnerable",
-						Description:          fmt.Sprintf("Linux SSH daemon config (%s:%d) enables obsolete cipher/KEX suite: '%s'", sshdPath, lineNum+1, trimmed),
-						Recommendation:       "Enforce modern Post-Quantum Hybrid KEX (e.g., sntrup761x25519-sha512@openssh.com or mlkem768x25519-sha512) and AES-256-GCM.",
+						ID:             fmt.Sprintf("lin-sshd-cfg-%d", lineNum+1),
+						Type:           "config",
+						Name:           "Linux SSH Daemon Config: Legacy Ciphers",
+						Path:           sshdPath,
+						Algorithm:      "Legacy SSH Cipher/KEX",
+						QuantumThreat:  "Harvest Now, Decrypt Later (HNDL) & Shor's Algorithm",
+						IsVulnerable:   true,
+						RiskLevel:      "critical",
+						Status:         "Quantum Vulnerable",
+						Description:    fmt.Sprintf("Linux SSH daemon config (%s:%d) enables obsolete cipher/KEX suite: '%s'", sshdPath, lineNum+1, trimmed),
+						Recommendation: "Enforce modern Post-Quantum Hybrid KEX (e.g., sntrup761x25519-sha512@openssh.com or mlkem768x25519-sha512) and AES-256-GCM.",
 						RemediationSteps: []string{
 							fmt.Sprintf("Edit %s: remove legacy algorithms from '%s'", sshdPath, strings.Fields(trimmed)[0]),
 							"Add post-quantum hybrid KEX: KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256",
@@ -339,17 +363,17 @@ func AuditLinuxTLSConfig() []AuditResult {
 				lower := strings.ToLower(trimmed)
 				if strings.Contains(lower, "seclevel=1") || strings.Contains(lower, "seclevel=0") {
 					results = append(results, AuditResult{
-						ID:                   fmt.Sprintf("lin-openssl-seclevel-%d", lineNum+1),
-						Type:                 "config",
-						Name:                 "Linux OpenSSL Config: Weak SECLEVEL",
-						Path:                 cnfPath,
-						Algorithm:            "OpenSSL Security Level",
-						QuantumThreat:        "Harvest Now, Decrypt Later (HNDL) & Weak Cryptography",
-						IsVulnerable:         true,
-						RiskLevel:            "high",
-						Status:               "Quantum Vulnerable",
-						Description:          fmt.Sprintf("System OpenSSL configuration (%s:%d) configures weak security level: '%s'", cnfPath, lineNum+1, trimmed),
-						Recommendation:       "Set CipherString to 'DEFAULT@SECLEVEL=2' or higher (preferably SECLEVEL=3) and enforce TLS 1.3.",
+						ID:             fmt.Sprintf("lin-openssl-seclevel-%d", lineNum+1),
+						Type:           "config",
+						Name:           "Linux OpenSSL Config: Weak SECLEVEL",
+						Path:           cnfPath,
+						Algorithm:      "OpenSSL Security Level",
+						QuantumThreat:  "Harvest Now, Decrypt Later (HNDL) & Weak Cryptography",
+						IsVulnerable:   true,
+						RiskLevel:      "high",
+						Status:         "Quantum Vulnerable",
+						Description:    fmt.Sprintf("System OpenSSL configuration (%s:%d) configures weak security level: '%s'", cnfPath, lineNum+1, trimmed),
+						Recommendation: "Set CipherString to 'DEFAULT@SECLEVEL=2' or higher (preferably SECLEVEL=3) and enforce TLS 1.3.",
 						RemediationSteps: []string{
 							fmt.Sprintf("Edit %s: update CipherString to use SECLEVEL=2 or SECLEVEL=3", cnfPath),
 							"Enforce TLS 1.3 minimum protocol: MinProtocol = TLSv1.3",
@@ -361,17 +385,17 @@ func AuditLinuxTLSConfig() []AuditResult {
 				}
 				if strings.Contains(lower, "minprotocol = tlsv1.0") || strings.Contains(lower, "minprotocol = tlsv1.1") {
 					results = append(results, AuditResult{
-						ID:                   fmt.Sprintf("lin-openssl-minproto-%d", lineNum+1),
-						Type:                 "config",
-						Name:                 "Linux OpenSSL Config: Deprecated TLS Protocol",
-						Path:                 cnfPath,
-						Algorithm:            "Legacy TLS Protocol (TLS 1.0/1.1)",
-						QuantumThreat:        "Harvest Now, Decrypt Later (HNDL)",
-						IsVulnerable:         true,
-						RiskLevel:            "critical",
-						Status:               "Quantum Vulnerable",
-						Description:          fmt.Sprintf("System OpenSSL configuration (%s:%d) permits deprecated TLS version: '%s'", cnfPath, lineNum+1, trimmed),
-						Recommendation:       "Update MinProtocol to TLSv1.3 in system OpenSSL configuration.",
+						ID:             fmt.Sprintf("lin-openssl-minproto-%d", lineNum+1),
+						Type:           "config",
+						Name:           "Linux OpenSSL Config: Deprecated TLS Protocol",
+						Path:           cnfPath,
+						Algorithm:      "Legacy TLS Protocol (TLS 1.0/1.1)",
+						QuantumThreat:  "Harvest Now, Decrypt Later (HNDL)",
+						IsVulnerable:   true,
+						RiskLevel:      "critical",
+						Status:         "Quantum Vulnerable",
+						Description:    fmt.Sprintf("System OpenSSL configuration (%s:%d) permits deprecated TLS version: '%s'", cnfPath, lineNum+1, trimmed),
+						Recommendation: "Update MinProtocol to TLSv1.3 in system OpenSSL configuration.",
 						RemediationSteps: []string{
 							fmt.Sprintf("Edit %s: set MinProtocol = TLSv1.3", cnfPath),
 						},
@@ -398,17 +422,17 @@ func AuditLinuxTLSConfig() []AuditResult {
 				lower := strings.ToLower(trimmed)
 				if strings.Contains(lower, "diffie-hellman-group1") || strings.Contains(lower, "3des") || strings.Contains(lower, "arcfour") {
 					results = append(results, AuditResult{
-						ID:                   fmt.Sprintf("lin-ssh-client-cfg-%d", lineNum+1),
-						Type:                 "config",
-						Name:                 "Linux SSH Client Config: Legacy Outbound Ciphers",
-						Path:                 sshClientPath,
-						Algorithm:            "Legacy SSH Cipher/KEX",
-						QuantumThreat:        "Harvest Now, Decrypt Later (HNDL)",
-						IsVulnerable:         true,
-						RiskLevel:            "high",
-						Status:               "Quantum Vulnerable",
-						Description:          fmt.Sprintf("Linux SSH client config (%s:%d) permits outbound connection via deprecated cipher/KEX: '%s'", sshClientPath, lineNum+1, trimmed),
-						Recommendation:       "Update client SSH configuration to prefer hybrid post-quantum key exchange (sntrup761x25519-sha512@openssh.com or mlkem768x25519-sha512).",
+						ID:             fmt.Sprintf("lin-ssh-client-cfg-%d", lineNum+1),
+						Type:           "config",
+						Name:           "Linux SSH Client Config: Legacy Outbound Ciphers",
+						Path:           sshClientPath,
+						Algorithm:      "Legacy SSH Cipher/KEX",
+						QuantumThreat:  "Harvest Now, Decrypt Later (HNDL)",
+						IsVulnerable:   true,
+						RiskLevel:      "high",
+						Status:         "Quantum Vulnerable",
+						Description:    fmt.Sprintf("Linux SSH client config (%s:%d) permits outbound connection via deprecated cipher/KEX: '%s'", sshClientPath, lineNum+1, trimmed),
+						Recommendation: "Update client SSH configuration to prefer hybrid post-quantum key exchange (sntrup761x25519-sha512@openssh.com or mlkem768x25519-sha512).",
 						RemediationSteps: []string{
 							fmt.Sprintf("Edit %s: remove legacy algorithms from '%s'", sshClientPath, strings.Fields(trimmed)[0]),
 							"Add post-quantum hybrid KEX: KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256",
@@ -431,23 +455,35 @@ func AuditLinuxTLSConfig() []AuditResult {
 			if strings.Contains(text, "driver       : "+driver) || strings.Contains(text, "name         : "+driver) {
 				if !seenDrivers[driver] {
 					seenDrivers[driver] = true
+					// 3DES (des3_ede) is a Grover concern (weak 112-bit key);
+					// DES/RC4(arc4)/Blowfish/CAST5 are CLASSICALLY broken/deprecated.
+					threat := "Classically Broken / Deprecated"
+					desc := fmt.Sprintf("Linux kernel has registered the deprecated cryptographic driver '%s', which is broken or weakened by classical attacks today.", driver)
+					expl := fmt.Sprintf("Kernel cipher %s uses short block/key sizes broken by classical cryptanalysis; disable it if not required by legacy hardware.", driver)
+					status := "Weak / Broken"
+					if driver == "des3_ede" {
+						threat = "Grover's Algorithm (Key Halving)"
+						desc = "Linux kernel has registered the 3DES (des3_ede) driver; its 112-bit effective key is lowered further by Grover's search."
+						expl = "3DES has a weak 112-bit effective key; Grover's quantum search reduces effective symmetric security below acceptable thresholds."
+						status = "Quantum Vulnerable"
+					}
 					results = append(results, AuditResult{
-						ID:                   fmt.Sprintf("lin-kernel-crypto-%s", driver),
-						Type:                 "config",
-						Name:                 fmt.Sprintf("Linux Kernel Registered Crypto Driver: %s", driver),
-						Path:                 "/proc/crypto",
-						Algorithm:            fmt.Sprintf("Legacy Kernel Cipher (%s)", driver),
-						QuantumThreat:        "Grover's Algorithm (Key Halving)",
-						IsVulnerable:         true,
-						RiskLevel:            "medium",
-						Status:               "Quantum Vulnerable",
-						Description:          fmt.Sprintf("Linux kernel has registered deprecated cryptographic driver '%s', vulnerable to symmetric key search and halving.", driver),
-						Recommendation:       fmt.Sprintf("Blacklist kernel module for %s if not required by legacy hardware.", driver),
+						ID:             fmt.Sprintf("lin-kernel-crypto-%s", driver),
+						Type:           "config",
+						Name:           fmt.Sprintf("Linux Kernel Registered Crypto Driver: %s", driver),
+						Path:           "/proc/crypto",
+						Algorithm:      fmt.Sprintf("Legacy Kernel Cipher (%s)", driver),
+						QuantumThreat:  threat,
+						IsVulnerable:   true,
+						RiskLevel:      "medium",
+						Status:         status,
+						Description:    desc,
+						Recommendation: fmt.Sprintf("Blacklist kernel module for %s if not required by legacy hardware.", driver),
 						RemediationSteps: []string{
 							fmt.Sprintf("Create blacklist file: echo 'blacklist %s' | sudo tee /etc/modprobe.d/blacklist-legacy-crypto.conf", driver),
 						},
 						CodeSnippet:          fmt.Sprintf("echo 'blacklist %s' | sudo tee -a /etc/modprobe.d/blacklist-legacy-crypto.conf", driver),
-						Explainer:            fmt.Sprintf("Kernel cipher %s provides short block or key sizes that are easily broken by classical attacks or Grover's algorithm.", driver),
+						Explainer:            expl,
 						ComplianceViolations: []string{"CNSA 2.0", "FIPS 140-3"},
 					})
 				}

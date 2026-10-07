@@ -36,20 +36,27 @@ Get-ChildItem Cert:\CurrentUser\My | Where-Object { $_.Issuer -match "Intune" } 
 	// 2. Deprecated / Weak Key Sizes (RSA-1024, RSA-512, MD5) - only applies to RSA
 	isRSA := strings.Contains(strings.ToUpper(algorithm), "RSA")
 	if isRSA && keySize > 0 && keySize <= 1024 {
+		// Build a verification command that ACTUALLY works for the given location.
+		// A Windows cert-store provider path cannot be read by `certutil -dump`
+		// (it expects a file), so use Get-ChildItem there instead.
 		dumpCmd := `openssl x509 -in "` + path + `" -text -noout`
 		if runtime.GOOS == "windows" {
-			dumpCmd = `certutil -dump "` + path + `"`
+			if strings.Contains(path, "certificate::") || strings.Contains(lowerPath, "currentuser") || strings.Contains(lowerPath, "localmachine") {
+				dumpCmd = "Get-ChildItem Cert: -Recurse | Where-Object { try { $_.GetRSAPublicKey().KeySize -lt 2048 } catch { $false } } | Format-List Subject, Thumbprint, NotAfter, SignatureAlgorithm, @{N='KeySizeBits';E={ try { $_.GetRSAPublicKey().KeySize } catch { 0 } }}"
+			} else {
+				dumpCmd = `certutil -dump "` + path + `"` // a real file path — valid
+			}
 		} else if strings.Contains(path, "keychain") {
 			dumpCmd = `/usr/bin/security find-certificate -a -p "` + path + `" | openssl x509 -text -noout`
 		}
 		return RemediationPlan{
-			Recommendation: fmt.Sprintf("URGENT: Deprecated %d-bit RSA key size is broken classically and vulnerable to instant quantum decryption. Revoke & re-key immediately.", keySize),
+			Recommendation: fmt.Sprintf("%d-bit RSA is below the NIST-mandated 2048-bit minimum (disallowed for new use since 2013) and is within reach of well-resourced classical attackers; it is also fully broken by Shor's algorithm once a cryptographically-relevant quantum computer (CRQC) exists. Re-key to RSA-3072+/ECDSA P-384 now and plan migration to ML-DSA (FIPS 204).", keySize),
 			Steps: []string{
-				"Immediately contact the issuing authority or application provider to revoke this certificate.",
-				"Re-issue credential with minimum RSA-4096 or ECDSA P-384 as a bridge, requesting NIST FIPS 204 (ML-DSA) compliance.",
-				"Verify associated client application or broker KYC portal is updated to reject sub-2048-bit keys.",
+				"Confirm whether this is a certificate your organization issued/controls (typically in the Personal \\My store) versus a trust-anchor you do not own (root/intermediate CA store).",
+				"For a cert you control: re-issue with RSA-3072+ or ECDSA P-384 and plan ML-DSA (FIPS 204) compliance.",
+				"For a trust-anchor you do not own: track the CA operator's post-quantum roadmap; remove it only if your organization no longer needs to trust that CA.",
 			},
-			CodeSnippet: `# Check certificate details and key parameters:
+			CodeSnippet: `# Inspect the certificate's real key size, algorithm and validity:
 ` + dumpCmd,
 		}
 	}
@@ -112,8 +119,14 @@ Set-ItemProperty $path -Name "DisabledByDefault" -Value 1 -Type DWord`,
 		}
 	}
 
-	// 6. Grover's Algorithm / Symmetric Ciphers (AES-128, 3DES, Blowfish)
-	if strings.Contains(lowerName, "aes128") || strings.Contains(lowerName, "aes-128") || strings.Contains(lowerDesc, "grover") || strings.Contains(lowerName, "3des") || strings.Contains(lowerName, "blowfish") {
+	// 6. Symmetric ciphers (AES-128 → Grover; RC4/DES/3DES/Blowfish/CAST5/RC2 →
+	//    classically broken). These migrate to AES-256-GCM, NOT to a PQC KEM/
+	//    signature — route them here so they don't fall through to the PQC fallback.
+	if strings.Contains(lowerName, "aes128") || strings.Contains(lowerName, "aes-128") || strings.Contains(lowerDesc, "grover") ||
+		strings.Contains(lowerName, "3des") || strings.Contains(lowerName, "blowfish") || strings.Contains(lowerName, "rc4") ||
+		strings.Contains(lowerName, "arcfour") || strings.Contains(lowerName, "cast5") || strings.Contains(lowerName, "rc2") ||
+		strings.Contains(lowerName, "_des_") || strings.Contains(lowerName, "des-") || strings.Contains(lowerName, "des_") ||
+		strings.Contains(lowerDesc, "classically broken") {
 		return RemediationPlan{
 			Recommendation: "Upgrade AES-128 to AES-256-GCM. Under Grover's Algorithm, AES-128 effective security is halved to 64 bits, violating NSA CNSA 2.0.",
 			Steps: []string{
@@ -200,4 +213,3 @@ openssl x509 -in "` + path + `" -noout -text | grep -E "(Signature Algorithm|Sub
 func GenerateRemediation(assetType string, algorithm string, keySize int, name string, description string, path string) RemediationPlan {
 	return GenerateRemediationWithUsage(assetType, algorithm, keySize, name, description, path, false, false)
 }
-

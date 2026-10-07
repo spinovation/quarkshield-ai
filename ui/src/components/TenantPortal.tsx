@@ -442,11 +442,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   }, [isSupportMirror]);
 
   const [emailInput, setEmailInput] = useState<string>(() => {
+    // Only pre-fill from this device's own saved login ("remember me"). Never
+    // hardcode a tenant admin's email as the default — that leaked the admin's
+    // address to every visitor of the tenant portal (e.g. a user in India saw
+    // the owner's email pre-filled). New visitors start with an empty field.
     const saved = localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user');
     if (saved && !saved.includes('superadmin')) return saved;
-    if (cleanSlug.includes('algomeld')) return 'sridhargs@algomeld.com';
-    if (cleanSlug.includes('spinovation')) return 'sridhargs@spinovation.com';
-    return `admin@${cleanSlug}.com`;
+    return '';
   });
   const [passwordInput, setPasswordInput] = useState<string>('');
   const [showPassword, setShowPassword] = useState<boolean>(false);
@@ -485,8 +487,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         status: 'active',
         subscriptionTier: 'partner',
         mcaLimit: 50,
-        contactName: 'Ganapati Sridhar',
-        adminEmail: 'sridhargs@algomeld.com',
+        contactName: 'Tenant Administrator',
+        adminEmail: 'admin@algomeld.com',
         accountType: 'partner'
       };
     }
@@ -500,8 +502,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       status: 'active',
       subscriptionTier: (cleanSlug.includes('partner') || cleanSlug.includes('amberoon')) ? 'partner' : 'growth',
       mcaLimit: 100,
-      contactName: cleanSlug.includes('spinovation') ? 'Ganapati Sridhar' : cleanSlug.includes('amberoon') ? 'Shirish Netke' : 'Tenant Administrator',
-      adminEmail: cleanSlug.includes('spinovation') ? 'sridhargs@spinovation.com' : cleanSlug.includes('amberoon') ? 'shirish.netke@amberoon.com' : `admin@${cleanSlug}.com`,
+      contactName: 'Tenant Administrator',
+      adminEmail: `admin@${cleanSlug}.com`,
       accountType: (cleanSlug.includes('partner') || cleanSlug.includes('amberoon')) ? 'partner' : 'corporate'
     };
   });
@@ -4275,19 +4277,20 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 })()}
                               </td>
                               <td style={{ padding: '0.7rem 0.5rem' }}>
-                                {a.isVulnerable ? (
-                                  <span style={{
-                                    fontSize: '0.7rem',
-                                    fontWeight: 600,
-                                    color: '#f87171',
-                                    background: 'rgba(239, 68, 68, 0.12)',
-                                    padding: '0.12rem 0.4rem',
-                                    borderRadius: '3px',
-                                    border: '1px solid rgba(239, 68, 68, 0.25)'
-                                  }}>
-                                    Shor Vulnerable
-                                  </span>
-                                ) : (
+                                {a.isVulnerable ? (() => {
+                                  // Label the actual quantum threat, not a blanket "Shor".
+                                  // Asymmetric → Shor; symmetric → Grover; legacy protocols → HNDL.
+                                  const s = `${a.algorithm || ''} ${a.name || ''}`.toLowerCase();
+                                  let label = 'Quantum Vulnerable', col = '#f87171', bg = 'rgba(239, 68, 68, 0.12)', bd = 'rgba(239, 68, 68, 0.25)';
+                                  if (/legacy protocol|tls 1\.|ssl [23]\.|\bssl\b/.test(s)) { label = 'Legacy / HNDL'; col = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; bd = 'rgba(251,191,36,0.3)'; }
+                                  else if (/3des|triple des|\bdes\b|rc4|arcfour|blowfish|\baes\b|grover/.test(s)) { label = 'Grover Weakened'; col = '#fbbf24'; bg = 'rgba(251,191,36,0.12)'; bd = 'rgba(251,191,36,0.3)'; }
+                                  else if (/rsa|ecdsa|ecdh|\becc\b|\bec\b|\bdsa\b|diffie|\bdh\b|ed25519|x25519|secp|shor/.test(s)) { label = 'Shor Vulnerable'; }
+                                  return (
+                                    <span style={{ fontSize: '0.7rem', fontWeight: 600, color: col, background: bg, padding: '0.12rem 0.4rem', borderRadius: '3px', border: `1px solid ${bd}` }}>
+                                      {label}
+                                    </span>
+                                  );
+                                })() : (
                                   <span style={{
                                     fontSize: '0.7rem',
                                     fontWeight: 600,

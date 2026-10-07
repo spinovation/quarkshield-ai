@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // AuditPlatformSystemStores audits macOS Keychains and system TLS/SSH configurations
@@ -173,11 +174,6 @@ func AuditMacOSKeychains() []AuditResult {
 			desc := fmt.Sprintf("macOS Keychain asset (%s). Subject: %s. Issuer: %s. Expiry: %s. Functional Role: %s.",
 				kcPath, subjectName, issuerName, expiry, funcTag)
 
-			dispSubject := subjectName
-			if len(dispSubject) > 40 {
-				dispSubject = dispSubject[:40] + "..."
-			}
-
 			shortID := fp
 			if len(shortID) > 8 {
 				shortID = shortID[:8]
@@ -185,22 +181,45 @@ func AuditMacOSKeychains() []AuditResult {
 
 			plan := GenerateRemediationWithUsage("certificate", algo, keySize, subjectName, desc, kcPath, isKeyEstablishment, isSignature)
 
+			vulnerable := algoIsQuantumVulnerable(algo)
+			// Trust-anchor (self-signed root / system root keychain) + expiry context.
+			lk := strings.ToLower(kcPath)
+			isTrustAnchor := (issuerName != "" && issuerName == subjectName) || strings.Contains(lk, "systemroot") || strings.Contains(lk, "rootcertificate")
+			isExpired := cert.NotAfter.Before(time.Now())
+			status := certStatus(vulnerable)
+			recommendation := plan.Recommendation
+			expl := explainer
+			if isTrustAnchor {
+				if riskLevel == "high" || riskLevel == "critical" {
+					riskLevel = "low"
+				}
+				status = "Trust Anchor (informational)"
+				recommendation = "Inventory/awareness only — this is a public trust-anchor (root/intermediate CA) in the system trust store. You do not own this key and cannot re-key it; the CA operator is responsible for its post-quantum migration. Remove it only if your organization no longer needs to trust this CA."
+				expl = "Root/intermediate CA certificates use classical algorithms a future quantum computer could forge, but they are public trust anchors managed by the CA — not operator-owned keys requiring re-key."
+			}
+			if isExpired {
+				if riskLevel == "high" || riskLevel == "critical" {
+					riskLevel = "low"
+				}
+				desc += fmt.Sprintf(" NOTE: EXPIRED on %s — retained only to validate previously-issued signatures; no active key-establishment exposure.", expiry)
+			}
+
 			results = append(results, AuditResult{
 				ID:                   fmt.Sprintf("mac-cert-%s", shortID),
 				Type:                 "certificate",
-				Name:                 fmt.Sprintf("macOS Keychain: %s", dispSubject),
-				Path:                 kcPath,
+				Name:                 fmt.Sprintf("macOS Keychain: %s", subjectName),
+				Path:                 fmt.Sprintf("%s — SHA-256 FP: %s", kcPath, fp),
 				Algorithm:            fmt.Sprintf("%s-%d", algo, keySize),
 				KeySize:              keySize,
 				QuantumThreat:        quantumThreat,
-				IsVulnerable:         algoIsQuantumVulnerable(algo),
+				IsVulnerable:         vulnerable,
 				RiskLevel:            riskLevel,
-				Status:               certStatus(algoIsQuantumVulnerable(algo)),
+				Status:               status,
 				Description:          desc,
-				Recommendation:       plan.Recommendation,
+				Recommendation:       recommendation,
 				RemediationSteps:     plan.Steps,
 				CodeSnippet:          plan.CodeSnippet,
-				Explainer:            explainer,
+				Explainer:            expl,
 				ComplianceViolations: complianceViolations,
 			})
 		}
@@ -241,17 +260,17 @@ func AuditMacOSTLSConfig() []AuditResult {
 				lower := strings.ToLower(trimmed)
 				if strings.Contains(lower, "diffie-hellman-group1") || strings.Contains(lower, "3des") || strings.Contains(lower, "arcfour") {
 					results = append(results, AuditResult{
-						ID:                   fmt.Sprintf("mac-cfg-%s-%d", filepath.Base(cfgPath), lineNum+1),
-						Type:                 "config",
-						Name:                 fmt.Sprintf("macOS SSH Config: %s", filepath.Base(cfgPath)),
-						Path:                 cfgPath,
-						Algorithm:            "Legacy SSH Cipher/KEX",
-						QuantumThreat:        "Harvest Now, Decrypt Later (HNDL) & Shor's Algorithm",
-						IsVulnerable:         true,
-						RiskLevel:            "critical",
-						Status:               "Quantum Vulnerable",
-						Description:          fmt.Sprintf("macOS SSH configuration (%s:%d) enables obsolete cipher/KEX suite: '%s'", cfgPath, lineNum+1, trimmed),
-						Recommendation:       "Enforce modern Post-Quantum Hybrid KEX (e.g., sntrup761x25519-sha512@openssh.com or mlkem768x25519-sha512) and AES-256-GCM.",
+						ID:             fmt.Sprintf("mac-cfg-%s-%d", filepath.Base(cfgPath), lineNum+1),
+						Type:           "config",
+						Name:           fmt.Sprintf("macOS SSH Config: %s", filepath.Base(cfgPath)),
+						Path:           cfgPath,
+						Algorithm:      "Legacy SSH Cipher/KEX",
+						QuantumThreat:  "Harvest Now, Decrypt Later (HNDL) & Shor's Algorithm",
+						IsVulnerable:   true,
+						RiskLevel:      "critical",
+						Status:         "Quantum Vulnerable",
+						Description:    fmt.Sprintf("macOS SSH configuration (%s:%d) enables obsolete cipher/KEX suite: '%s'", cfgPath, lineNum+1, trimmed),
+						Recommendation: "Enforce modern Post-Quantum Hybrid KEX (e.g., sntrup761x25519-sha512@openssh.com or mlkem768x25519-sha512) and AES-256-GCM.",
 						RemediationSteps: []string{
 							fmt.Sprintf("Edit %s: remove legacy algorithms from '%s'", cfgPath, strings.Fields(trimmed)[0]),
 							"Add post-quantum hybrid KEX: KexAlgorithms sntrup761x25519-sha512@openssh.com,curve25519-sha256",

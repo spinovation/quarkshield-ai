@@ -16,7 +16,7 @@ func atoi(s string) int {
 // Certificate Services (an issued certificate or CA certificate).
 type ADCSAsset struct {
 	Name     string `json:"name"`
-	Type     string `json:"type"`   // ca_root | certificate | template
+	Type     string `json:"type"` // ca_root | certificate | template
 	Algo     string `json:"algo"`
 	Size     int    `json:"size"`
 	Vuln     bool   `json:"vuln"`
@@ -50,11 +50,23 @@ func classifyADCSAlgo(alg string, size int) (string, bool, string, string) {
 		return "DSA-" + itoa(size), true, "critical", "DSA is quantum-vulnerable (discrete log)."
 	case strings.Contains(a, "ed25519"):
 		return "Ed25519", true, "critical", "Edwards-curve signatures are quantum-vulnerable."
-	default:
-		if a == "" {
-			return "unknown", false, "low", "Unclassified AD CS key."
+	case strings.Contains(a, "ml-kem"), strings.Contains(a, "mlkem"), strings.Contains(a, "ml-dsa"),
+		strings.Contains(a, "mldsa"), strings.Contains(a, "slh-dsa"), strings.Contains(a, "slhdsa"),
+		strings.Contains(a, "dilithium"), strings.Contains(a, "kyber"), strings.Contains(a, "falcon"),
+		strings.Contains(a, "sphincs"), strings.Contains(a, "sntrup"):
+		label := alg
+		if label == "" {
+			label = "PQC"
 		}
-		return alg, false, "low", "Unclassified AD CS key algorithm."
+		return label, false, "secure", "Post-quantum algorithm (NIST FIPS 203/204/205)."
+	default:
+		// NEVER mark an unknown key "safe" — that is a false negative for a
+		// security tool. Flag it for review and treat as vulnerable until the
+		// algorithm is confirmed post-quantum.
+		if a == "" {
+			return "Unknown", true, "medium", "Unclassified AD CS key — algorithm could not be determined; treat as quantum-vulnerable until reviewed."
+		}
+		return alg, true, "medium", "Unrecognized AD CS key algorithm — not confirmed post-quantum; treat as quantum-vulnerable until reviewed."
 	}
 }
 

@@ -161,6 +161,41 @@ class PortalErrorBoundary extends React.Component<{ children: React.ReactNode },
   }
 }
 
+// --- CBOM field accessors ---------------------------------------------------
+// The server CBOM (server/src/lib/cyclonedx.ts) is proper CycloneDX: it uses
+// `nistQuantumSecurityLevel` (0 = vulnerable, 3 = secure) and carries the
+// algorithm/keyLength in `quarkshield:*` properties — NOT the old invented
+// `algorithmProperties.name` / `quantumSecurityLevel`. Reading the old names
+// silently returned undefined, which made every asset default to "secure /
+// FIPS-204/205 Approved". These helpers read the correct fields (with a
+// fallback to the legacy shape for the hardcoded sample CBOM) and, for a
+// security tool, default UNKNOWN assets to vulnerable rather than secure.
+const cbomProp = (comp: any, name: string): string | undefined =>
+  comp?.properties?.find((p: any) => p?.name === name)?.value;
+const cbomAlgo = (comp: any): string =>
+  cbomProp(comp, 'quarkshield:algorithm')
+  || comp?.cryptoProperties?.algorithmProperties?.name
+  || comp?.name || '';
+const cbomKeyLen = (comp: any): number | undefined => {
+  const v = cbomProp(comp, 'quarkshield:keyLength')
+    ?? comp?.cryptoProperties?.algorithmProperties?.keyLength
+    ?? comp?.cryptoProperties?.relatedCryptoMaterialProperties?.size;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+};
+const cbomVulnerable = (comp: any): boolean => {
+  const nq = comp?.cryptoProperties?.algorithmProperties?.nistQuantumSecurityLevel;
+  if (nq === 0) return true;
+  if (typeof nq === 'number') return false; // explicit secure level (e.g. 3)
+  const legacy = comp?.cryptoProperties?.algorithmProperties?.quantumSecurityLevel;
+  if (legacy === 0) return true;
+  if (typeof legacy === 'number') return false;
+  // No explicit level: only trust recognised PQC / AES-256 as secure, else vulnerable.
+  const a = cbomAlgo(comp).toLowerCase();
+  if (/ml-?kem|ml-?dsa|slh-?dsa|kyber|dilithium|sphincs|falcon|sntrup|aes-?256|chacha20/.test(a)) return false;
+  return true;
+};
+
 export default function App() {
   const [tenantSlug, setTenantSlug] = useState<string>(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -1241,14 +1276,14 @@ export default function App() {
 
     const machineMatch = selectedMachineFilter === 'all' || host === selectedMachineFilter;
     const categoryMatch = selectedCategoryFilter === 'all' || comp.cryptoProperties?.assetType === selectedCategoryFilter;
-    const isVulnerable = comp.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0;
-    const statusMatch = selectedStatusFilter === 'all' 
+    const isVulnerable = cbomVulnerable(comp);
+    const statusMatch = selectedStatusFilter === 'all'
       || (selectedStatusFilter === 'vulnerable' && isVulnerable) 
       || (selectedStatusFilter === 'secure' && !isVulnerable);
     const searchMatch = !searchQuery 
       || comp.name?.toLowerCase().includes(searchQuery.toLowerCase())
       || compPath(comp)?.toLowerCase().includes(searchQuery.toLowerCase())
-      || comp.cryptoProperties?.algorithmProperties?.name?.toLowerCase().includes(searchQuery.toLowerCase());
+      || cbomAlgo(comp).toLowerCase().includes(searchQuery.toLowerCase());
 
     return tenantMatch && machineMatch && categoryMatch && statusMatch && searchMatch;
   });
@@ -1275,10 +1310,10 @@ export default function App() {
       id: comp.bomRef || comp.name,
       name: comp.name,
       type: comp.cryptoProperties?.assetType || 'cryptographic-asset',
-      algorithm: comp.cryptoProperties?.algorithmProperties?.name || comp.name,
-      keySize: comp.cryptoProperties?.algorithmProperties?.keyLength,
-      isVulnerable: comp.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0,
-      riskLevel: comp.properties?.find((p: any) => p.name === 'quarkshield:riskLevel')?.value || (comp.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0 ? 'high' : 'low'),
+      algorithm: cbomAlgo(comp),
+      keySize: cbomKeyLen(comp),
+      isVulnerable: cbomVulnerable(comp),
+      riskLevel: comp.properties?.find((p: any) => p.name === 'quarkshield:riskLevel')?.value || (cbomVulnerable(comp) ? 'high' : 'low'),
       path: compPath(comp),
       hostname: compHost(comp),
       complianceViolations: comp.properties?.find((p: any) => p.name === 'quarkshield:complianceViolations')?.value
@@ -2825,6 +2860,16 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                 <>
                   {/* Filters Row */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem', marginBottom: '1.25rem', background: 'rgba(0,0,0,0.2)', padding: '0.75rem', borderRadius: '8px' }}>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.3rem' }}>Search</label>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Search by asset name, algorithm, path, or thumbprint (e.g. digicert, RSA, 3des)…"
+                    style={{ width: '100%', padding: '0.5rem 0.6rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '6px', color: '#ffffff', fontSize: '0.84rem' }}
+                  />
+                </div>
                 <div>
                   <label style={{ fontSize: '0.72rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block', marginBottom: '0.3rem' }}>Filter Machine</label>
                   <select 
@@ -2908,8 +2953,8 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                         </tr>
                       ) : (
                         paginatedCBOMComponents.map((c: any, idx: number) => {
-                          const isVuln = c.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0;
-                          const riskProp = c.properties?.find((p: any) => p.name === 'quarkshield:riskLevel')?.value || 'high';
+                          const isVuln = cbomVulnerable(c);
+                          const riskProp = c.properties?.find((p: any) => p.name === 'quarkshield:riskLevel')?.value || (isVuln ? 'high' : 'secure');
                           const recProp = c.properties?.find((p: any) => p.name === 'quarkshield:recommendation')?.value || '';
 
                           return (
@@ -2921,28 +2966,37 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                                 </div>
                               </td>
                               <td>
-                                <span style={{ color: 'var(--text-secondary)' }}>
+                                <span
+                                  onClick={() => { const h = compHost(c); if (h) setSelectedMachineFilter(h); }}
+                                  title="Filter by this endpoint"
+                                  style={{ color: 'var(--text-secondary)', cursor: compHost(c) ? 'pointer' : 'default', textDecoration: compHost(c) ? 'underline dotted' : 'none' }}>
                                   {compHost(c) || 'General Endpoint'}
                                 </span>
                               </td>
                               <td>
-                                <span style={{ fontWeight: 600, color: '#ffffff' }}>
-                                  {c.cryptoProperties?.algorithmProperties?.name}
+                                <span
+                                  onClick={() => { const a = cbomAlgo(c); if (a) setSearchQuery(a); }}
+                                  title="Filter by this algorithm"
+                                  style={{ fontWeight: 600, color: '#ffffff', cursor: cbomAlgo(c) ? 'pointer' : 'default', textDecoration: cbomAlgo(c) ? 'underline dotted' : 'none' }}>
+                                  {cbomAlgo(c) || '—'}
                                 </span>
-                                {c.cryptoProperties?.algorithmProperties?.keyLength && (
+                                {cbomKeyLen(c) && (
                                   <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginLeft: '0.3rem' }}>
-                                    ({c.cryptoProperties.algorithmProperties.keyLength}-bit)
+                                    ({cbomKeyLen(c)}-bit)
                                   </span>
                                 )}
                               </td>
                               <td>
-                                <span style={{ color: isVuln ? 'var(--status-vulnerable)' : 'var(--status-secure)', fontWeight: 600 }}>
+                                <span
+                                  onClick={() => setSelectedStatusFilter(isVuln ? 'vulnerable' : 'secure')}
+                                  title="Filter by this status"
+                                  style={{ color: isVuln ? 'var(--status-vulnerable)' : 'var(--status-secure)', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline dotted' }}>
                                   {isVuln ? 'Quantum Vulnerable' : 'Post-Quantum Secure'}
                                 </span>
                               </td>
                               <td>
                                 <span className={`badge ${riskProp === 'critical' || riskProp === 'high' ? 'danger' : (riskProp === 'secure' ? 'success' : 'warning')}`}>
-                                  NIST Level {c.cryptoProperties?.algorithmProperties?.quantumSecurityLevel}
+                                  NIST Level {cbomVulnerable(c) ? 0 : 3}
                                 </span>
                               </td>
                               <td>
@@ -3263,15 +3317,15 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                   <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '6px' }}>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', textTransform: 'uppercase' }}>Algorithm</div>
                     <div style={{ fontWeight: 600, color: '#ffffff' }}>
-                      {selectedAssetDetail.cryptoProperties?.algorithmProperties?.name} 
-                      {selectedAssetDetail.cryptoProperties?.algorithmProperties?.keyLength ? ` (${selectedAssetDetail.cryptoProperties.algorithmProperties.keyLength}-bit)` : ''}
+                      {cbomAlgo(selectedAssetDetail) || '—'}
+                      {cbomKeyLen(selectedAssetDetail) ? ` (${cbomKeyLen(selectedAssetDetail)}-bit)` : ''}
                     </div>
                   </div>
 
                   <div style={{ background: 'rgba(0,0,0,0.25)', padding: '0.75rem', borderRadius: '6px' }}>
                     <div style={{ color: 'var(--text-muted)', fontSize: '0.72rem', textTransform: 'uppercase' }}>Quantum Security</div>
-                    <div style={{ fontWeight: 600, color: selectedAssetDetail.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0 ? 'var(--status-vulnerable)' : 'var(--status-secure)' }}>
-                      {selectedAssetDetail.cryptoProperties?.algorithmProperties?.quantumSecurityLevel === 0 ? 'Level 0 (Quantum Insecure)' : 'Level 3 (FIPS-204/205 Approved)'}
+                    <div style={{ fontWeight: 600, color: cbomVulnerable(selectedAssetDetail) ? 'var(--status-vulnerable)' : 'var(--status-secure)' }}>
+                      {cbomVulnerable(selectedAssetDetail) ? 'Quantum Vulnerable (classical)' : 'Post-Quantum Secure'}
                     </div>
                   </div>
                 </div>

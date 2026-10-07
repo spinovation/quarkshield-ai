@@ -43,6 +43,7 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
 }) => {
   const [selectedTenant, setSelectedTenant] = useState<string>(currentTenant);
   const [users, setUsers] = useState<TenantUser[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [twoFactorPolicy, setTwoFactorPolicy] = useState<'optional' | 'admins_only' | 'mandatory'>('optional');
   const [savingPolicy, setSavingPolicy] = useState(false);
@@ -90,6 +91,7 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
   // Fetch Users for selected tenant
   const fetchTenantUsers = async (tenant: string) => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch(`/api/tenants/${tenant}/users`);
       if (res.ok) {
@@ -106,35 +108,13 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
         setTwoFactorPolicy(polData.twoFactorPolicy || 'optional');
       }
     } catch (err) {
-      console.warn('Backend unavailable, using simulated tenant users:', err);
-      if (tenant === 'spinovationcorp' || tenant.includes('spinovation')) {
-        setUsers([
-          { id: 'tu-sp-01', tenantName: tenant, email: 'sridhargs@spinovation.com', firstName: 'Ganapati', lastName: 'Sridhar', role: 'admin', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 1800000).toISOString(), createdAt: new Date(Date.now() - 30 * 86400000).toISOString() },
-          { id: 'tu-sp-02', tenantName: tenant, email: 'secops@spinovation.com', firstName: 'Elena', lastName: 'Rostova', role: 'secops', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 7200000).toISOString(), createdAt: new Date(Date.now() - 20 * 86400000).toISOString() },
-          { id: 'tu-sp-03', tenantName: tenant, email: 'auditor@spinovation.com', firstName: 'Marcus', lastName: 'Vance', role: 'auditor', twoFactorEnabled: false, status: 'active', lastLogin: new Date(Date.now() - 86400000).toISOString(), createdAt: new Date(Date.now() - 10 * 86400000).toISOString() }
-        ]);
-        setTwoFactorPolicy('admins_only');
-      } else if (tenant === 'algomeld' || tenant.includes('algomeld')) {
-        setUsers([
-          { id: 'tu-am-01', tenantName: tenant, email: 'sridhargs@algomeld.com', firstName: 'Ganapati', lastName: 'Sridhar', role: 'admin', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 1200000).toISOString(), createdAt: new Date(Date.now() - 45 * 86400000).toISOString() },
-          { id: 'tu-am-02', tenantName: tenant, email: 'ops@algomeld.com', firstName: 'Arun', lastName: 'Kumar', role: 'secops', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 5400000).toISOString(), createdAt: new Date(Date.now() - 25 * 86400000).toISOString() },
-          { id: 'tu-am-03', tenantName: tenant, email: 'compliance@algomeld.com', firstName: 'Sarah', lastName: 'Jenkins', role: 'auditor', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 86400000).toISOString(), createdAt: new Date(Date.now() - 15 * 86400000).toISOString() }
-        ]);
-        setTwoFactorPolicy('mandatory');
-      } else if (tenant === 'jhrzic') {
-        setUsers([
-          { id: 'tu-03', tenantName: 'jhrzic', email: 'lead@jhrzic.com', firstName: 'John', lastName: 'Zic', role: 'admin', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 3600000).toISOString(), createdAt: new Date().toISOString() },
-          { id: 'tu-04', tenantName: 'jhrzic', email: 'auditor@jhrzic.com', firstName: 'Sarah', lastName: 'Connor', role: 'auditor', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 86400000).toISOString(), createdAt: new Date().toISOString() },
-          { id: 'tu-05', tenantName: 'jhrzic', email: 'devops@jhrzic.com', firstName: 'David', lastName: 'K.', role: 'secops', twoFactorEnabled: false, status: 'active', lastLogin: null, createdAt: new Date().toISOString() }
-        ]);
-        setTwoFactorPolicy('admins_only');
-      } else {
-        setUsers([
-          { id: 'tu-01', tenantName: tenant, email: `admin@${tenant}.com`, firstName: 'Reshma', lastName: 'Admin', role: 'admin', twoFactorEnabled: true, status: 'active', lastLogin: new Date(Date.now() - 14400000).toISOString(), createdAt: new Date().toISOString() },
-          { id: 'tu-02', tenantName: tenant, email: `secops@${tenant}.com`, firstName: 'Alex', lastName: 'Vance', role: 'secops', twoFactorEnabled: false, status: 'active', lastLogin: new Date(Date.now() - 7200000).toISOString(), createdAt: new Date().toISOString() }
-        ]);
-        setTwoFactorPolicy('optional');
-      }
+      // Never fabricate a user list on failure — the old fallback hardcoded real
+      // admin emails (e.g. sridhargs@spinovation.com) and invented fake users,
+      // which both leaked addresses and misled whoever was viewing. Show an
+      // honest empty state + error instead.
+      console.warn('Failed to load tenant users:', err);
+      setUsers([]);
+      setLoadError('Could not load users for this tenant. Please retry.');
     } finally {
       setLoading(false);
     }
@@ -494,6 +474,12 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
             </p>
           </div>
         </div>
+
+        {loadError && (
+          <div style={{ padding: '0.7rem 1rem', marginBottom: '1rem', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: '8px', color: '#fca5a5', fontSize: '0.85rem' }}>
+            {loadError}
+          </div>
+        )}
 
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>

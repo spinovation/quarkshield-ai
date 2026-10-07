@@ -400,6 +400,18 @@ func AuditPEMCertificate(pemString string, label string, path string) AuditResul
 		}
 	}
 
+	// Recompute vulnerability from the ACTUAL parsed algorithm instead of leaving
+	// the hardcoded `true` — otherwise a post-quantum certificate (ML-DSA/Kyber/…)
+	// supplied as PEM would be falsely reported as "Quantum Vulnerable" and handed
+	// a migration recommendation. (The DER path already did this correctly.)
+	isVulnerable = algoIsQuantumVulnerable(algorithm)
+	if !isVulnerable {
+		quantumThreat = "Post-Quantum Secure"
+		riskLevel = "secure"
+		explainer = "Post-quantum algorithm (NIST FIPS 203/204/205) — resistant to Shor's and Grover's algorithms."
+		complianceViolations = nil
+	}
+
 	status := "Quantum Vulnerable"
 	if !isVulnerable {
 		status = "Post-Quantum Secure"
@@ -556,7 +568,7 @@ func AuditConfigFile(fileName string, content string) ConfigAuditResult {
 					violations = append(violations, LineViolation{
 						LineNumber:  lineNum,
 						LineContent: line,
-						Issue:       "Classically broken algorithms (RC4, 3DES, MD5) enabled (also annihilated by Grover's Algorithm).",
+						Issue:       "Classically broken / deprecated algorithms (RC4, 3DES, MD5) enabled — RC4 and MD5 are broken by classical attacks today; 3DES additionally has a weak 112-bit key. Disable regardless of quantum posture.",
 						RiskLevel:   "critical",
 						Fix:         "Replace with modern AEAD-only ciphers (AES-256-GCM / Chacha20-Poly1305).",
 					})
@@ -621,7 +633,7 @@ func AuditConfigFile(fileName string, content string) ConfigAuditResult {
 					violations = append(violations, LineViolation{
 						LineNumber:  lineNum,
 						LineContent: line,
-						Issue:       "Weak symmetric CBC/legacy ciphers enabled (broken classically and destroyed by Grover's Algorithm).",
+						Issue:       "Weak/legacy symmetric ciphers enabled — RC4 (arcfour) and Blowfish are classically broken; 3DES-CBC has a weak 112-bit key (Grover-relevant). Disable all of these.",
 						RiskLevel:   "critical",
 						Fix:         "Restrict ciphers to AES-256-GCM and Chacha20-Poly1305.",
 					})
@@ -634,7 +646,7 @@ func AuditConfigFile(fileName string, content string) ConfigAuditResult {
 				violations = append(violations, LineViolation{
 					LineNumber:  lineNum,
 					LineContent: redactConfigLine(line),
-					Issue:       "Insecure hash reference (SHA-1 / MD5) detected: Collision resistance collapsed under Grover's Algorithm.",
+					Issue:       "Insecure hash reference (SHA-1 / MD5) detected — these are broken by CLASSICAL collision attacks today (not a quantum/Grover issue). Replace them.",
 					RiskLevel:   "high",
 					Fix:         "Migrate hashing to SHA-384 or SHA-512 for CNSA 2.0 compliance.",
 				})
@@ -707,7 +719,7 @@ func cdxPrimitive(algo string) string {
 }
 
 type CBOMCryptoProperties struct {
-	AssetType          string             `json:"assetType"`
+	AssetType           string             `json:"assetType"`
 	AlgorithmProperties CBOMAlgoProperties `json:"algorithmProperties"`
 }
 
@@ -881,4 +893,3 @@ func AuditDERCertificate(cert *x509.Certificate, fileName string, path string) A
 		ComplianceViolations: complianceViolations,
 	}
 }
-

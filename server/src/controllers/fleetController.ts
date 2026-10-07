@@ -782,12 +782,21 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       let complianceViolations: string[] = [];
 
       const algo = (rawAsset.algorithm || '').toUpperCase();
-      const size = rawAsset.key_size || rawAsset.keySize || 2048;
+      // Only default a key size for asymmetric families where a modulus/curve
+      // size is meaningful. NEVER stamp 2048 onto symmetric ciphers, hashes,
+      // protocols or configs — that produced bogus "Triple DES 2048-bit" and
+      // "ECDSA-2048" labels. Unknown/symmetric → null (UI shows N/A).
+      let size: number | null = rawAsset.key_size || rawAsset.keySize || null;
+      if (size == null) {
+        if (/RSA|DSA|DIFFIE|\bDH\b/.test(algo)) size = 2048;        // asymmetric modulus default
+        else if (/ECDSA|ECDH|\bECC\b|\bEC\b|CURVE|ED25519|X25519/.test(algo)) size = 256; // ECC curve default
+        // else leave null (symmetric / hash / protocol / config / unknown)
+      }
 
       if (rawAsset.type === 'ssh_key') {
         if (algo.includes('RSA')) {
           isVulnerable = true;
-          riskLevel = size < 2048 ? 'critical' : 'high';
+          riskLevel = (size ?? 2048) < 2048 ? 'critical' : 'high';
           status = 'Quantum Vulnerable';
           recommendation = 'Upgrade OpenSSH to 9.8+ and adopt hybrid mlkem768x25519-sha256 or ML-DSA.';
           explainer = "RSA integer factorization is solved in polynomial time by Shor's algorithm.";
@@ -816,7 +825,7 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       } else if (rawAsset.type === 'certificate' || rawAsset.type === 'private_key') {
         if (algo.includes('RSA')) {
           isVulnerable = true;
-          riskLevel = size < 2048 ? 'critical' : 'high';
+          riskLevel = (size ?? 2048) < 2048 ? 'critical' : 'high';
           status = 'Quantum Vulnerable';
           recommendation = 'Deploy Composite X.509 certificates pairing classical signatures with ML-DSA.';
           explainer = "Shor's algorithm breaks RSA key pairs of any length.";
@@ -836,12 +845,14 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
           explainer = 'Quantum-resistant digital signature.';
         }
       } else if (rawAsset.type === 'config') {
-        isVulnerable = true;
-        riskLevel = 'high';
-        status = 'Policy Violation';
-        recommendation = rawAsset.recommendation || 'Modernize host cryptographic configuration.';
-        explainer = rawAsset.explainer || 'Configuration permits obsolete, non-quantum-resistant cryptographic suites.';
-        complianceViolations = ['NIST SP 800-52r2', 'CNSA 2.0'];
+        // Respect the agent's own finding instead of forcing every config vulnerable
+        // (a config that already mandates PQC/AES-256 must not be flagged).
+        isVulnerable = rawAsset.isVulnerable !== false;
+        riskLevel = (rawAsset.riskLevel as any) || (isVulnerable ? 'high' : 'secure');
+        status = isVulnerable ? (rawAsset.status || 'Policy Violation') : 'Compliant';
+        recommendation = rawAsset.recommendation || (isVulnerable ? 'Modernize host cryptographic configuration.' : 'Configuration meets current cryptographic policy.');
+        explainer = rawAsset.explainer || 'Host cryptographic configuration setting.';
+        complianceViolations = isVulnerable ? ['NIST SP 800-52r2', 'CNSA 2.0'] : [];
       } else {
         isVulnerable = rawAsset.isVulnerable || false;
         riskLevel = (rawAsset.riskLevel || 'medium') as any;
