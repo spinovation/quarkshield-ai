@@ -350,7 +350,7 @@ router.patch('/threat-graph/remediations/:id', ...tg, updateRemediation);
 router.post('/threat-graph/rebuild', ...tg, rebuildThreatGraph);
 router.get('/threat-graph/runs', ...tg, listRebuildRuns);
 router.get('/threat-intel/status', requireAuth, getThreatIntelStatus);
-router.post('/threat-intel/sync', requireSuperAdmin, syncThreatIntelNow);
+router.post('/threat-intel/sync', requirePlatformAdmin, syncThreatIntelNow);
 
 // Projects (BILL-4 / BILL-4b) — framework-based authorization boundaries with per-control
 // assessment; each yields its own OSCAL SSP/POA&M.
