@@ -20,6 +20,7 @@ export const RULE_CONTROLS: Record<string, string[]> = {
   'TR-06': ['IA-5', 'AC-17', 'SC-12'],
   'TR-07': ['SC-12', 'SC-17', 'IA-5(2)'],
   'TR-08': ['AC-4', 'SC-7', 'SI-4'],
+  'TR-09': ['SI-2', 'CP-9', 'CP-10', 'IR-4'],
 };
 
 export const CONTROL_TITLES: Record<string, string> = {
@@ -30,6 +31,7 @@ export const CONTROL_TITLES: Record<string, string> = {
   'SC-23': 'Session Authenticity', 'IA-5': 'Authenticator Management', 'IA-5(2)': 'Public Key-Based Authentication',
   'AC-17': 'Remote Access', 'SC-17': 'Public Key Infrastructure Certificates', 'AC-4': 'Information Flow Enforcement',
   'SC-7': 'Boundary Protection', 'SI-4': 'System Monitoring',
+  'CP-9': 'System Backup', 'CP-10': 'System Recovery and Reconstitution', 'IR-4': 'Incident Handling',
 };
 
 const NIST_171R2: Record<string, string[]> = {
@@ -37,6 +39,7 @@ const NIST_171R2: Record<string, string[]> = {
   'SC-8': ['3.13.8'], 'SC-12': ['3.13.10'], 'SC-13': ['3.13.11'], 'SC-23': ['3.13.15'],
   'IA-5': ['3.5.2'], 'IA-5(2)': ['3.5.2'], 'AC-17': ['3.1.12', '3.1.13'], 'SC-17': ['3.13.11'],
   'AC-4': ['3.1.3'], 'SC-7': ['3.13.1', '3.13.5'], 'SI-4': ['3.14.6', '3.14.7'],
+  'IR-4': ['3.6.1'],   // CP-9 / CP-10 have no 800-171 r2 counterpart
 };
 
 export interface FrameworkDef { id: string; label: string; map: (c: string) => string[] }

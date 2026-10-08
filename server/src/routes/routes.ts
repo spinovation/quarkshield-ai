@@ -3,7 +3,7 @@ import { requireAuth, requireSuperAdmin, requirePlatformAdmin, requireTenantAcce
 import {
   getThreatOverview, getThreatGraph, getRelationshipEvidence, listThreatScenarios, getThreatScenario,
   listRiskAssets, getAssetRiskDetail, updateRemediation, overrideAssetContext, rebuildThreatGraph,
-  listRebuildRuns, getThreatGraphCatalog, scheduleRebuild,
+  listRebuildRuns, getThreatGraphCatalog, scheduleRebuild, getThreatIntelStatus, syncThreatIntelNow,
 } from '../controllers/threatGraphController';
 import { exportExecutiveReport, getReportStakeholders, saveReportStakeholders, sendRoadmapReport } from '../controllers/reportController';
 import { twoFactorStatusSafe as twoFactorStatus, twoFactorSetupSafe as twoFactorSetup, twoFactorVerifySafe as twoFactorVerify, twoFactorDisableSafe as twoFactorDisable } from '../controllers/twoFactorController';
@@ -349,6 +349,8 @@ router.put('/threat-graph/assets/:id/context', ...tg, overrideAssetContext);
 router.patch('/threat-graph/remediations/:id', ...tg, updateRemediation);
 router.post('/threat-graph/rebuild', ...tg, rebuildThreatGraph);
 router.get('/threat-graph/runs', ...tg, listRebuildRuns);
+router.get('/threat-intel/status', requireAuth, getThreatIntelStatus);
+router.post('/threat-intel/sync', requireSuperAdmin, syncThreatIntelNow);
 
 // Projects (BILL-4 / BILL-4b) — framework-based authorization boundaries with per-control
 // assessment; each yields its own OSCAL SSP/POA&M.

@@ -25,6 +25,8 @@ import routes from './routes/routes';
 import { attachUser, isWeakSecret } from './middleware/auth';
 import { logDownload } from './lib/downloadTracker';
 import { startPullScheduler } from './lib/pullScheduler';
+import { startThreatIntelScheduler } from './lib/threatIntel/feeds';
+import { scheduleRebuildForAllTenants } from './lib/threatGraph/store';
 
 dotenv.config();
 
@@ -211,6 +213,8 @@ import https from 'https';
 const startServers = () => {
   // DEF-41: start the recurring pull scheduler (60s worker) once the app boots.
   startPullScheduler();
+  // Daily CISA KEV + FIRST EPSS sync; new intelligence re-scores every Risk Assurance tenant.
+  startThreatIntelScheduler(() => scheduleRebuildForAllTenants('threat_intel_sync'));
 
   // 1. Start HTTP Server
   app.listen(port, () => {

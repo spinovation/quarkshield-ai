@@ -58,6 +58,39 @@ const mk = (
   kill_chain: p.kill_chain, rationale: p.rationale,
 });
 
+// ---------------------------------------------------------------------------
+// Exploitation-likelihood from intelligence (CISA KEV, FIRST EPSS), falling back to CVSS.
+// Intelligence adjusts LIKELIHOOD only — impact always comes from the asset.
+// ---------------------------------------------------------------------------
+/** A vulnerability matters if it is severe (CVSS ≥ 7) OR known to be exploited (KEV). */
+const relevant = (v: VulnNode): boolean => v.cvss >= 7 || !!v.kev;
+
+/** Per-vulnerability likelihood (1–4) before exposure. */
+export const vulnLikelihood = (v: VulnNode): number => {
+  const cvssBase = v.cvss >= 9 ? 3 : 2;
+  if (v.kev) return 4;                                   // exploited in the wild
+  if (v.epss === null) return cvssBase;                  // no EPSS score: CVSS only
+  if (v.epss >= 0.5) return Math.max(3, cvssBase);       // very likely to be exploited soon
+  if (v.epss >= 0.1) return cvssBase;
+  if (v.epss < 0.01) return Math.max(1, cvssBase - 1);   // exploitation unlikely
+  return cvssBase;
+};
+
+const pct = (n: number) => `${(n * 100).toFixed(n < 0.01 || n >= 0.995 ? 2 : 1)}%`;
+
+/** Human-readable intelligence signal for a set of driving CVEs. */
+export const intelSummary = (vs: VulnNode[]): string => {
+  const kev = vs.filter(v => v.kev);
+  const withEpss = vs.filter(v => v.epss !== null).sort((a, b) => (b.epss || 0) - (a.epss || 0));
+  const parts: string[] = [];
+  if (kev.length) {
+    parts.push(`${kev.map(v => v.cve).join(', ')} ${kev.length > 1 ? 'are' : 'is'} in CISA KEV (exploited in the wild)` +
+      (kev.some(v => v.kev?.ransomware_use) ? ', with known ransomware use' : ''));
+  }
+  if (withEpss.length) parts.push(`highest EPSS ${pct(withEpss[0].epss!)} (${withEpss[0].cve}, ${Math.round((withEpss[0].epss_percentile || 0) * 100)}th percentile)`);
+  return parts.length ? `Likelihood from exploitation intelligence: ${parts.join('; ')}.` : 'Likelihood from CVSS (no KEV/EPSS signal).';
+};
+
 const LIB_ECOSYSTEMS = new Set(['npm', 'pypi', 'golang', 'go', 'maven', 'nuget', 'cargo', 'gem', 'rubygems', 'composer']);
 const PRIVESC_PKGS = /^(sudo|polkit|pkexec|linux|linux-image.*|kernel|glibc|libc6|systemd|dbus|openssh)$/i;
 
@@ -68,7 +101,7 @@ RULES.push({
   summary: 'High/critical CVE (CVSS ≥ 7) in a component of an asset',
   evaluate(t, assets) {
     const out: TrThreat[] = [];
-    for (const [assetId, vs] of byAsset(t.vulns.filter(v => v.cvss >= 7))) {
+    for (const [assetId, vs] of byAsset(t.vulns.filter(relevant))) {
       // Source repositories are not running services: their CVEs are supply-chain risk (TR-03).
       const a = assets.get(assetId); if (!a || a.type === 'repo') continue;
       const max = Math.max(...vs.map(v => v.cvss));
@@ -78,10 +111,10 @@ RULES.push({
         actor: a.internet_exposed ? 'External attacker' : 'Attacker with network access',
         intent: 'Gain code execution through a known software flaw',
         title: `Exploitation of ${vs.length} known vulnerabilit${vs.length > 1 ? 'ies' : 'y'} on ${a.name}`,
-        description: `Highest CVSS ${max.toFixed(1)} (${vs.slice(0, 3).map(v => v.cve).join(', ')}${vs.length > 3 ? '…' : ''}).`,
-        drivers: vs.map(v => v.id), likelihood: (max >= 9 ? 3 : 2) + (a.internet_exposed ? 1 : 0),
+        description: `Highest CVSS ${max.toFixed(1)} (${vs.slice(0, 3).map(v => v.cve).join(', ')}${vs.length > 3 ? '…' : ''}).${vs.some(v => v.kev) ? ' Known exploited in the wild (CISA KEV).' : ''}`,
+        drivers: vs.map(v => v.id), likelihood: Math.max(...vs.map(vulnLikelihood)) + (a.internet_exposed ? 1 : 0),
         stride: s.letters, attack, kill_chain: 'exploitation',
-        rationale: `${s.why}; ATT&CK ${attack[0]} because the asset is ${a.internet_exposed ? (a.exposed_via ? 'published to the internet by a reverse proxy' : 'internet-exposed') : a.type === 'endpoint' ? 'a user endpoint' : 'reachable internally'}.`,
+        rationale: `${s.why}; ATT&CK ${attack[0]} because the asset is ${a.internet_exposed ? (a.exposed_via ? 'published to the internet by a reverse proxy' : 'internet-exposed') : a.type === 'endpoint' ? 'a user endpoint' : 'reachable internally'}. ${intelSummary(vs)}`,
       }));
     }
     return out;
@@ -94,15 +127,16 @@ RULES.push({
   evaluate(t, assets) {
     const comps = new Map(t.components.map(c => [c.id, c]));
     const out: TrThreat[] = [];
-    const hits = t.vulns.filter(v => v.cvss >= 7 && PRIVESC_PKGS.test(comps.get(v.component_id)?.name || ''));
+    const hits = t.vulns.filter(v => relevant(v) && PRIVESC_PKGS.test(comps.get(v.component_id)?.name || ''));
     for (const [assetId, vs] of byAsset(hits)) {
       const a = assets.get(assetId); if (!a || (a.type !== 'endpoint' && a.type !== 'server')) continue;
       out.push(mk(this, a, {
         actor: 'Attacker with a foothold on the host', intent: 'Escalate to root/SYSTEM',
         title: `Local privilege escalation on ${a.name}`,
         description: `Privilege-boundary package flaws: ${vs.map(v => v.cve).slice(0, 3).join(', ')}.`,
-        drivers: vs.map(v => v.id), likelihood: 2, stride: ['E'], attack: ['T1068'], kill_chain: 'installation',
-        rationale: 'Flaw in a privilege-boundary package → STRIDE E, ATT&CK T1068.',
+        // Needs a foothold first, so capped one below the exploitation signal.
+        drivers: vs.map(v => v.id), likelihood: Math.max(2, Math.max(...vs.map(vulnLikelihood)) - 1), stride: ['E'], attack: ['T1068'], kill_chain: 'installation',
+        rationale: `Flaw in a privilege-boundary package → STRIDE E, ATT&CK T1068. ${intelSummary(vs)}`,
       }));
     }
     return out;
@@ -115,7 +149,7 @@ RULES.push({
   evaluate(t, assets) {
     const comps = new Map(t.components.map(c => [c.id, c]));
     const out: TrThreat[] = [];
-    const hits = t.vulns.filter(v => v.cvss >= 7 && LIB_ECOSYSTEMS.has((comps.get(v.component_id)?.ecosystem || '').toLowerCase()));
+    const hits = t.vulns.filter(v => relevant(v) && LIB_ECOSYSTEMS.has((comps.get(v.component_id)?.ecosystem || '').toLowerCase()));
     for (const [assetId, vs] of byAsset(hits)) {
       const a = assets.get(assetId); if (!a || (a.type !== 'repo' && a.type !== 'service')) continue;
       const max = Math.max(...vs.map(v => v.cvss));
@@ -123,8 +157,8 @@ RULES.push({
         actor: 'Supply-chain attacker', intent: 'Ship malicious or exploitable code through a dependency',
         title: `Vulnerable dependencies in ${a.name}`,
         description: `${vs.length} vulnerable library dependenc${vs.length > 1 ? 'ies' : 'y'} (max CVSS ${max.toFixed(1)}).`,
-        drivers: vs.map(v => v.id), likelihood: max >= 9 ? 3 : 2, stride: ['T'], attack: ['T1195.001'], kill_chain: 'delivery',
-        rationale: 'Third-party library weakness enters through the build → STRIDE T, ATT&CK T1195.001.',
+        drivers: vs.map(v => v.id), likelihood: Math.min(3, Math.max(...vs.map(vulnLikelihood))), stride: ['T'], attack: ['T1195.001'], kill_chain: 'delivery',
+        rationale: `Third-party library weakness enters through the build → STRIDE T, ATT&CK T1195.001. ${intelSummary(vs)}`,
       }));
     }
     return out;
@@ -220,6 +254,27 @@ RULES.push({
         description: `${cs.length} Shor-vulnerable signature dependencies (${purposes}).`,
         drivers: cs.map(c => c.id), likelihood: 1, stride: ['S', 'T'], attack: ['T1649'], kill_chain: 'weaponization',
         rationale: 'Signature/trust purpose (not key establishment) → authenticity risk (STRIDE S/T), not HNDL. Likelihood is low until a CRQC exists.',
+      }));
+    }
+    return out;
+  },
+});
+
+RULES.push({
+  id: 'TR-09', version: 1, category: 'ransomware_malware',
+  summary: 'CVE known to be used in ransomware campaigns (CISA KEV) on a running asset',
+  evaluate(t, assets) {
+    const out: TrThreat[] = [];
+    for (const [assetId, vs] of byAsset(t.vulns.filter(v => v.kev?.ransomware_use))) {
+      const a = assets.get(assetId); if (!a || a.type === 'repo') continue;
+      const entry = a.internet_exposed ? 'T1190' : a.type === 'endpoint' ? 'T1203' : 'T1210';
+      out.push(mk(this, a, {
+        actor: 'Ransomware operator', intent: 'Gain access through a known-exploited flaw, then encrypt or extort data',
+        title: `Ransomware exposure on ${a.name}`,
+        description: `${vs.map(v => v.cve).join(', ')} ${vs.length > 1 ? 'are' : 'is'} listed by CISA as used in ransomware campaigns.`,
+        drivers: vs.map(v => v.id), likelihood: a.internet_exposed ? 4 : 3, stride: ['T', 'D'], attack: [entry, 'T1486'],
+        kill_chain: 'actions_on_objectives',
+        rationale: `CISA KEV marks ${vs.map(v => v.cve).join(', ')} with known ransomware campaign use → encryption for impact (ATT&CK T1486; STRIDE Tampering / Denial of Service). Derived from exploitation intelligence, not from observed activity in this environment.`,
       }));
     }
     return out;

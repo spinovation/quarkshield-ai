@@ -1,10 +1,11 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ShieldAlert, AlertTriangle, Crosshair, ShieldCheck, Link2, ArrowUp, ArrowDown, ArrowRight } from 'lucide-react';
 import type { ThreatApi } from './api';
 import { ArchitectureView } from './ArchitectureView';
+import { EXPLAIN, SOURCE_ROLES } from './explain';
 import {
   card, muted, LevelBadge, PathRiskBadge, SectionTitle, LinkButton, Empty, PathChain, LEVEL_META, Chip,
-  tableStyle, th, td,
+  tableStyle, th, td, InfoTip, IntelBadges, type TipContent,
 } from './ui';
 
 interface Props {
@@ -20,8 +21,8 @@ interface Props {
 // KPI cards
 // ---------------------------------------------------------------------------
 const Kpi: React.FC<{
-  icon: React.ElementType; tone: string; label: string; value: React.ReactNode; foot?: React.ReactNode;
-}> = ({ icon: Icon, tone, label, value, foot }) => (
+  icon: React.ElementType; tone: string; label: string; value: React.ReactNode; foot?: React.ReactNode; info?: TipContent;
+}> = ({ icon: Icon, tone, label, value, foot, info }) => (
   <div style={{ ...card, display: 'flex', gap: 14, alignItems: 'flex-start', padding: '1rem' }}>
     <div style={{
       width: 46, height: 46, borderRadius: 23, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -30,7 +31,9 @@ const Kpi: React.FC<{
       <Icon size={22} color={tone} />
     </div>
     <div style={{ minWidth: 0, flex: 1 }}>
-      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary, #cbd5e1)' }}>{label}</div>
+      <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary, #cbd5e1)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
+        <span>{label}</span>{info && <InfoTip tip={info} />}
+      </div>
       <div style={{ fontSize: '1.65rem', fontWeight: 700, lineHeight: 1.25, color: 'var(--text-primary, #f8fafc)' }}>{value}</div>
       {foot && <div style={{ ...muted, fontSize: '0.72rem', marginTop: 2 }}>{foot}</div>}
     </div>
@@ -113,6 +116,8 @@ const barColor = (i: number) => ['#ef4444', '#f97316', '#f59e0b', '#eab308', '#f
 
 export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenario, onOpenAsset, onViewAllScenarios }) => {
   const k = data.kpis;
+  // Clicking a data-source chip highlights where that source shows up in the diagram.
+  const [focusSource, setFocusSource] = useState<string | null>(null);
   const residualColor = (LEVEL_META[k.residual_level] || LEVEL_META.low).color;
   const row: React.CSSProperties = { display: 'grid', gap: '1rem' };
 
@@ -120,32 +125,78 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {/* KPI row */}
       <div style={{ ...row, gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-        <Kpi icon={ShieldAlert} tone="#ff3366" label="Total Threats Identified" value={k.threats}
+        <Kpi icon={ShieldAlert} tone="#ff3366" label="Total Threats Identified" value={k.threats} info={EXPLAIN.threats}
           foot={k.threats_delta ? <span style={{ color: k.threats_delta > 0 ? '#ff3366' : '#4ade80' }}>
             {k.threats_delta > 0 ? <ArrowUp size={11} /> : <ArrowDown size={11} />} {Math.abs(k.threats_delta)} {k.threats_delta > 0 ? 'new' : 'fewer'} since last run</span>
             : `${k.attack_paths} attack path${k.attack_paths === 1 ? '' : 's'}`} />
-        <Kpi icon={AlertTriangle} tone="#f97316" label="High / Critical Risks" value={k.high_critical}
+        <Kpi icon={AlertTriangle} tone="#f97316" label="High / Critical Risks" value={k.high_critical} info={EXPLAIN.highCritical}
           foot={`(${k.high_critical_pct}%) of ${k.risks_total} risks`} />
-        <Kpi icon={Crosshair} tone="#38bdf8" label="Affected Controls" value={k.affected_controls}
+        <Kpi icon={Crosshair} tone="#38bdf8" label="Affected Controls" value={k.affected_controls} info={EXPLAIN.controls}
           foot={`${k.controls_framework} · touched by open risks`} />
-        <Kpi icon={ShieldCheck} tone="#22c55e" label="Residual Risk (After Remediation)"
+        <Kpi icon={ShieldCheck} tone="#22c55e" label="Residual Risk (After Remediation)" info={EXPLAIN.residual}
           value={<span style={{ color: residualColor, textTransform: 'capitalize' }}>{k.residual_level}</span>}
           foot={k.residual_reduction_pct > 0
             ? <span style={{ color: '#4ade80' }}><ArrowDown size={11} /> {k.residual_reduction_pct}% from inherent</span>
             : 'no remediation credited yet'} />
-        <Kpi icon={Link2} tone="#a855f7" label="Frameworks Mapped" value={k.frameworks_mapped}
+        <Kpi icon={Link2} tone="#a855f7" label="Frameworks Mapped" value={k.frameworks_mapped} info={EXPLAIN.frameworks}
           foot={k.frameworks.join(' | ') || 'no open risks mapped'} />
       </div>
 
+      {/* Data lineage: which inputs this model was built from */}
+      {data.dataSources && (
+        <div style={{ ...card, display: 'flex', flexDirection: 'column', gap: 8, padding: '0.6rem 0.9rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '0.78rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              Data sources <InfoTip tip={EXPLAIN.dataSources} />
+            </span>
+            <span style={{ ...muted, fontSize: '0.72rem' }}>Click a source to highlight where it appears in the Threat Model Overview.</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {(() => {
+              const chip = (on: boolean): React.CSSProperties => ({
+                display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 999, fontSize: '0.74rem',
+                border: on ? '1px solid var(--accent-cyan, #00f2fe)' : '1px solid rgba(255,255,255,0.1)',
+                background: on ? 'rgba(0,242,254,0.12)' : 'transparent', color: 'var(--text-secondary)',
+              });
+              const btn: React.CSSProperties = { background: 'none', border: 'none', padding: 0, color: 'inherit', font: 'inherit', cursor: 'pointer' };
+              return (
+                <>
+                  {/* "All": nothing highlighted — the full diagram. */}
+                  <span style={chip(!focusSource)}>
+                    <button aria-pressed={!focusSource} onClick={() => setFocusSource(null)} title="Show every box (no highlight)" style={btn}>
+                      <strong style={{ color: !focusSource ? 'var(--accent-cyan, #00f2fe)' : 'var(--text-secondary)' }}>All</strong>
+                    </button>
+                  </span>
+                  {data.dataSources.map((d: any) => {
+                    const on = focusSource === d.id;
+                    return (
+                      <span key={d.id} style={{ ...chip(on), color: d.n ? 'var(--text-secondary)' : 'var(--text-muted)', opacity: d.n ? 1 : 0.6 }}>
+                        <button aria-pressed={on} disabled={!d.n} onClick={() => setFocusSource(on ? null : d.id)}
+                          title={d.n ? `Highlight ${d.label} in the diagram` : 'No data from this source yet'}
+                          style={{ ...btn, cursor: d.n ? 'pointer' : 'default' }}>
+                          <strong style={{ color: d.n ? 'var(--accent-cyan, #00f2fe)' : 'inherit' }}>{d.n}</strong> {d.label}
+                        </button>
+                        <InfoTip tip={{ what: d.label, source: d.detail, how: SOURCE_ROLES[d.id]?.summary }} size={12} />
+                      </span>
+                    );
+                  })}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* Threat model overview (architecture / threat / data-flow views) */}
       <div style={{ ...card, minHeight: 400 }}>
-        <ArchitectureView api={api} data={data} onOpenAsset={onOpenAsset} />
+        <ArchitectureView api={api} data={data} onOpenAsset={onOpenAsset}
+          focusSource={focusSource} focusLabel={data.dataSources?.find((d: any) => d.id === focusSource)?.label} onClearFocus={() => setFocusSource(null)} />
       </div>
 
       {/* Risk by threat type · compliance mapping · heat map */}
       <div style={{ ...row, gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))' }}>
         <div style={card}>
-          <SectionTitle>Risk by Threat Type</SectionTitle>
+          <SectionTitle info={EXPLAIN.threatTypes}>Risk by Threat Type</SectionTitle>
           {data.riskByThreatType.length === 0 && <Empty>No threats in this scope.</Empty>}
           {data.riskByThreatType.map((c: any, i: number) => (
             <div key={c.category} style={{ marginBottom: 12 }}>
@@ -161,7 +212,7 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
           ))}
         </div>
         <div style={card}>
-          <SectionTitle>Compliance Mapping</SectionTitle>
+          <SectionTitle info={EXPLAIN.compliance}>Compliance Mapping</SectionTitle>
           {data.complianceMapping.length === 0 ? <Empty>No open risks touch mapped controls.</Empty> : (
             <table style={tableStyle}>
               <thead><tr><th style={th}>Framework</th><th style={th}>Relevant Controls</th><th style={th} /></tr></thead>
@@ -188,7 +239,7 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
           </div>
         </div>
         <div style={card}>
-          <SectionTitle>Risk Heat Map</SectionTitle>
+          <SectionTitle info={EXPLAIN.heatMap}>Risk Heat Map</SectionTitle>
           <HeatMap points={data.heatPoints} onOpen={onOpenScenario} />
         </div>
 
@@ -197,7 +248,7 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
       {/* Top threat scenarios · recommended actions */}
       <div style={{ ...row, gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))' }}>
         <div style={card}>
-          <SectionTitle>Top Threat Scenarios</SectionTitle>
+          <SectionTitle info={EXPLAIN.topScenarios}>Top Threat Scenarios</SectionTitle>
           {data.topScenarios.length === 0 ? <Empty>No threat scenarios in this scope.</Empty> : (
             <div style={{ overflowX: 'auto' }}>
               <table style={tableStyle}>
@@ -208,6 +259,9 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
                       <td style={td}>{s.rank}</td>
                       <td style={td}>
                         <LinkButton onClick={() => onOpenScenario(s.id)}>{s.title}</LinkButton>
+                        {(s.intel?.kev || s.intel?.ransomware || s.intel?.epss_max != null) && (
+                          <div style={{ marginTop: 3 }}><IntelBadges kev={s.intel.kev} ransomware={s.intel.ransomware} epss={s.intel.epss_max} /></div>
+                        )}
                         {s.via_path_to && <div style={{ ...muted, fontSize: '0.7rem' }}>path to {s.via_path_to}</div>}
                       </td>
                       <td style={td}><LevelBadge level={s.level} /></td>
@@ -222,7 +276,7 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
         </div>
 
         <div style={card}>
-          <SectionTitle right={<LinkButton onClick={onViewAllScenarios}>View All <ArrowRight size={12} /></LinkButton>}>Recommended Actions</SectionTitle>
+          <SectionTitle info={EXPLAIN.actions} right={<LinkButton onClick={onViewAllScenarios}>View All <ArrowRight size={12} /></LinkButton>}>Recommended Actions</SectionTitle>
           {data.recommendedActions.length === 0 ? <Empty>No actions needed.</Empty> : (
             <div style={{ overflowX: 'auto' }}>
               <table style={tableStyle}>
@@ -237,6 +291,7 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
                         <LinkButton onClick={() => onOpenAsset(m.asset_id)}>
                           <span style={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', color: 'var(--text-secondary)' }}>{m.action}</span>
                         </LinkButton>
+                        {(m.kev || m.epss_max != null) && <div style={{ marginTop: 3 }}><IntelBadges kev={m.kev} epss={m.epss_max} dueDate={m.kev_due_date} /></div>}
                       </td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>{m.owner || <span style={muted}>Unassigned</span>}</td>
                       <td style={{ ...td, whiteSpace: 'nowrap' }}>{m.target_date ? new Date(`${m.target_date}T00:00:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : <span style={muted}>—</span>}</td>
@@ -252,7 +307,7 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
       {/* QuarkShield differentiators: attack paths, PQC/HNDL, framework coverage */}
       <div style={{ ...row, gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))' }}>
         <div style={card}>
-          <SectionTitle>Attack Paths</SectionTitle>
+          <SectionTitle info={EXPLAIN.attackPaths}>Attack Paths</SectionTitle>
           {data.attackPaths.length === 0 && <Empty>No attack path reaches a sensitive asset in this scope.</Empty>}
           {data.attackPaths.map((p: any) => (
             <div key={p.id} style={{ padding: '0.5rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
@@ -265,7 +320,7 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
           ))}
         </div>
         <div style={card}>
-          <SectionTitle>Cryptographic Exposure · PQC / HNDL</SectionTitle>
+          <SectionTitle info={EXPLAIN.crypto}>Cryptographic Exposure · PQC / HNDL</SectionTitle>
           {data.cryptoExposure.length === 0 && <Empty>No cryptographic findings in this scope.</Empty>}
           {data.cryptoExposure.map((c: any) => (
             <div key={c.purpose} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: '0.8rem', padding: '0.35rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
@@ -278,7 +333,7 @@ export const Overview: React.FC<Props> = ({ api, data, onOpenPath, onOpenScenari
           <div style={{ ...muted, fontSize: '0.7rem', marginTop: 8 }}>Key establishment → ML-KEM / hybrid (HNDL); signatures, SSH and certificates → ML-DSA migration.</div>
         </div>
         <div style={card}>
-          <SectionTitle>STRIDE &amp; MITRE ATT&amp;CK®</SectionTitle>
+          <SectionTitle info={EXPLAIN.frameworksCoverage}>STRIDE &amp; MITRE ATT&amp;CK®</SectionTitle>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
             {['S', 'T', 'R', 'I', 'D', 'E'].map(l => {
               const s = data.stride.find((x: any) => x.ref === l);

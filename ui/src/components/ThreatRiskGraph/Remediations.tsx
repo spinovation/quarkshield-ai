@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { ThreatApi } from './api';
-import { Chip, muted, REM_STATUS, selectStyle, Empty, LEVEL_META } from './ui';
+import { Chip, muted, REM_STATUS, selectStyle, Empty, LEVEL_META, IntelBadges } from './ui';
 
 /**
  * Remediation workflow: owner, target date and status. Residual risk is recomputed
@@ -39,6 +39,7 @@ export const Remediations: React.FC<{ api: ThreatApi; items: any[]; onChanged: (
             {m.command && <code style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: 6, wordBreak: 'break-all' }}>{m.command}</code>}
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
               <Chip>{m.action_type.replace(/_/g, ' ')}</Chip>
+              {(m.kev || m.epss_max != null) && <IntelBadges kev={m.kev} epss={m.epss_max} dueDate={m.kev_due_date} />}
               {m.breaks_paths > 0 && <span style={muted}>breaks {m.breaks_paths} attack path{m.breaks_paths > 1 ? 's' : ''}</span>}
               <select aria-label="Remediation status" value={m.state.status} disabled={saving === m.id} style={selectStyle}
                 onChange={e => save(m.id, { status: e.target.value })}>

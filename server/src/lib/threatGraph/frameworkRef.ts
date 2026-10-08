@@ -26,6 +26,7 @@ export const ATTACK_TECHNIQUES: Record<string, AttackTechnique> = {
   T1600: { id: 'T1600', name: 'Weaken Encryption', tactics: ['defense-evasion'] },
   T1041: { id: 'T1041', name: 'Exfiltration Over C2 Channel', tactics: ['exfiltration'] },
   T1213: { id: 'T1213', name: 'Data from Information Repositories', tactics: ['collection'] },
+  T1486: { id: 'T1486', name: 'Data Encrypted for Impact', tactics: ['impact'] },
 };
 
 export const STRIDE_LABELS: Record<StrideLetter, string> = {

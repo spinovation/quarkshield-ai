@@ -303,12 +303,18 @@ export const inferTopology = (src: SourceData): Topology => {
 
     for (const v of c.vulnerabilities || []) {
       const cve = (v.cveId || '').trim();
-      if (!cve || cve.toUpperCase() === 'CLEAN' || /REMEDIATED/i.test(v.title || '') || !(Number(v.cvssScore) > 0)) continue;
+      const kev = src.intel?.kev[cve.toUpperCase()] || null;
+      const epss = src.intel?.epss[cve.toUpperCase()] || null;
+      // A KEV entry is kept even when the advisory carries no CVSS score.
+      if (!cve || cve.toUpperCase() === 'CLEAN' || /REMEDIATED/i.test(v.title || '') || (!(Number(v.cvssScore) > 0) && !kev)) continue;
+      const ownCwe = Array.isArray(v.cwe) ? v.cwe : v.cwe ? [v.cwe] : [];
       vulns.push({
         id: `vuln:${c.id}:${cve}`, component_id: compId, asset_id: assetId, cve,
         cvss: Number(v.cvssScore) || 0, severity: (v.severity || 'medium').toLowerCase(), title: v.title || cve,
         fixed_version: v.fixedVersion || null, remediation_cmd: v.remediationCmd || null,
-        cwe: Array.isArray(v.cwe) ? v.cwe : v.cwe ? [v.cwe] : [],
+        // CWE from the SBOM advisory, else from the KEV entry (improves STRIDE mapping).
+        cwe: ownCwe.length ? ownCwe : kev?.cwes || [],
+        kev, epss: epss?.epss ?? null, epss_percentile: epss?.percentile ?? null,
       });
     }
 

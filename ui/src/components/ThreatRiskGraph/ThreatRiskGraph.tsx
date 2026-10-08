@@ -191,7 +191,8 @@ export const ThreatRiskGraph: React.FC<{ tenant?: string }> = ({ tenant }) => {
       <div style={{ ...muted, fontSize: '0.7rem', lineHeight: 1.5 }}>
         Risk is derived from discovered exposures (Likelihood × Impact); identifying a risk does not establish compliance, and no control is
         treated as effective without evidence. MITRE ATT&amp;CK® techniques shown are potential techniques derived from exposures, not
-        observed activity — © The MITRE Corporation. Cyber Kill Chain® is a registered trademark of Lockheed Martin.
+        observed activity — © The MITRE Corporation. Cyber Kill Chain® is a registered trademark of Lockheed Martin. Exploitation
+        intelligence: CISA Known Exploited Vulnerabilities Catalog; EPSS scores courtesy of FIRST.org — used to adjust likelihood only.
       </div>
     </div>
   );

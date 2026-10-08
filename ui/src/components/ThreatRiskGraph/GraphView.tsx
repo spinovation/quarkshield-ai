@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ReactFlow, Background, Controls, MiniMap, MarkerType, Position, type Node, type Edge,
+  ReactFlow, Background, Controls, MiniMap, MarkerType, Position, applyNodeChanges, type Node, type Edge, type NodeChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Loader2, X, Crosshair } from 'lucide-react';
@@ -138,6 +138,12 @@ export const GraphView: React.FC<Props> = ({ api, paths, initialPath, initialFoc
     return { rfNodes, rfEdges };
   }, [graph]);
 
+  // Keep nodes in state so React Flow can store measured sizes (the minimap only draws
+  // measured nodes) and so dragged positions stick.
+  const [nodes, setNodes] = useState<Node[]>([]);
+  useEffect(() => { setNodes(rfNodes); }, [rfNodes]);
+  const onNodesChange = useCallback((changes: NodeChange[]) => setNodes(ns => applyNodeChanges(changes, ns)), []);
+
   const onNodeClick = useCallback((_: unknown, n: Node) => {
     const node = graph?.nodes.find(x => x.id === n.id);
     if (node) setSelected({ type: 'node', node });
@@ -176,7 +182,7 @@ export const GraphView: React.FC<Props> = ({ api, paths, initialPath, initialFoc
           <span><span style={{ color: CONF_EDGE.high.stroke }}>━</span> high</span>
           <span><span style={{ color: CONF_EDGE.medium.stroke }}>╍</span> medium</span>
           <span><span style={{ color: CONF_EDGE.low.stroke }}>┄</span> low (lateral hypothesis)</span>
-          <span>All relationships auto-discovered — click an edge for its evidence.</span>
+          <span>All relationships auto-discovered — click an edge for its evidence. Bottom-right map: drag to pan the whole graph.</span>
         </span>
       </div>
 
@@ -187,13 +193,25 @@ export const GraphView: React.FC<Props> = ({ api, paths, initialPath, initialFoc
           {!loading && graph && graph.nodes.length === 0 && <div style={{ padding: '1rem', ...muted }}>Nothing to draw yet — no threats or relationships were derived for this tenant.</div>}
           {graph && graph.nodes.length > 0 && (
             <ReactFlow
-              nodes={rfNodes} edges={rfEdges} fitView colorMode="dark" minZoom={0.2}
+              nodes={nodes} onNodesChange={onNodesChange} edges={rfEdges} fitView colorMode="dark" minZoom={0.2}
               nodesDraggable nodesConnectable={false} onNodeClick={onNodeClick} onEdgeClick={onEdgeClick}
               proOptions={{ hideAttribution: true }}
             >
               <Background gap={22} color="#1c2540" />
               <Controls showInteractive={false} />
-              <MiniMap pannable zoomable style={{ background: '#0c1122' }} nodeColor={() => '#26304f'} />
+              {/* Minimap: thumbnail of the whole graph; drag it to pan, scroll to zoom. */}
+              <MiniMap pannable zoomable ariaLabel="Graph overview map — drag to pan"
+                style={{ background: '#0c1122', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 6, width: 160, height: 110 }}
+                maskColor="rgba(6, 8, 13, 0.55)" maskStrokeColor="#38bdf8" maskStrokeWidth={2}
+                nodeBorderRadius={4}
+                nodeColor={n => {
+                  const g = graph?.nodes.find(x => x.id === n.id);
+                  if (!g) return '#475569';
+                  if (g.kind === 'actor') return KIND_COLOR.actor;
+                  if (g.kind === 'impact') return KIND_COLOR.impact;
+                  if (g.kind === 'asset') return g.level ? LEVEL_META[g.level]?.color || KIND_COLOR.asset : KIND_COLOR.asset;
+                  return KIND_COLOR[g.kind] || '#94a3b8';
+                }} />
             </ReactFlow>
           )}
         </div>

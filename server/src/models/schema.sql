@@ -911,3 +911,44 @@ CREATE TABLE IF NOT EXISTS tr_rebuild_runs (
   finished_at TIMESTAMP WITH TIME ZONE
 );
 CREATE INDEX IF NOT EXISTS idx_tr_runs_tenant ON tr_rebuild_runs (tenant_key, started_at DESC);
+
+-- =========================================================================
+-- EXPLOITATION-LIKELIHOOD INTELLIGENCE (shared reference data, not tenant data)
+-- CISA Known Exploited Vulnerabilities + FIRST EPSS, synced daily by
+-- lib/threatIntel/feeds.ts. Used ONLY to adjust likelihood in the Threat & Risk
+-- Graph — never impact, never IOC/actor matching.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS ti_kev (
+  cve_id VARCHAR(40) PRIMARY KEY,
+  vendor VARCHAR(255),
+  product VARCHAR(255),
+  vulnerability_name VARCHAR(500),
+  date_added DATE,
+  due_date DATE,
+  ransomware_use BOOLEAN NOT NULL DEFAULT false,   -- knownRansomwareCampaignUse = 'Known'
+  short_description TEXT,
+  required_action TEXT,
+  cwes TEXT[] DEFAULT '{}',
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ti_epss (
+  cve_id VARCHAR(40) PRIMARY KEY,
+  epss REAL NOT NULL,          -- probability of exploitation activity in the next 30 days
+  percentile REAL NOT NULL,
+  score_date DATE
+);
+
+CREATE TABLE IF NOT EXISTS ti_feed_runs (
+  id VARCHAR(100) PRIMARY KEY,
+  feed VARCHAR(20) NOT NULL,   -- kev | epss
+  status VARCHAR(20) NOT NULL, -- running | success | error
+  source VARCHAR(500),
+  records INTEGER,
+  feed_version VARCHAR(100),   -- KEV catalogVersion / EPSS model+score date
+  sha256 VARCHAR(64),
+  error TEXT,
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  finished_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_ti_feed_runs_feed ON ti_feed_runs (feed, started_at DESC);

@@ -4,7 +4,7 @@ import type { ThreatApi } from './api';
 import { Remediations } from './Remediations';
 import {
   card, muted, LevelBadge, PathRiskBadge, Chip, SectionTitle, LinkButton, Empty, PathChain, levelOf, LEVEL_META, ASSET_TYPE_LABEL,
-  tableStyle, th, td,
+  tableStyle, th, td, IntelBadges,
 } from './ui';
 
 interface Props {
@@ -113,7 +113,10 @@ export const ScenarioView: React.FC<Props> = ({ api, selectedId, onSelect, onOpe
                         <tr key={d.id}>
                           <td style={td}>{d.cve || d.name}</td>
                           <td style={td}>{d.cve ? d.title : `${d.algorithm}${d.key_size ? ` ${d.key_size}-bit` : ''} · ${String(d.purpose).replace(/_/g, ' ')}`}</td>
-                          <td style={td}>{d.cve ? <>CVSS {d.cvss}</> : d.hndl_relevant ? 'HNDL' : d.classically_weak ? 'Weak' : d.quantum_vulnerable ? 'Quantum-vulnerable' : d.risk_level}</td>
+                          <td style={td}>
+                            {d.cve ? <>CVSS {d.cvss} <IntelBadges kev={!!d.kev} ransomware={!!d.kev?.ransomware_use} epss={d.epss} percentile={d.epss_percentile} dueDate={d.kev?.due_date} /></>
+                              : d.hndl_relevant ? 'HNDL' : d.classically_weak ? 'Weak' : d.quantum_vulnerable ? 'Quantum-vulnerable' : d.risk_level}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

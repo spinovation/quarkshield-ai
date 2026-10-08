@@ -6,7 +6,8 @@ import {
   Fingerprint, Loader2,
 } from 'lucide-react';
 import type { ThreatApi } from './api';
-import { muted, REL_LABEL } from './ui';
+import { muted, REL_LABEL, InfoTip, LevelBadge } from './ui';
+import { EXPLAIN, RULE_TEXT, SOURCE_LABEL, SOURCE_ROLES } from './explain';
 
 /**
  * "Threat Model Overview" panel — three views over the SAME auto-discovered topology:
@@ -45,12 +46,15 @@ const AssetNode: React.FC<NodeProps> = ({ data }) => {
   const d = data as any;
   const Icon = d.Icon as React.ElementType;
   return (
-    <div style={{ width: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, textAlign: 'center', cursor: 'pointer' }}>
+    <div style={{
+      width: 120, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, textAlign: 'center', cursor: 'pointer',
+      opacity: d.dim ? 0.18 : 1, transition: 'opacity 0.2s',
+    }}>
       <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
       <div style={{
         width: 52, height: 52, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative',
-        background: `${d.color}22`, border: `1.5px solid ${d.threatened ? '#ff3366' : d.color}`,
-        boxShadow: d.exposed ? `0 0 14px ${d.color}66` : 'none',
+        background: `${d.color}22`, border: d.focus ? '2.5px solid #00f2fe' : `1.5px solid ${d.threatened ? '#ff3366' : d.color}`,
+        boxShadow: d.focus ? '0 0 18px rgba(0,242,254,0.85)' : d.exposed ? `0 0 14px ${d.color}66` : 'none',
       }}>
         <Icon size={24} color={d.color} />
         {d.badge > 0 && (
@@ -72,6 +76,7 @@ const ListBox: React.FC<NodeProps> = ({ data }) => {
   return (
     <div style={{
       width: 150, padding: '8px 10px', borderRadius: 10, border: `1.5px solid ${d.color}`, background: `${d.color}14`,
+      opacity: d.dim ? 0.18 : 1, transition: 'opacity 0.2s',
     }}>
       {d.side === 'right' && <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />}
       <div style={{ fontSize: 11, fontWeight: 700, color: d.color, marginBottom: 6 }}>{d.title}</div>
@@ -95,9 +100,12 @@ interface Props {
   api: ThreatApi;
   data: any;                     // overview payload (scope, attackPaths, riskByThreatType, topScenarios)
   onOpenAsset: (id: string) => void;
+  focusSource?: string | null;   // data-source chip selected in the Overview
+  focusLabel?: string;
+  onClearFocus?: () => void;
 }
 
-export const ArchitectureView: React.FC<Props> = ({ api, data, onOpenAsset }) => {
+export const ArchitectureView: React.FC<Props> = ({ api, data, onOpenAsset, focusSource, focusLabel, onClearFocus }) => {
   const [mode, setMode] = useState<Mode>('architecture');
   const [graph, setGraph] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +155,7 @@ export const ArchitectureView: React.FC<Props> = ({ api, data, onOpenAsset }) =>
           label: `${meta.plural} ×${list.length}`, sub: list.some((a: any) => a.exposed) ? 'some internet-facing' : meta.label,
           Icon: meta.Icon, color: meta.color, exposed: list.some((a: any) => a.exposed),
           threatened: list.some((a: any) => threatened.has(a.id)), badge: list.filter((a: any) => levelCount.has(a.id)).length,
-          members: list.map((a: any) => a.id),
+          members: list.map((a: any) => a.id), memberNodes: list, typeLabel: meta.plural,
         } });
       } else {
         for (const a of list) {
@@ -155,6 +163,7 @@ export const ArchitectureView: React.FC<Props> = ({ api, data, onOpenAsset }) =>
           vnodes.push({ id: a.id, tier: meta.tier, data: {
             label: a.label, sub: `${meta.label}${a.exposed ? ' · exposed' : ''}`, Icon: meta.Icon, color: meta.color,
             exposed: a.exposed, threatened: threatened.has(a.id), badge: levelCount.has(a.id) ? 1 : 0, members: [a.id],
+            memberNodes: [a], typeLabel: meta.label,
           } });
         }
       }
@@ -238,8 +247,40 @@ export const ArchitectureView: React.FC<Props> = ({ api, data, onOpenAsset }) =>
       id: `${v.id}>keydata`, source: v.id, target: 'keydata',
       style: { stroke: '#2dd4bf', strokeDasharray: '3 3' }, markerEnd: { type: MarkerType.ArrowClosed, color: '#2dd4bf' },
     });
+    // Correlation rules behind each visual node's relationships (for the lineage panel).
+    const rulesByNode = new Map<string, Set<string>>();
+    for (const e of graph.edges) {
+      if (!e.rule) continue;
+      for (const end of [e.source, e.target]) {
+        const v = memberOf.get(end);
+        if (!v) continue;
+        const set = rulesByNode.get(v) || new Set<string>();
+        set.add(e.rule); rulesByNode.set(v, set);
+      }
+    }
+    for (const n of rfNodes) (n.data as any).rules = [...(rulesByNode.get(n.id) || [])].sort();
+
+    // Data-source focus: highlight boxes whose members carry data from the source, dim the rest.
+    const role = focusSource ? SOURCE_ROLES[focusSource] : null;
+    if (role) {
+      for (const n of rfNodes) {
+        const d = n.data as any;
+        if (n.type === 'box') { d.dim = true; continue; }
+        d.matches = (d.memberNodes || []).filter(role.match);
+        d.focus = d.matches.length > 0;
+        d.dim = !d.focus;
+      }
+      const focused = new Set(rfNodes.filter(n => (n.data as any).focus).map(n => n.id));
+      for (const e of rfEdges) {
+        if (!(focused.has(e.source) && focused.has(e.target))) e.style = { ...e.style, opacity: 0.12 };
+      }
+    }
     return { nodes: rfNodes, edges: rfEdges };
-  }, [graph, data, mode]);
+  }, [graph, data, mode, focusSource]);
+
+  const [hovered, setHovered] = useState<any | null>(null);
+  // Selecting a data source shows its explanation, not a previously hovered box.
+  useEffect(() => { setHovered(null); }, [focusSource]);
 
   // Switching view changes the node set (e.g. Data Flow drops the threats box): refit.
   useEffect(() => {
@@ -258,12 +299,15 @@ export const ArchitectureView: React.FC<Props> = ({ api, data, onOpenAsset }) =>
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 600 }}>Threat Model Overview</h3>
+        <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+          Threat Model Overview <InfoTip tip={EXPLAIN.architecture} />
+        </h3>
         <div style={{ display: 'flex', gap: 2, padding: 2, borderRadius: 8, border: '1px solid rgba(255,255,255,0.08)' }}>
           {tab('architecture', 'Architecture View')}{tab('threat', 'Threat View')}{tab('dataflow', 'Data Flow')}
         </div>
       </div>
-      <div ref={wrapRef} style={{ flex: 1, minHeight: 330, borderRadius: 8, background: 'rgba(0,0,0,0.15)', position: 'relative' }}>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', flex: 1 }}>
+      <div ref={wrapRef} style={{ flex: '1 1 520px', minHeight: 330, borderRadius: 8, background: 'rgba(0,0,0,0.15)', position: 'relative' }}>
         {!graph && !error && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Loader2 size={18} className="spin" /></div>}
         {error && <div style={{ ...muted, padding: 12 }}>{error}</div>}
         {graph && (
@@ -272,9 +316,15 @@ export const ArchitectureView: React.FC<Props> = ({ api, data, onOpenAsset }) =>
             nodesDraggable={false} nodesConnectable={false} panOnScroll={false} zoomOnScroll={false} preventScrolling={false}
             proOptions={{ hideAttribution: true }}
             onInit={inst => { rfRef.current = inst; }}
+            onNodeMouseEnter={(_, n) => setHovered({ id: n.id, ...(n.data as any) })}
+            onNodeMouseLeave={() => { if (focusSource) setHovered(null); }}
             onNodeClick={(_, n) => { const m = (n.data as any)?.members; if (m?.length) onOpenAsset(m[0]); }}
           />
         )}
+      </div>
+      {focusSource && !hovered
+        ? <SourcePanel sourceId={focusSource} label={focusLabel} nodes={nodes} onClear={onClearFocus} />
+        : <LineagePanel node={hovered} />}
       </div>
       <div style={{ ...muted, fontSize: '0.68rem' }}>
         {mode === 'dataflow'
@@ -282,6 +332,100 @@ export const ArchitectureView: React.FC<Props> = ({ api, data, onOpenAsset }) =>
           : mode === 'threat' ? 'Red dashed edges are hops on computed attack paths; badges count assets with elevated residual risk.'
           : 'Architecture inferred from your fleet, SBOM, repositories, PKI and proxies. Click a node for its risk detail.'}
       </div>
+    </div>
+  );
+};
+
+/** Right-hand explanation of the hovered box: what it is, where it came from, how it was linked. */
+const LineagePanel: React.FC<{ node: any | null }> = ({ node }) => {
+  const box: React.CSSProperties = {
+    flex: '0 1 250px', minWidth: 220, maxHeight: 360, overflowY: 'auto', borderRadius: 8, padding: '10px 12px',
+    background: 'rgba(255,255,255,0.025)', border: '1px solid rgba(255,255,255,0.08)', fontSize: '0.76rem', lineHeight: 1.45,
+  };
+  const h = (t: string) => <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#7dd3fc', margin: '8px 0 2px' }}>{t}</div>;
+  if (!node) return <div style={{ ...box, ...muted }}>Hover any box to see what it is, where its data comes from and which correlation rules connected it.</div>;
+  if (node.id === 'threats') return (
+    <div style={box}>
+      <strong style={{ fontSize: '0.85rem' }}>External Threats</strong>
+      {h('What it is')}<div>Threat sources implied by the threats derived in this scope (one per threat category present).</div>
+      {h('Data source')}<div>Threat rules TR-01…TR-08 over CVE, crypto, repository and PKI findings.</div>
+      {h('Red dashed arrows')}<div>Entry points of computed attack paths — where an attacker first gets a foothold.</div>
+    </div>
+  );
+  if (node.id === 'keydata') return (
+    <div style={box}>
+      <strong style={{ fontSize: '0.85rem' }}>Key Data</strong>
+      {h('What it is')}<div>The kinds of data at stake behind the data tier.</div>
+      {h('How it is derived')}<div>Databases and sensitive/CUI assets → sensitive data; PKI/KMS → keys &amp; certificates; credential-theft threats → credentials; HNDL threats → encrypted traffic that could be decrypted later.</div>
+    </div>
+  );
+  const members: any[] = node.memberNodes || [];
+  const sources = [...new Set(members.map(m => SOURCE_LABEL[m.meta?.source_table] || m.meta?.source_table).filter(Boolean))];
+  const inference = [...new Set(members.flatMap(m => m.meta?.inference || []))].slice(0, 6);
+  const levels = members.map(m => m.level).filter(Boolean);
+  const worst = ['critical', 'high', 'medium', 'low'].find(l => levels.includes(l));
+  return (
+    <div style={box}>
+      <strong style={{ fontSize: '0.85rem', wordBreak: 'break-word' }}>{node.label}</strong>
+      <div style={{ ...muted, fontSize: '0.72rem' }}>{node.typeLabel}{node.exposed ? ' · internet-facing' : ''}</div>
+      {worst && <div style={{ marginTop: 6 }}><LevelBadge level={worst} /> <span style={muted}>highest residual risk</span></div>}
+      {members.length > 1 && (<>{h(`Members (${members.length})`)}<div>{members.slice(0, 8).map(m => m.label).join(', ')}{members.length > 8 ? '…' : ''}</div></>)}
+      {h('Data source')}<div>{sources.join(' · ') || '—'}</div>
+      {members.length === 1 && members[0].meta && (
+        <div style={muted}>Criticality {members[0].meta.criticality} · {members[0].meta.classification}{members[0].meta.context_origin === 'override' ? ' (admin override)' : ' (inferred)'}</div>
+      )}
+      {(() => {
+        const sum = members.reduce((acc: any, m: any) => {
+          const fx = m.meta?.findings; if (!fx) return acc;
+          acc.components += fx.components; acc.vulns += fx.vulns; acc.crypto += fx.crypto; acc.intel.push(...(fx.intel || []));
+          return acc;
+        }, { components: 0, vulns: 0, crypto: 0, intel: [] as any[] });
+        if (!sum.components && !sum.vulns && !sum.crypto) return null;
+        return (<>
+          {h('Findings on this box')}
+          <ul style={{ margin: 0, paddingLeft: 16 }}>
+            {sum.components > 0 && <li>{sum.components} SBOM component{sum.components > 1 ? 's' : ''}</li>}
+            {sum.vulns > 0 && <li>{sum.vulns} CVE match{sum.vulns > 1 ? 'es' : ''}</li>}
+            {sum.crypto > 0 && <li>{sum.crypto} crypto finding{sum.crypto > 1 ? 's' : ''} (CBOM)</li>}
+            {sum.intel.length > 0 && <li>KEV / EPSS: {sum.intel.map((i: any) => `${i.cve}${i.kev ? ' (KEV)' : ''}${typeof i.epss === 'number' ? ` EPSS ${(i.epss * 100).toFixed(i.epss >= 0.995 || i.epss < 0.01 ? 2 : 1)}%` : ''}`).join(', ')}</li>}
+          </ul>
+        </>);
+      })()}
+      {inference.length > 0 && (<>{h('Why it is here')}<ul style={{ margin: 0, paddingLeft: 16 }}>{inference.map(i => <li key={i}>{i}</li>)}</ul></>)}
+      {node.rules?.length > 0 && (<>{h('Correlation rules linking it')}<ul style={{ margin: 0, paddingLeft: 16 }}>
+        {node.rules.map((r: string) => <li key={r}><strong>{r}</strong> — {RULE_TEXT[r] || r}</li>)}
+      </ul></>)}
+      <div style={{ ...muted, marginTop: 8, fontSize: '0.7rem' }}>Click the box to open its Asset Risk Detail.</div>
+    </div>
+  );
+};
+
+/** Explains a selected data source: what it does and which boxes it contributed to. */
+const SourcePanel: React.FC<{ sourceId: string; label?: string; nodes: Node[]; onClear?: () => void }> = ({ sourceId, label, nodes, onClear }) => {
+  const role = SOURCE_ROLES[sourceId];
+  const hits = nodes.filter(n => (n.data as any).focus);
+  const box: React.CSSProperties = {
+    flex: '0 1 250px', minWidth: 220, maxHeight: 360, overflowY: 'auto', borderRadius: 8, padding: '10px 12px',
+    background: 'rgba(0,242,254,0.05)', border: '1px solid rgba(0,242,254,0.35)', fontSize: '0.76rem', lineHeight: 1.45,
+  };
+  const h = (t: string) => <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#7dd3fc', margin: '8px 0 2px' }}>{t}</div>;
+  return (
+    <div style={box}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+        <strong style={{ fontSize: '0.85rem' }}>{label || sourceId}</strong>
+        {onClear && <button onClick={onClear} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.72rem' }}>Clear</button>}
+      </div>
+      {h(role?.role === 'creates' ? 'Creates boxes' : 'Adds findings to boxes')}
+      <div>{role?.summary}</div>
+      {(() => {
+        const assets = hits.reduce((n, x) => n + ((x.data as any).matches || []).length, 0);
+        return h(`Highlighted: ${hits.length} box${hits.length === 1 ? '' : 'es'} · ${assets} asset${assets === 1 ? '' : 's'}`);
+      })()}
+      {hits.length === 0 && <div style={{ color: 'var(--text-muted)' }}>No box in this scope carries data from this source.</div>}
+      <ul style={{ margin: 0, paddingLeft: 16 }}>
+        {hits.flatMap(n => ((n.data as any).matches || []).map((m: any) => <li key={`${n.id}-${m.id}`}>{role?.evidence(m)}</li>))}
+      </ul>
+      <div style={{ color: 'var(--text-muted)', marginTop: 8, fontSize: '0.7rem' }}>Hover a box for its full lineage; click it to open Asset Risk Detail.</div>
     </div>
   );
 };

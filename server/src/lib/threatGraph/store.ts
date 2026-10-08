@@ -9,6 +9,7 @@ import { PoolClient } from 'pg';
 import pool from '../../config/db';
 import { normTenant, getTenantEntitlement } from '../../middleware/auth';
 import { buildThreatGraph } from './engine';
+import { loadIntelFor } from '../threatIntel/feeds';
 import { GraphResult, RemediationState, SourceData, ContextOverride } from './types';
 
 const T = `LOWER(REGEXP_REPLACE(COALESCE(tenant_name,''), '[^a-zA-Z0-9]', '', 'g')) = $1`;
@@ -36,7 +37,10 @@ export const loadSource = async (tenant: string): Promise<SourceData> => {
     q<SourceData['proxies'][number]>(`SELECT id, name, listen_port, upstream_url, tls_curve, status FROM pqc_proxies WHERE ${T}`),
     q<ContextOverride>(`SELECT asset_id, criticality, data_classification, environment FROM tr_context_overrides WHERE tenant_key = $1`),
   ]);
-  return { tenant, machines, cryptoFindings, components, gitScans, pkiConnectors, pkiAssets, proxies, overrides };
+  // Exploitation intelligence (CISA KEV / FIRST EPSS) for just this tenant's CVEs.
+  const cves = components.flatMap(c => (Array.isArray(c.vulnerabilities) ? c.vulnerabilities : []).map(v => String(v?.cveId || '')));
+  const intel = await loadIntelFor(cves).catch(() => ({ kev: {}, epss: {} }));
+  return { tenant, machines, cryptoFindings, components, gitScans, pkiConnectors, pkiAssets, proxies, overrides, intel };
 };
 
 export const loadRemediationState = async (tenantKey: string): Promise<RemediationState[]> =>
@@ -194,4 +198,11 @@ export const scheduleRebuild = (tenant: string | null | undefined, trigger: stri
   }, DEBOUNCE_MS);
   timer.unref?.();
   timers.set(key, timer);
+};
+
+/** Re-score every tenant that has a threat graph (e.g. after a threat-intel feed sync). */
+export const scheduleRebuildForAllTenants = async (trigger: string): Promise<number> => {
+  const r = await pool.query(`SELECT DISTINCT ON (tenant_key) tenant_name FROM tr_rebuild_runs WHERE tenant_name IS NOT NULL ORDER BY tenant_key, started_at DESC`);
+  for (const row of r.rows) scheduleRebuild(row.tenant_name, trigger);
+  return r.rowCount || 0;
 };

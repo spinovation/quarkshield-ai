@@ -4,7 +4,7 @@ import type { ThreatApi } from './api';
 import { Remediations } from './Remediations';
 import {
   card, muted, LevelBadge, PathRiskBadge, Chip, SectionTitle, LinkButton, Empty, PathChain, levelOf, LEVEL_META, ASSET_TYPE_LABEL,
-  REL_LABEL, tableStyle, th, td, selectStyle,
+  REL_LABEL, tableStyle, th, td, selectStyle, IntelBadges,
 } from './ui';
 
 interface Props {
@@ -187,7 +187,10 @@ export const AssetDetail: React.FC<Props> = ({ api, selectedId, onSelect, onOpen
                           <td style={td}>{c.ecosystem}</td>
                           <td style={td}>
                             {c.vulnerabilities.length === 0 ? <span style={muted}>none known</span> : c.vulnerabilities.map((v: any) => (
-                              <div key={v.id}><Chip color={v.cvss >= 9 ? LEVEL_META.critical.color : v.cvss >= 7 ? LEVEL_META.high.color : undefined}>{v.cve}</Chip> CVSS {v.cvss}{v.fixed_version ? ` · fix ${v.fixed_version}` : ''}</div>
+                              <div key={v.id} style={{ marginBottom: 3 }}>
+                                <Chip color={v.cvss >= 9 ? LEVEL_META.critical.color : v.cvss >= 7 ? LEVEL_META.high.color : undefined}>{v.cve}</Chip> CVSS {v.cvss}{v.fixed_version ? ` · fix ${v.fixed_version}` : ''}{' '}
+                                <IntelBadges kev={!!v.kev} ransomware={!!v.kev?.ransomware_use} epss={v.epss} percentile={v.epss_percentile} dueDate={v.kev?.due_date} />
+                              </div>
                             ))}
                           </td>
                         </tr>

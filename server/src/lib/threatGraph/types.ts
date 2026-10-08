@@ -116,8 +116,19 @@ export interface ContextOverride {
   environment?: string | null;
 }
 
+/** Exploitation-likelihood intelligence for the tenant's CVEs (CISA KEV, FIRST EPSS). */
+export interface KevIntel {
+  vulnerability_name?: string | null; date_added?: string | null; due_date?: string | null;
+  ransomware_use: boolean; required_action?: string | null; cwes?: string[];
+}
+export interface ThreatIntel {
+  kev: Record<string, KevIntel>;
+  epss: Record<string, { epss: number; percentile: number }>;
+}
+
 export interface SourceData {
   tenant: string;
+  intel?: ThreatIntel;
   machines: SrcMachine[];
   cryptoFindings: SrcCryptoFinding[];
   components: SrcComponent[];
@@ -212,6 +223,9 @@ export interface VulnNode {
   fixed_version: string | null;
   remediation_cmd: string | null;
   cwe: string[];
+  kev: KevIntel | null;              // listed in CISA KEV (exploited in the wild)
+  epss: number | null;               // FIRST EPSS probability (next 30 days)
+  epss_percentile: number | null;
 }
 
 export type ThreatCategory =
@@ -291,6 +305,9 @@ export interface TrRemediation {
   command: string | null;
   risk_ids: string[];
   breaks_paths: number;
+  kev?: boolean;                     // fixes at least one CISA KEV vulnerability
+  kev_due_date?: string | null;      // earliest CISA remediation due date among them
+  epss_max?: number | null;
 }
 
 export interface RemediationState {

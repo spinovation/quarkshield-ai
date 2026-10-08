@@ -1,7 +1,8 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import { isSuperRole, normTenant } from '../middleware/auth';
-import { rebuildTenant, scheduleRebuild } from '../lib/threatGraph/store';
+import { rebuildTenant, scheduleRebuild, scheduleRebuildForAllTenants } from '../lib/threatGraph/store';
+import { feedStatus, syncThreatIntel } from '../lib/threatIntel/feeds';
 import { RULE_CATALOG } from '../lib/threatGraph/rules';
 import { ATTACK_TECHNIQUES, KILL_CHAIN, STRIDE_LABELS, THREAT_CATEGORY_LABELS } from '../lib/threatGraph/frameworkRef';
 import { PURPOSE_LABELS } from '../lib/threatGraph/cryptoPurpose';
@@ -89,7 +90,7 @@ const scenarioStatus = (states: { status: string; target_date?: string | null }[
 export const getThreatOverview = withTenant(async (req, res, tenant, key) => {
   await ensureBuilt(tenant, key);
   const q = async (sql: string, p: unknown[] = [key]) => (await pool.query(sql, p)).rows;
-  const [assets, threats, risks, paths, rems, cryptoRows, runs] = await Promise.all([
+  const [assets, threats, risks, paths, rems, cryptoRows, runs, vulnRows, intelStatus] = await Promise.all([
     q(`SELECT data FROM tr_assets WHERE tenant_key = $1`).then(r => data<any>(r)),
     q(`SELECT data FROM tr_threats WHERE tenant_key = $1`).then(r => data<any>(r)),
     q(`SELECT data FROM tr_risks WHERE tenant_key = $1 ORDER BY priority`).then(r => data<any>(r)),
@@ -97,7 +98,20 @@ export const getThreatOverview = withTenant(async (req, res, tenant, key) => {
     q(`SELECT data FROM tr_remediations WHERE tenant_key = $1`).then(r => data<any>(r)),
     q(`SELECT asset_id, data FROM tr_nodes WHERE tenant_key = $1 AND node_type = 'crypto'`),
     q(`SELECT finished_at, stats FROM tr_rebuild_runs WHERE tenant_key = $1 AND status = 'success' ORDER BY started_at DESC LIMIT 30`),
+    q(`SELECT asset_id, data FROM tr_nodes WHERE tenant_key = $1 AND node_type = 'vuln'`),
+    feedStatus().catch(() => null),
   ]);
+  const vulnById = new Map(vulnRows.map((r: any) => [r.data.id, r.data]));
+  /** KEV / EPSS signal across a set of driver ids. */
+  const intelOf = (driverIds: string[]) => {
+    const vs = driverIds.map(d => vulnById.get(d)).filter(Boolean) as any[];
+    const epss = vs.map(v => v.epss).filter((x: any) => typeof x === 'number');
+    return {
+      kev: vs.some(v => v.kev), ransomware: vs.some(v => v.kev?.ransomware_use),
+      epss_max: epss.length ? Math.max(...epss) : null,
+      kev_cves: vs.filter(v => v.kev).map(v => v.cve),
+    };
+  };
   const state = await remState(key);
   const assetById = new Map(assets.map((a: any) => [a.id, a]));
 
@@ -180,6 +194,7 @@ export const getThreatOverview = withTenant(async (req, res, tenant, key) => {
         score: r.residual_score, level: r.residual_level, inherent_score: r.inherent_score,
         controls: r.controls || [],
         status: scenarioStatus(remIds.map(id => state.get(id) || { status: 'open' })),
+        intel: intelOf(t?.driver_ids || []),
       };
     });
 
@@ -194,7 +209,8 @@ export const getThreatOverview = withTenant(async (req, res, tenant, key) => {
     .map(({ m, score }) => {
       const st = state.get(m.id) || { status: 'open' };
       return {
-        ...m, max_risk: score, priority: score >= 12 ? 'P1' : score >= 6 ? 'P2' : 'P3',
+        // A fix for a CISA KEV (exploited-in-the-wild) vulnerability is always P1.
+        ...m, max_risk: score, priority: m.kev || score >= 12 ? 'P1' : score >= 6 ? 'P2' : 'P3',
         owner: st.owner || null, target_date: st.target_date || null, state: st,
         asset_name: (assetById.get(m.asset_id) as any)?.name,
       };
@@ -217,6 +233,30 @@ export const getThreatOverview = withTenant(async (req, res, tenant, key) => {
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   };
   const names = Object.fromEntries(assets.map((a: any) => [a.id, { name: a.name, type: a.type }]));
+
+  // Data lineage: which QuarkShield inputs this (scoped) model was built from.
+  const nodeCounts = (await q(
+    `SELECT node_type, asset_id, COUNT(*)::int AS n FROM tr_nodes WHERE tenant_key = $1 GROUP BY node_type, asset_id`))
+    .filter((r: any) => sAssetIds.has(r.asset_id));
+  const countNodes = (t: string) => nodeCounts.filter((r: any) => r.node_type === t).reduce((x: number, r: any) => x + r.n, 0);
+  const countAssets = (tables: string[]) => [...sAssetIds].filter(id => tables.includes((assetById.get(id) as any)?.source_table)).length;
+  const dataSources = [
+    { id: 'fleet', label: 'Fleet agents', n: countAssets(['fleet_machines']), detail: 'Enrolled QuarkShield agents (endpoints and servers): host identity, OS, IP, Workstation Group. Feeds assets and the network-segment hypothesis (R6, R9).' },
+    { id: 'sbom', label: 'SBOM components', n: countNodes('component'), detail: 'Software Bill of Materials from agents, CI and repo scans. Server packages reveal services and databases (R8); package versions are matched to CVEs.' },
+    { id: 'cve', label: 'CVE matches', n: countNodes('vuln'), detail: 'Known vulnerabilities matched to SBOM component versions (CVSS, fixed version, CWE). Drives TR-01/02/03 threats and patch actions.' },
+    { id: 'cbom', label: 'Crypto findings (CBOM)', n: countNodes('crypto'), detail: 'Keys, certificates, TLS key exchange, SSH and crypto configuration from agents, TLS probes, repos, PKI and proxies — classified by purpose for PQC/HNDL analysis (TR-04/05/06/07).' },
+    { id: 'repos', label: 'Git repositories', n: countAssets(['git_scans']), detail: 'Latest Git/CI crypto scan per repository: committed keys and in-code crypto. Linked to hosts by SBOM fingerprint (R5).' },
+    { id: 'pki', label: 'PKI / KMS connectors', n: countAssets(['pki_connectors']), detail: 'AWS KMS, Azure Key Vault, HashiCorp Vault, AD CS key and certificate inventory. Trust links to hosts (R4).' },
+    { id: 'proxy', label: 'PQC proxies', n: countAssets(['pqc_proxies']), detail: 'Hybrid-PQC reverse proxies: the internet front door. Their upstreams become internet-reachable (R1, R7).' },
+    {
+      id: 'intel', label: 'KEV / EPSS matches',
+      n: vulnRows.filter((r: any) => sAssetIds.has(r.asset_id) && (r.data.kev || r.data.epss !== null)).length,
+      detail: `Exploitation intelligence matched to your CVEs: CISA Known Exploited Vulnerabilities (exploited in the wild, ransomware use, CISA due dates) and FIRST EPSS (probability of exploitation in the next 30 days). Adjusts likelihood only. `
+        + (intelStatus?.lastSuccess?.kev ? `KEV synced ${new Date(intelStatus.lastSuccess.kev.finished_at).toLocaleDateString()} (${intelStatus.lastSuccess.kev.records} entries). ` : 'KEV not synced yet. ')
+        + (intelStatus?.lastSuccess?.epss ? `EPSS synced ${new Date(intelStatus.lastSuccess.epss.finished_at).toLocaleDateString()} (${intelStatus.lastSuccess.epss.feed_version || ''}).` : 'EPSS not synced yet.'),
+    },
+    { id: 'probe', label: 'TLS endpoints', n: [...sAssetIds].filter(id => (assetById.get(id) as any)?.type === 'tls_endpoint').length, detail: 'Endpoints observed by agent TLS probes or proxy upstreams; public names are treated as internet-exposed (R3, R7).' },
+  ];
   const topPaths = (await withResidual(key, sPaths.slice(0, 8)))
     .map((p: any) => ({ ...p, hops: p.hops.map((h: any) => ({ ...h, name: names[h.asset_id]?.name, type: names[h.asset_id]?.type })) }));
 
@@ -256,6 +296,7 @@ export const getThreatOverview = withTenant(async (req, res, tenant, key) => {
     stride: countRefs(t => t.stride).map(([ref, n]) => ({ ref, n, label: STRIDE_LABELS[ref as keyof typeof STRIDE_LABELS] })),
     attack: countRefs(t => t.attack).map(([ref, n]) => ({ ref, n, name: ATTACK_TECHNIQUES[ref]?.name, tactics: ATTACK_TECHNIQUES[ref]?.tactics })),
     trend: [...runs].reverse().map((t: any) => ({ at: t.finished_at, ...t.stats })),
+    dataSources,
   });
 });
 
@@ -283,10 +324,30 @@ export const getThreatGraph = withTenant(async (req, res, tenant, key) => {
     const missing = ids.filter(i => !nodes.has(i));
     if (!missing.length) return;
     const r = await pool.query(`SELECT data FROM tr_assets WHERE tenant_key = $1 AND id = ANY($2)`, [key, missing]);
+    // Findings each asset carries, per data source (SBOM, CVE, CBOM, KEV/EPSS) — links the
+    // "Data sources" strip to the boxes in the diagram.
+    const f = await pool.query(
+      `SELECT asset_id,
+              COUNT(*) FILTER (WHERE node_type = 'component')::int AS components,
+              COUNT(*) FILTER (WHERE node_type = 'vuln')::int AS vulns,
+              COUNT(*) FILTER (WHERE node_type = 'crypto')::int AS crypto,
+              COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT('cve', data->>'cve', 'kev', (data->'kev') IS NOT NULL AND data->'kev' <> 'null'::jsonb,
+                                                    'ransomware', COALESCE((data->'kev'->>'ransomware_use')::boolean, false),
+                                                    'epss', data->'epss'))
+                       FILTER (WHERE node_type = 'vuln' AND ((data->'kev') IS NOT NULL AND data->'kev' <> 'null'::jsonb OR data->'epss' <> 'null'::jsonb)), '[]'::jsonb) AS intel
+         FROM tr_nodes WHERE tenant_key = $1 AND asset_id = ANY($2) GROUP BY asset_id`, [key, missing]);
+    const findings = new Map(f.rows.map((x: any) => [x.asset_id, x]));
     for (const a of data<any>(r.rows)) {
+      const fx: any = findings.get(a.id) || { components: 0, vulns: 0, crypto: 0, intel: [] };
       nodes.set(a.id, {
         id: a.id, kind: 'asset', subtype: a.type, label: a.name, exposed: a.internet_exposed,
-        level: riskByAsset.get(a.id), meta: { criticality: a.criticality, classification: a.data_classification },
+        level: riskByAsset.get(a.id),
+        // Lineage for hover explanations: where the asset came from and why it is typed/scored this way.
+        meta: {
+          criticality: a.criticality, classification: a.data_classification, source_table: a.source_table,
+          inference: a.inference || [], groups: a.groups || [], context_origin: a.context_origin,
+          findings: { components: fx.components, vulns: fx.vulns, crypto: fx.crypto, intel: fx.intel },
+        },
       });
     }
   };
@@ -575,3 +636,23 @@ export const getThreatGraphCatalog = (_req: Request, res: Response): void => {
 };
 
 export { scheduleRebuild };
+
+// ---------------------------------------------------------------------------
+// Exploitation-likelihood intelligence (CISA KEV, FIRST EPSS)
+// ---------------------------------------------------------------------------
+export const getThreatIntelStatus = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const st = await feedStatus();
+    const counts = (await pool.query(`SELECT (SELECT COUNT(*) FROM ti_kev)::int AS kev, (SELECT COUNT(*) FROM ti_kev WHERE ransomware_use)::int AS kev_ransomware, (SELECT COUNT(*) FROM ti_epss)::int AS epss`)).rows[0];
+    res.json({ ...st, counts });
+  } catch (e) {
+    res.status(500).json({ error: (e as Error).message });
+  }
+};
+
+/** Super-admin: sync KEV + EPSS now, then re-score every tenant graph. */
+export const syncThreatIntelNow = async (_req: Request, res: Response): Promise<void> => {
+  const results = await syncThreatIntel();
+  const tenants = results.some(r => r.status === 'success') ? await scheduleRebuildForAllTenants('threat_intel_sync') : 0;
+  res.json({ results, tenantsRescheduled: tenants });
+};

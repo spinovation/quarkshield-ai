@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useRef, useState } from 'react';
+import { Info } from 'lucide-react';
 
 /** Shared look for the Threat & Risk Graph screens (matches the console's dark/cyan theme). */
 
@@ -58,9 +59,55 @@ export const Chip: React.FC<{ children: React.ReactNode; title?: string; color?:
   }}>{children}</span>
 );
 
-export const SectionTitle: React.FC<{ children: React.ReactNode; right?: React.ReactNode }> = ({ children, right }) => (
+export interface TipContent { what: React.ReactNode; source?: React.ReactNode; how?: React.ReactNode }
+
+/**
+ * Hover / keyboard-focus explanation: what this is, where the data comes from, how it is
+ * computed. Rendered with position:fixed so cards with overflow never clip it.
+ */
+export const InfoTip: React.FC<{ tip: TipContent; size?: number }> = ({ tip, size = 13 }) => {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; above: boolean } | null>(null);
+  const show = () => {
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return;
+    const W = 320;
+    const left = Math.max(8, Math.min(window.innerWidth - W - 8, r.left + r.width / 2 - W / 2));
+    const above = r.bottom + 230 > window.innerHeight;
+    setPos({ left, top: above ? r.top - 8 : r.bottom + 8, above });
+  };
+  const hide = () => setPos(null);
+  const row = (label: string, body: React.ReactNode) => body ? (
+    <div style={{ marginTop: 6 }}>
+      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#7dd3fc', marginBottom: 2 }}>{label}</div>
+      <div>{body}</div>
+    </div>
+  ) : null;
+  return (
+    <span ref={ref} tabIndex={0} role="button" aria-label="What is this?" onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={hide}
+      style={{ display: 'inline-flex', alignItems: 'center', cursor: 'help', color: 'var(--text-muted, #94a3b8)', verticalAlign: 'middle', outline: 'none' }}>
+      <Info size={size} />
+      {pos && (
+        <span role="tooltip" style={{
+          position: 'fixed', left: pos.left, top: pos.top, transform: pos.above ? 'translateY(-100%)' : undefined, zIndex: 1000,
+          width: 320, padding: '10px 12px', borderRadius: 8, background: '#0b1224', border: '1px solid rgba(56,189,248,0.35)',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.5)', color: '#e2e8f0', fontSize: 12, lineHeight: 1.45, fontWeight: 400,
+          textTransform: 'none', letterSpacing: 'normal', whiteSpace: 'normal', textAlign: 'left', pointerEvents: 'none',
+        }}>
+          {row('What it is', tip.what)}
+          {row('Data source', tip.source)}
+          {row('How it is computed', tip.how)}
+        </span>
+      )}
+    </span>
+  );
+};
+
+export const SectionTitle: React.FC<{ children: React.ReactNode; right?: React.ReactNode; info?: TipContent }> = ({ children, right, info }) => (
   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: '0.7rem' }}>
-    <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary, #f8fafc)' }}>{children}</h3>
+    <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 600, color: 'var(--text-primary, #f8fafc)', display: 'flex', alignItems: 'center', gap: 6 }}>
+      {children}{info && <InfoTip tip={info} />}
+    </h3>
     {right}
   </div>
 );
@@ -91,6 +138,24 @@ export const PathRiskBadge: React.FC<{ path: any }> = ({ path }) => (
     <LevelBadge level={path.residual_level || path.level} score={path.residual_score ?? path.path_risk} />
   </span>
 );
+
+/** Exploitation-intelligence badges: CISA KEV, known ransomware use, FIRST EPSS. */
+export const IntelBadges: React.FC<{ kev?: boolean; ransomware?: boolean; epss?: number | null; percentile?: number | null; dueDate?: string | null }> =
+  ({ kev, ransomware, epss, percentile, dueDate }) => {
+    // Two decimals at the extremes so 0.9996 reads 99.96%, not a misleading 100.0%.
+    const pct = (n: number) => `${(n * 100).toFixed(n < 0.01 || n >= 0.995 ? 2 : 1)}%`;
+    const pill = (bg: string, text: string, title: string) => (
+      <span title={title} style={{ background: bg, color: '#fff', fontSize: '0.64rem', fontWeight: 700, borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>{text}</span>
+    );
+    return (
+      <span style={{ display: 'inline-flex', gap: 4, flexWrap: 'wrap', verticalAlign: 'middle' }}>
+        {kev && pill('#b91c1c', 'KEV', `Listed in CISA Known Exploited Vulnerabilities — exploited in the wild${dueDate ? `. CISA remediation due date (federal, BOD 22-01): ${dueDate}` : ''}`)}
+        {ransomware && pill('#7c2d12', 'RANSOMWARE', 'CISA KEV: known use in ransomware campaigns')}
+        {typeof epss === 'number' && pill(epss >= 0.5 ? '#c2410c' : epss >= 0.1 ? '#a16207' : '#334155', `EPSS ${pct(epss)}`,
+          `FIRST EPSS: ${pct(epss)} probability of exploitation activity in the next 30 days${percentile != null ? ` (${Math.round(percentile * 100)}th percentile)` : ''}`)}
+      </span>
+    );
+  };
 
 /** Attack path rendered inline as a chain of hops. */
 export const PathChain: React.FC<{ hops: any[]; onAsset?: (id: string) => void }> = ({ hops, onAsset }) => (

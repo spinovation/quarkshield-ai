@@ -21,7 +21,8 @@ const CONF_ORDER: Confidence[] = ['low', 'medium', 'high'];
 /** Threats that give an attacker an initial foothold. */
 const isEntryThreat = (t: TrThreat, a: TrAsset): boolean => {
   switch (t.rule_id) {
-    case 'TR-01': return a.internet_exposed || a.type === 'endpoint';
+    case 'TR-01':
+    case 'TR-09': return a.internet_exposed || a.type === 'endpoint';
     case 'TR-03': return true;
     case 'TR-05': return a.internet_exposed;
     case 'TR-06': return true;

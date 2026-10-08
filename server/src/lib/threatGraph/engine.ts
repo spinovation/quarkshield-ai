@@ -55,11 +55,17 @@ export const buildThreatGraph = (src: SourceData, remediationState: RemediationS
   for (const v of topo.vulns) {
     const c = compById.get(v.component_id)!;
     const id = `rem:patch:${v.component_id}`;
-    const r = remediations.get(id) || {
+    const r: TrRemediation = remediations.get(id) || {
       id, action_type: 'patch' as RemediationType, target_id: v.component_id, asset_id: v.asset_id,
       action: `Upgrade ${c.name} ${c.version}${v.fixed_version ? ` → ${v.fixed_version}` : ' to a fixed release'}`,
-      command: v.remediation_cmd, risk_ids: [], breaks_paths: 0,
+      command: v.remediation_cmd, risk_ids: [], breaks_paths: 0, kev: false, kev_due_date: null, epss_max: null,
     };
+    // Exploitation intelligence on the remediation: KEV fixes are prioritized and carry CISA's due date.
+    if (v.kev) {
+      r.kev = true;
+      if (v.kev.due_date && (!r.kev_due_date || v.kev.due_date < r.kev_due_date)) r.kev_due_date = v.kev.due_date;
+    }
+    if (v.epss !== null && (r.epss_max === null || r.epss_max === undefined || v.epss > r.epss_max)) r.epss_max = v.epss;
     remediations.set(id, r);
     driverToRem.set(v.id, id);
   }
