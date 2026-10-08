@@ -106,9 +106,9 @@ export const createFleetToken = async (req: Request, res: Response) => {
         // ignore
       }
       if (!assignedLicense) {
-        assignedLicense = assignedTenant === 'SPINOVATIONCORP'
-          ? 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'
-          : `QS-TENANT-${assignedTenant.toUpperCase()}-ACTIVE`;
+        // No real license for this tenant: record a non-credential placeholder. (A
+        // hardcoded real key used to be substituted here and was accepted by ingest.)
+        assignedLicense = `QS-TENANT-${assignedTenant.toUpperCase()}-ACTIVE`;
       }
     }
 
@@ -180,7 +180,7 @@ export const getFleetMachines = async (req: Request, res: Response) => {
         t.id as "tokenId",
         t.name as "groupName",
         COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name, 'Default Fleet') as "tenantName",
-        COALESCE(NULLIF(m.license_key, ''), NULLIF(t.license_key, ''), 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8') as "licenseKey"
+        COALESCE(NULLIF(m.license_key, ''), NULLIF(t.license_key, ''), '') as "licenseKey"
       FROM fleet_machines m
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
     `;
@@ -242,7 +242,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         COALESCE(m.hostname, a.source_ref, 'Remote Asset') as hostname,
         m.os, m.arch,
         COALESCE(a.tenant_name, m.tenant_name, t.tenant_name, t.name, 'Default Fleet') as "tenantName",
-        COALESCE(m.license_key, t.license_key, 'QS-CORP-DEMOCLIENT-6AF00609-C7486296') as "licenseKey"
+        COALESCE(m.license_key, t.license_key, '') as "licenseKey"
       FROM assets a
       LEFT JOIN fleet_machines m ON a.machine_id = m.id
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
@@ -691,6 +691,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Malformed payload: expected hostname.' });
     }
     const safeAssets = Array.isArray(assets) ? assets : [];
+    const MAX_ASSETS_PER_SYNC = 20000;
+    if (safeAssets.length > MAX_ASSETS_PER_SYNC) {
+      return res.status(413).json({ error: `Too many assets in one sync (${safeAssets.length} > ${MAX_ASSETS_PER_SYNC}).` });
+    }
 
     // Tenant canonicalization (BILL-1): the fleet TOKEN is the sole authority on which
     // tenant a device belongs to. We must NEVER trust req.body.tenant_name — a client
@@ -778,6 +782,14 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     } else {
       const hashInput = cleanHwUUID ? `${assignedTenant}-${cleanHwUUID}` : `${assignedTenant}-${cleanHost}`;
       machineId = 'mach-' + crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 20);
+      // The id is derived from tenant+device with a '-' separator, so two different
+      // (tenant, device) pairs can collide. Never let a new enrollment take over a row
+      // that belongs to another tenant (the upsert below would otherwise re-home it and
+      // the asset purge would wipe the victim's inventory).
+      const owner = await pool.query('SELECT tenant_name FROM fleet_machines WHERE id = $1', [machineId]);
+      if (owner.rowCount && String(owner.rows[0].tenant_name || '').toLowerCase() !== assignedTenant.toLowerCase()) {
+        machineId = 'mach-' + crypto.createHash('sha256').update(`${assignedTenant}\u0000${cleanHwUUID || cleanHost}\u0000v2`).digest('hex').substring(0, 20);
+      }
     }
     
     let vulnerableCount = 0;
@@ -934,7 +946,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         last_seen = CURRENT_TIMESTAMP,
         last_sync = CURRENT_TIMESTAMP,
         tenant_name = COALESCE(NULLIF(EXCLUDED.tenant_name, ''), fleet_machines.tenant_name, $14),
-        license_key = COALESCE(NULLIF(EXCLUDED.license_key, ''), fleet_machines.license_key, $15);
+        license_key = COALESCE(NULLIF(EXCLUDED.license_key, ''), fleet_machines.license_key, $15)
+      WHERE REPLACE(LOWER(COALESCE(fleet_machines.tenant_name, '')), ' ', '') IN ('', REPLACE(LOWER(EXCLUDED.tenant_name), ' ', ''));
     `;
     await pool.query(upsertMachineQuery, [
       machineId,
@@ -974,8 +987,14 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     for (const r of prevAssetsRes.rows) prevMap.set(fp(r.name, r.algorithm, r.path || ''), r.is_vulnerable);
     const hadBaseline = prevMap.size > 0; // don't emit "added" drift for the first-ever scan
 
-    // Purge previous scan findings for this machine to keep ONLY the latest sync data
-    await pool.query('DELETE FROM assets WHERE machine_id = $1', [machineId]);
+    // Purge previous scan findings for this machine to keep ONLY the latest sync data.
+    // Done in ONE transaction with the inserts so a concurrent sync (agent retry +
+    // scheduled pull) cannot interleave and leave a half inventory.
+    const txn = await pool.connect();
+    try {
+    await txn.query('BEGIN');
+    await txn.query('SELECT 1 FROM fleet_machines WHERE id = $1 FOR UPDATE', [machineId]);
+    await txn.query('DELETE FROM assets WHERE machine_id = $1', [machineId]);
 
     const assetQuery = `
       INSERT INTO assets (
@@ -1004,12 +1023,19 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     `;
 
     for (const a of processedAssets) {
-      await pool.query(assetQuery, [
+      await txn.query(assetQuery, [
         a.id, a.type, a.name, a.algorithm, a.key_size, a.hash_algorithm,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.machine_id,
         a.path, assignedTenant, 'endpoint_deploy', cleanHost
       ]);
+    }
+    await txn.query('COMMIT');
+    } catch (txErr) {
+      await txn.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      txn.release();
     }
 
     // Ingest Software BOM components into tenant's sbom_components catalog
@@ -1559,7 +1585,10 @@ export const agentFetchCommands = async (req: Request, res: Response) => {
     const m = await pool.query(
       `SELECT id FROM fleet_machines
        WHERE LOWER(tenant_name) = LOWER($1)
-         AND ((hardware_uuid IS NOT NULL AND hardware_uuid <> '' AND hardware_uuid = $2) OR LOWER(hostname) = LOWER($3))
+         AND (
+           ($2 <> '' AND hardware_uuid = $2)
+           OR ($2 = '' AND (hardware_uuid IS NULL OR hardware_uuid = '') AND LOWER(hostname) = LOWER($3))
+         )
        ORDER BY last_seen DESC LIMIT 1`,
       [tenant, hwUuid, host]
     );

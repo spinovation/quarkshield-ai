@@ -139,12 +139,15 @@ cmd_persist() {
   cat > /etc/systemd/system/cf-origin-firewall.service <<UNIT
 [Unit]
 Description=Restrict Docker-published web ports to Cloudflare (cf-origin)
-After=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
 Requires=docker.service
 
 [Service]
 Type=oneshot
-ExecStart=${script_path} apply
+# Retry until the Cloudflare range fetch succeeds: a transient DNS/network failure
+# at boot must not leave the origin wide open (fail-safe, not fail-open).
+ExecStart=/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10 11 12; do ${script_path} apply && exit 0; sleep 10; done; exit 1'
 RemainAfterExit=yes
 
 [Install]

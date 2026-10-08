@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { requireAuth, requireSuperAdmin, requireTenantAccess, requireTenantAdmin, requireIntegrationsEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole } from '../middleware/auth';
+import { requireAuth, requireSuperAdmin, requirePlatformAdmin, requireTenantAccess, requireTenantAdmin, requireIntegrationsEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole, safeEqual } from '../middleware/auth';
 import { exportExecutiveReport, getReportStakeholders, saveReportStakeholders, sendRoadmapReport } from '../controllers/reportController';
-import { twoFactorStatus, twoFactorSetup, twoFactorVerify, twoFactorDisable } from '../controllers/twoFactorController';
+import { twoFactorStatusSafe as twoFactorStatus, twoFactorSetupSafe as twoFactorSetup, twoFactorVerifySafe as twoFactorVerify, twoFactorDisableSafe as twoFactorDisable } from '../controllers/twoFactorController';
 import {
   getFleetTokens,
   createFleetToken,
@@ -138,15 +138,17 @@ const router = Router();
 router.post('/auth/login', unifiedLogin);
 router.post('/auth/forgot-password', forgotPassword);
 router.post('/auth/reset-password', resetPassword);
-router.post('/auth/change-password', changePassword);
+router.post('/auth/change-password', requireAuth, changePassword);
 router.post('/auth/logout', logout);
 router.get('/auth/me', getMe);
 
 // TOTP 2FA management (authenticated)
 router.get('/reports/executive', requireAuth, requireTenantAccess, exportExecutiveReport);
 router.get('/reports/stakeholders', requireAuth, requireTenantAccess, getReportStakeholders);
-router.post('/reports/stakeholders', requireAuth, requireTenantAccess, saveReportStakeholders);
-router.post('/reports/executive/send', requireAuth, requireTenantAccess, sendRoadmapReport);
+// Emailing reports / editing the recipient list is an admin action (any role could
+// otherwise use the platform as a relay to arbitrary addresses).
+router.post('/reports/stakeholders', requireAuth, requireTenantAccess, requireTenantAdmin, saveReportStakeholders);
+router.post('/reports/executive/send', requireAuth, requireTenantAccess, requireTenantAdmin, sendRoadmapReport);
 router.get('/2fa/status', requireAuth, twoFactorStatus);
 router.post('/2fa/setup', requireAuth, twoFactorSetup);
 router.post('/2fa/verify', requireAuth, twoFactorVerify);
@@ -173,9 +175,11 @@ router.post('/support/contact', submitSupportTicket);
 // ==========================================
 // FLEET (authenticated, tenant-scoped)
 // ==========================================
-router.get('/fleet/tokens', requireAuth, requireTenantAccess, getFleetTokens);
-router.post('/fleet/tokens', requireAuth, requireTenantAccess, createFleetToken);
-router.delete('/fleet/tokens/:id', requireAuth, requireTenantAccess, revokeFleetToken);
+// Enrollment tokens are bearer credentials: only tenant admins / platform roles may
+// list, mint, or revoke them.
+router.get('/fleet/tokens', requireAuth, requireTenantAccess, requireTenantAdmin, getFleetTokens);
+router.post('/fleet/tokens', requireAuth, requireTenantAccess, requireTenantAdmin, createFleetToken);
+router.delete('/fleet/tokens/:id', requireAuth, requireTenantAccess, requireTenantAdmin, revokeFleetToken);
 router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines);
 router.delete('/fleet/machines/:id', requireAuth, requireTenantAccess, deleteFleetMachine);
 router.post('/fleet/machines/:machineId/pull', requireAuth, requireTenantAccess, enqueuePullCommand);
@@ -198,39 +202,39 @@ router.get('/cbom/fleet', getPublicFleetPosture);
 // ==========================================
 router.get('/admin/clients', requireSuperAdmin, getClients);
 router.get('/admin/clients/:name/stats', requireSuperAdmin, getClientStats);
-router.post('/admin/clients/deploy-inline', requireSuperAdmin, deployInlineClient);
-router.post('/admin/clients/:name/subscription', requireSuperAdmin, updateSubscription);
-router.post('/admin/clients/:name/plan', requireSuperAdmin, updateClientPlan);
-router.post('/admin/clients', requireSuperAdmin, createClient);
-router.delete('/admin/clients/:id', requireSuperAdmin, deleteClient);
-router.delete('/admin/clients/:name', requireSuperAdmin, deleteClient);
+router.post('/admin/clients/deploy-inline', requirePlatformAdmin, deployInlineClient);
+router.post('/admin/clients/:name/subscription', requirePlatformAdmin, updateSubscription);
+router.post('/admin/clients/:name/plan', requirePlatformAdmin, updateClientPlan);
+router.post('/admin/clients', requirePlatformAdmin, createClient);
+router.delete('/admin/clients/:id', requirePlatformAdmin, deleteClient);
+router.delete('/admin/clients/:name', requirePlatformAdmin, deleteClient);
 
 router.get('/admin/users', requireSuperAdmin, getUsers);
 router.get('/admin/operators', requireSuperAdmin, getOperators);
-router.post('/admin/operators/invite', requireSuperAdmin, inviteOperator);
-router.post('/admin/operators/:id/reset-password', requireSuperAdmin, resetOperatorPassword);
-router.post('/admin/users/:id/role', requireSuperAdmin, toggleUserRole);
-router.post('/admin/users/:id/lock', requireSuperAdmin, toggleUserLock);
-router.post('/admin/users/:id/cmdb', requireSuperAdmin, toggleUserCMDB);
-router.post('/admin/users/:id/playbook', requireSuperAdmin, toggleUserPlaybook);
-router.post('/admin/users/:id/web3', requireSuperAdmin, toggleUserWeb3);
-router.post('/admin/users/:id/reset-password', requireSuperAdmin, resetUserPassword);
-router.delete('/admin/users/:id', requireSuperAdmin, deleteUser);
+router.post('/admin/operators/invite', requirePlatformAdmin, inviteOperator);
+router.post('/admin/operators/:id/reset-password', requirePlatformAdmin, resetOperatorPassword);
+router.post('/admin/users/:id/role', requirePlatformAdmin, toggleUserRole);
+router.post('/admin/users/:id/lock', requirePlatformAdmin, toggleUserLock);
+router.post('/admin/users/:id/cmdb', requirePlatformAdmin, toggleUserCMDB);
+router.post('/admin/users/:id/playbook', requirePlatformAdmin, toggleUserPlaybook);
+router.post('/admin/users/:id/web3', requirePlatformAdmin, toggleUserWeb3);
+router.post('/admin/users/:id/reset-password', requirePlatformAdmin, resetUserPassword);
+router.delete('/admin/users/:id', requirePlatformAdmin, deleteUser);
 
 router.get('/admin/seo-geo-analytics', requireSuperAdmin, getSeoGeoAnalytics);
 router.get('/admin/download-analytics', requireSuperAdmin, getDownloadAnalytics);
 router.get('/admin/system-health', requireSuperAdmin, getSystemHealth);
 
-router.post('/admin/licenses/generate', requireSuperAdmin, generateLicense);
+router.post('/admin/licenses/generate', requirePlatformAdmin, generateLicense);
 router.get('/admin/licenses', requireSuperAdmin, getLicenses);
-router.delete('/admin/licenses/:id', requireSuperAdmin, revokeLicense);
-router.post('/admin/licenses/send-email', requireSuperAdmin, sendLicenseEmail);
-router.post('/admin/clients/send-next-steps-email', requireSuperAdmin, sendNextStepsEmail);
+router.delete('/admin/licenses/:id', requirePlatformAdmin, revokeLicense);
+router.post('/admin/licenses/send-email', requirePlatformAdmin, sendLicenseEmail);
+router.post('/admin/clients/send-next-steps-email', requirePlatformAdmin, sendNextStepsEmail);
 router.get('/admin/settings/mail', requireSuperAdmin, getMailSettings);
-router.post('/admin/settings/mail', requireSuperAdmin, updateMailSettings);
+router.post('/admin/settings/mail', requirePlatformAdmin, updateMailSettings);
 
-router.post('/admin/onboard-partner', requireSuperAdmin, onboardPartnerTenant);
-router.post('/admin/onboard-user', requireSuperAdmin, onboardUser);
+router.post('/admin/onboard-partner', requirePlatformAdmin, onboardPartnerTenant);
+router.post('/admin/onboard-user', requirePlatformAdmin, onboardUser);
 
 // ==========================================
 // IN-TENANT USER MGMT & 2FA POLICY (authenticated, tenant-scoped)
@@ -242,7 +246,7 @@ router.delete('/tenants/:tenant/users/:id', requireAuth, requireTenantAccess, re
 router.post('/tenants/:tenant/users/:id/reset-2fa', requireAuth, requireTenantAccess, requireTenantAdmin, resetTenantUser2FA);
 router.post('/tenants/:tenant/users/:id/reset-password', requireAuth, requireTenantAccess, requireTenantAdmin, resetTenantUserPassword);
 router.get('/tenants/:tenant/2fa-policy', requireAuth, requireTenantAccess, getTenant2FAPolicy);
-router.put('/tenants/:tenant/2fa-policy', requireAuth, requireTenantAccess, updateTenant2FAPolicy);
+router.put('/tenants/:tenant/2fa-policy', requireAuth, requireTenantAccess, requireTenantAdmin, updateTenant2FAPolicy);
 router.get('/tenant/:tenant/portal-data', requireAuth, requireTenantAccess, getTenantPortalData);
 
 // ==========================================
@@ -281,12 +285,17 @@ router.get('/git/ci-gate/runner.sh', (req, res) => getCITemplate({ ...req, param
 // Integrations & Gateways surface (BILL-2). Super roles always see it unlocked.
 // On a tenant pod this resolves from the central plane (BILL-3), with a local fallback.
 router.get('/entitlements', requireAuth, async (req, res) => {
-  if (isSuperRole(req.user?.role)) {
-    res.json({ integrations: true, tier: 'enterprise', seats: 250, super: true });
-    return;
+  try {
+    if (isSuperRole(req.user?.role)) {
+      res.json({ integrations: true, tier: 'enterprise', seats: 250, super: true });
+      return;
+    }
+    const ent = await getTenantEntitlement(req.user?.tenant);
+    res.json({ ...ent, super: false });
+  } catch (e) {
+    console.error('entitlements lookup failed:', e);
+    res.status(500).json({ error: 'Entitlement lookup failed' });
   }
-  const ent = await getTenantEntitlement(req.user?.tenant);
-  res.json({ ...ent, super: false });
 });
 
 // BILL-3: the central plane is the single source of truth for tenant entitlement.
@@ -295,7 +304,7 @@ router.get('/entitlements', requireAuth, async (req, res) => {
 // re-delegates, so there is no cross-pod recursion.
 router.get('/central/entitlement', async (req, res) => {
   const token = process.env.QS_CENTRAL_SERVICE_TOKEN || '';
-  if (!token || req.headers['x-qs-service-token'] !== token) {
+  if (!token || !safeEqual(String(req.headers['x-qs-service-token'] || ''), token)) {
     res.status(401).json({ error: 'Invalid or missing service token' });
     return;
   }
@@ -352,8 +361,8 @@ router.get('/sbom/superadmin-guide', requireSuperAdmin, getSuperAdminGuide);
 router.post('/billing/checkout', createCheckoutSession);
 router.get('/billing/registration-status/:sessionId', getRegistrationStatus);
 router.post('/billing/webhook', handleStripeWebhook);
-router.post('/billing/custom-checkout', requireSuperAdmin, createCustomCheckoutSession);
-router.post('/billing/custom-checkout/:id/send', requireSuperAdmin, sendCustomCheckoutEmail);
+router.post('/billing/custom-checkout', requirePlatformAdmin, createCustomCheckoutSession);
+router.post('/billing/custom-checkout/:id/send', requirePlatformAdmin, sendCustomCheckoutEmail);
 router.get('/billing/custom-checkout/invites', requireSuperAdmin, getCustomCheckoutInvites);
 router.post('/billing/portal-session', requireAuth, requireTenantAccess, createCustomerPortalSession);
 

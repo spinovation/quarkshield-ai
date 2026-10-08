@@ -496,13 +496,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
 
   const processSignInSuccess = (data: any, email: string) => {
     const cleanEmail = email.toLowerCase().trim();
-    const isInternal =
-      cleanEmail.endsWith('@quarkshield.ai') ||
-      cleanEmail.endsWith('@spinovation.com') ||
-      cleanEmail.includes('superadmin') ||
-      cleanEmail === 'sridhargs@gmail.com';
-
-    if (data.accountType === 'superadmin' || isInternal) {
+    // The server's verified accountType is the only thing that decides which
+    // console is launched; nothing is inferred from the email address.
+    if (data.accountType === 'superadmin') {
       localStorage.setItem('quarkshield_user', email);
       sessionStorage.setItem('quarkshield_user', email);
       localStorage.setItem('quarkshield_role', data.role || 'Super Admin');
@@ -515,10 +511,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'INTERNAL USER');
       localStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
       sessionStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
-      if (data.token) {
-        localStorage.setItem('quarkshield_token', data.token);
-        sessionStorage.setItem('quarkshield_token', data.token);
-      }
+      // The session lives in the httpOnly cookie only; never mirror the JWT into
+      // web storage where any XSS could read it.
       setSignInSuccessMsg('Verified Internal Super Admin. Launching Management Console...');
       setTimeout(() => {
         setShowSignInModal(false);
@@ -544,10 +538,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
         sessionStorage.setItem('quarkshield_workspace', ws);
         localStorage.setItem('quarkshield_tenant_slug', ws);
         sessionStorage.setItem('quarkshield_tenant_slug', ws);
-      }
-      if (data.token) {
-        localStorage.setItem('quarkshield_token', data.token);
-        sessionStorage.setItem('quarkshield_token', data.token);
       }
       setSignInSuccessMsg(`Verified ${data.role || 'User'} (${data.customerName || data.workspace || 'Workspace'}). Connecting...`);
       setTimeout(() => {
@@ -600,6 +590,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
         throw new Error(data.error || 'Authentication failed. Please check your credentials.');
       }
 
+      if (!data.success) {
+        // e.g. 200 {success:false, twoFactorRequired:true, message}
+        throw new Error(data.error || data.message || 'Authentication failed.');
+      }
+      if (data.mustChangePassword) {
+        // The login already set the session cookie; the forced change uses it.
+        setForceChangeEmail(loginIdentifier.trim());
+        setForceCurrentPassword(loginPassword);
+        setShowForceChangeModal(true);
+        setShowSignInModal(false);
+        setIsAuthenticating(false);
+        return;
+      }
       processSignInSuccess(data, loginIdentifier.trim());
     } catch (err: any) {
       setSignInError(err.message || 'Unable to connect to authentication authority.');
@@ -642,11 +645,11 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
     }
 
     try {
-      const res = await fetch('/api/auth/force-change-password', {
+      const res = await fetch('/api/auth/change-password', {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          email: forceChangeEmail,
           currentPassword: forceCurrentPassword,
           newPassword: forceNewPassword
         })
@@ -658,9 +661,23 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       }
 
       setForceChangeSuccess('Password successfully established! Signing you in...');
+      // The change-password response carries no identity; sign in again with the
+      // new password so the account type/role come from the server's login answer.
+      const loginRes = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: forceChangeEmail, password: forceNewPassword })
+      });
+      const loginData = await loginRes.json().catch(() => null);
+      if (!loginRes.ok || !loginData?.success) {
+        setForceChangeSuccess(null);
+        setShowForceChangeModal(false);
+        setSignInError('Password updated. Please sign in again with your new password.');
+        return;
+      }
       setTimeout(() => {
-        processSignInSuccess(data, forceChangeEmail);
-      }, 1000);
+        processSignInSuccess(loginData, forceChangeEmail);
+      }, 600);
     } catch (err: any) {
       setForceChangeError(err.message || 'Error changing password.');
     }

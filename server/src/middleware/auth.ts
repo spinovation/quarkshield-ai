@@ -1,6 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import pool from '../config/db';
+
+/** Constant-time string compare for shared secrets / service tokens. */
+export const safeEqual = (a: string, b: string): boolean => {
+  const ba = Buffer.from(String(a || ''));
+  const bb = Buffer.from(String(b || ''));
+  if (ba.length === 0 || ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+};
 
 /**
  * Session authentication and authorization.
@@ -65,9 +74,76 @@ declare global {
   }
 }
 
-const SUPER_ROLES = ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor'];
+// Platform operator roles. All of them may VIEW across tenants (the fleet console);
+// only PLATFORM_ADMIN_ROLES may perform destructive/privilege-changing operations
+// (delete tenants/users, change roles, mint licenses, invite operators, change mail
+// settings, run custom checkouts). Previously every operator role was a full
+// superadmin, so a "read-only" compliance auditor could delete a tenant.
+const PLATFORM_ADMIN_ROLES = ['superadmin', 'root_admin'];
+const SUPER_ROLES = [...PLATFORM_ADMIN_ROLES, 'secops_lead', 'support_engineer', 'compliance_auditor'];
 
 export const isSuperRole = (role?: string): boolean => !!role && SUPER_ROLES.includes(role);
+export const isPlatformAdmin = (role?: string): boolean => !!role && PLATFORM_ADMIN_ROLES.includes(role);
+
+/** Require a platform ADMIN (superadmin/root_admin) — for destructive admin operations. */
+export const requirePlatformAdmin = (req: Request, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (!isPlatformAdmin(req.user.role)) {
+    res.status(403).json({ error: 'Platform administrator access required' });
+    return;
+  }
+  next();
+};
+
+// ---------------------------------------------------------------------------
+// Session revocation. JWTs are stateless, so locking/deleting a user or resetting
+// a password used to leave existing 7-day tokens valid. Every authenticated
+// request now checks the user row: it must still exist, not be locked/disabled,
+// and the token must have been issued AFTER `sessions_revoked_at`. Results are
+// cached briefly to keep this to one indexed PK lookup per user per 30s.
+// ---------------------------------------------------------------------------
+interface UserState { exists: boolean; locked: boolean; revokedAt: number }
+const USER_STATE_TTL_MS = 30 * 1000;
+const userStateCache = new Map<string, { at: number; val: UserState }>();
+
+const tableForAccount = (accountType: string): 'admin_users' | 'tenant_users' =>
+  accountType === 'tenant' ? 'tenant_users' : 'admin_users';
+
+const loadUserState = async (accountType: string, id: string): Promise<UserState> => {
+  const key = `${accountType}:${id}`;
+  const cached = userStateCache.get(key);
+  if (cached && Date.now() - cached.at < USER_STATE_TTL_MS) return cached.val;
+  const table = tableForAccount(accountType);
+  const r = table === 'admin_users'
+    ? await pool.query('SELECT row_locked AS locked, sessions_revoked_at FROM admin_users WHERE id = $1', [id])
+    : await pool.query("SELECT (status IS NOT NULL AND status <> 'active') AS locked, sessions_revoked_at FROM tenant_users WHERE id = $1", [id]);
+  const row = r.rows[0];
+  const val: UserState = row
+    ? { exists: true, locked: !!row.locked, revokedAt: row.sessions_revoked_at ? new Date(row.sessions_revoked_at).getTime() : 0 }
+    : { exists: false, locked: true, revokedAt: 0 };
+  userStateCache.set(key, { at: Date.now(), val });
+  return val;
+};
+
+/** Invalidate the cached state for a user (call after lock/delete/revoke). */
+export const forgetUserState = (accountType: 'tenant' | 'admin', id: string): void => {
+  userStateCache.delete(`${accountType === 'tenant' ? 'tenant' : 'admin'}:${id}`);
+  // admin accountType is 'superadmin' | 'operator' in tokens; clear both spellings.
+  userStateCache.delete(`superadmin:${id}`);
+  userStateCache.delete(`operator:${id}`);
+};
+
+/**
+ * Revoke every existing session for a user. Call on lock, password reset, 2FA
+ * reset, role change, and logout. Tokens issued before now are rejected.
+ */
+export const revokeUserSessions = async (table: 'admin_users' | 'tenant_users', id: string): Promise<void> => {
+  await pool.query(`UPDATE ${table} SET sessions_revoked_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]).catch(() => {});
+  forgetUserState(table === 'tenant_users' ? 'tenant' : 'admin', id);
+};
 
 // Roles a TENANT user may legitimately hold. Critically this list contains NO
 // platform/super role, so a tenant-scoped write can never mint a role that
@@ -134,14 +210,24 @@ const extractToken = (req: Request): string | null => {
   return null;
 };
 
-/** Populate req.user if a valid session is present; never rejects. */
-export const attachUser = (req: Request, _res: Response, next: NextFunction): void => {
+/** Populate req.user if a valid, non-revoked session is present; never rejects. */
+export const attachUser = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   const token = extractToken(req);
   if (token) {
     try {
-      req.user = jwt.verify(token, getSecret()) as SessionUser;
+      const decoded = jwt.verify(token, getSecret()) as SessionUser & { iat?: number };
+      // Server-side liveness check: user must still exist, not be locked/disabled,
+      // and the token must post-date any revocation.
+      const state = await loadUserState(decoded.accountType, decoded.sub);
+      // iat has 1s granularity and is stamped by the Node clock while the revocation
+      // is stamped by Postgres; allow a few seconds of tolerance so a reset-then-login
+      // (or modest clock skew between hosts) does not bounce the user.
+      const issuedAtMs = (decoded.iat || 0) * 1000 + 3000;
+      if (state.exists && !state.locked && issuedAtMs >= state.revokedAt) {
+        req.user = decoded;
+      }
     } catch {
-      // invalid/expired token -> treat as anonymous
+      // invalid/expired token or DB error -> treat as anonymous
     }
   }
   next();

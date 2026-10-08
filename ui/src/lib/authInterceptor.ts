@@ -13,15 +13,20 @@
 const SESSION_KEYS = [
   'quarkshield_user', 'quarkshield_account_type', 'quarkshield_role',
   'quarkshield_customer_id', 'quarkshield_customer_name', 'quarkshield_license_tier',
-  'quarkshield_tenant_slug', 'quarkshield_workspace', 'quarkshield_view_mode',
+  'quarkshield_tenant_slug', 'quarkshield_workspace',
   'quarkshield_token',
 ];
+// Keys cleared on logout that are NOT evidence of a session (view_mode is written on
+// every page load, so it must never count as "had a session").
+const EXTRA_CLEAR_KEYS = ['quarkshield_view_mode', 'quarkshield_platform_operators'];
 
 let redirecting = false;
 
 const isApiUrl = (url: string): boolean => url.includes('/api/');
+// Endpoints where a 401 is an EXPECTED answer (wrong credentials, or simply "not
+// signed in yet" for the session probe) rather than an expired session.
 const isAuthEndpoint = (url: string): boolean =>
-  /\/api\/auth\/(login|forgot-password|reset-password|change-password)\b/.test(url) ||
+  /\/api\/auth\/(login|logout|me|forgot-password|reset-password|change-password)\b/.test(url) ||
   url.includes('/api/2fa/');
 const onResetPage = (): boolean =>
   window.location.pathname.toLowerCase().startsWith('/reset-password');
@@ -55,7 +60,7 @@ export function installAuthInterceptor(): void {
     if (res.status === 401 && isApiUrl(url) && !isAuthEndpoint(url) && !onResetPage() && !redirecting && hadSession) {
       redirecting = true;
       try {
-        SESSION_KEYS.forEach(k => { localStorage.removeItem(k); sessionStorage.removeItem(k); });
+        [...SESSION_KEYS, ...EXTRA_CLEAR_KEYS].forEach(k => { localStorage.removeItem(k); sessionStorage.removeItem(k); });
       } catch { /* ignore storage errors */ }
       // Send the user to the sign-in (landing) page only if not already on it.
       const base = window.location.protocol + '//' + window.location.host + '/';

@@ -13,9 +13,13 @@ interface SupportTicketBody {
   attachments?: Attachment[];
 }
 
-const MAX_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;   // per file
-const MAX_TOTAL_BYTES = 18 * 1024 * 1024;        // all files (under the 20MB body limit)
+const MAX_ATTACHMENTS = 3;
+const MAX_ATTACHMENT_BYTES = 4 * 1024 * 1024;    // per file
+const MAX_TOTAL_BYTES = 6 * 1024 * 1024;         // all files (this is an unauthenticated endpoint)
+const MAX_MESSAGE_CHARS = 10000;
+const ALLOWED_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/plain', 'text/csv', 'application/pdf', 'application/json', 'application/zip']);
+const escapeHtml = (v: unknown): string => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const SUPPORT_INBOX = process.env.SUPPORT_INBOX || 'support@quarkshield.ai';
 
 const isEmail = (s: string) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(s);
@@ -43,17 +47,23 @@ export const submitSupportTicket = async (req: Request, res: Response) => {
     for (const a of atts) {
       const bytes = a.data ? Buffer.byteLength(a.data, 'base64') : (a.size || 0);
       if (bytes > MAX_ATTACHMENT_BYTES) {
-        return res.status(400).json({ error: `Attachment "${a.name}" exceeds the 15 MB limit.` });
+        return res.status(400).json({ error: `Attachment "${String(a.name || '').slice(0, 80)}" exceeds the 4 MB limit.` });
+      }
+      if (!ALLOWED_MIME.has(String(a.type || '').toLowerCase())) {
+        return res.status(400).json({ error: 'Attachment type not allowed. Use images, PDF, text, CSV, JSON or ZIP.' });
       }
       total += bytes;
     }
     if (total > MAX_TOTAL_BYTES) {
-      return res.status(400).json({ error: 'Attachments exceed the 18 MB total limit.' });
+      return res.status(400).json({ error: 'Attachments exceed the 6 MB total limit.' });
+    }
+    if (message.length > MAX_MESSAGE_CHARS) {
+      return res.status(400).json({ error: `Message exceeds ${MAX_MESSAGE_CHARS} characters.` });
     }
 
     const ticketId = `qs_tkt_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
-    const senderName = name?.trim() || (senderEmail.includes('@') ? senderEmail.split('@')[0] : 'Workstation User');
-    const ticketSubject = subject?.trim() || 'Feedback';
+    const senderName = (name?.trim() || (senderEmail.includes('@') ? senderEmail.split('@')[0] : 'Workstation User')).slice(0, 120);
+    const ticketSubject = (subject?.trim() || 'Feedback').replace(/[\r\n]+/g, ' ').slice(0, 200);
     const ticketMessage = message.trim();
 
     // Persist the ticket and each attachment's bytes (tables come from schema.sql).
@@ -75,7 +85,7 @@ export const submitSupportTicket = async (req: Request, res: Response) => {
       to: SUPPORT_INBOX,
       subject: `[Support] ${ticketSubject} — ${ticketId}`,
       text: `New support request ${ticketId}\nFrom: ${senderName} <${senderEmail}>\nSubject: ${ticketSubject}\nAttachments: ${atts.length}\n\n${ticketMessage}`,
-      html: `<p><b>New support request</b> ${ticketId}</p><p>From: ${senderName} &lt;${senderEmail}&gt;<br>Subject: ${ticketSubject}<br>Attachments: ${atts.length}</p><pre style="white-space:pre-wrap">${ticketMessage.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c))}</pre>`,
+      html: `<p><b>New support request</b> ${escapeHtml(ticketId)}</p><p>From: ${escapeHtml(senderName)} &lt;${escapeHtml(senderEmail)}&gt;<br>Subject: ${escapeHtml(ticketSubject)}<br>Attachments: ${atts.length}</p><pre style="white-space:pre-wrap">${escapeHtml(ticketMessage)}</pre>`,
     }).catch(e => console.warn('Support notification email failed:', e?.message));
 
     console.log(`[SUPPORT] ${ticketId} from ${senderEmail} (${atts.length} attachment(s))`);

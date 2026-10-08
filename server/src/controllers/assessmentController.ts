@@ -76,11 +76,17 @@ export const submitAssessment = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Company or organization name is required.' });
     }
 
-    const cleanName = String(name).trim();
-    const cleanCompany = String(company).trim();
-    const cleanRole = role ? String(role).trim() : 'Unspecified';
-    const cleanEnvSize = environmentSize ? String(environmentSize).trim() : 'Unspecified';
-    const cleanInterests = Array.isArray(interests) ? interests : (interests ? [String(interests)] : ['General Assessment']);
+    // Free text from an unauthenticated form: cap lengths and strip line breaks so it
+    // cannot inject mail headers; it is HTML-escaped where rendered below.
+    const plain = (v: unknown, max: number) => String(v ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, max);
+    const cleanName = plain(name, 120);
+    const cleanCompany = plain(company, 160);
+    const cleanRole = role ? plain(role, 120) : 'Unspecified';
+    const cleanEnvSize = environmentSize ? plain(environmentSize, 60) : 'Unspecified';
+    const cleanInterests = (Array.isArray(interests) ? interests : (interests ? [String(interests)] : ['General Assessment']))
+      .slice(0, 12).map(i => plain(i, 80)).filter(Boolean);
+    const h = (v: unknown): string => String(v ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     const cleanTier = tier ? String(tier).trim() : null;
 
     const assessmentId = `pqc_req_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`;
@@ -145,13 +151,13 @@ export const submitAssessment = async (req: Request, res: Response) => {
         <h2 style="color:#0284c7; margin-bottom:1rem;">New Enterprise PQC Assessment Request</h2>
         <table style="width:100%; border-collapse:collapse; font-size:14px;">
           <tr><td style="padding:6px 0; font-weight:bold; width:150px;">Request ID:</td><td><code>${assessmentId}</code></td></tr>
-          <tr><td style="padding:6px 0; font-weight:bold;">Contact Name:</td><td>${cleanName}</td></tr>
-          <tr><td style="padding:6px 0; font-weight:bold;">Work Email:</td><td><a href="mailto:${cleanEmail}">${cleanEmail}</a></td></tr>
-          <tr><td style="padding:6px 0; font-weight:bold;">Company:</td><td>${cleanCompany}</td></tr>
-          <tr><td style="padding:6px 0; font-weight:bold;">Role:</td><td>${cleanRole}</td></tr>
-          <tr><td style="padding:6px 0; font-weight:bold;">Environment Size:</td><td>${cleanEnvSize}</td></tr>
-          <tr><td style="padding:6px 0; font-weight:bold;">Selected Tier:</td><td>${cleanTier || 'None'}</td></tr>
-          <tr><td style="padding:6px 0; font-weight:bold;">Interests:</td><td>${cleanInterests.map(i => `<span style="background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:4px; font-size:12px; margin-right:4px;">${i}</span>`).join(' ')}</td></tr>
+          <tr><td style="padding:6px 0; font-weight:bold;">Contact Name:</td><td>${h(cleanName)}</td></tr>
+          <tr><td style="padding:6px 0; font-weight:bold;">Work Email:</td><td><a href="mailto:${h(cleanEmail)}">${h(cleanEmail)}</a></td></tr>
+          <tr><td style="padding:6px 0; font-weight:bold;">Company:</td><td>${h(cleanCompany)}</td></tr>
+          <tr><td style="padding:6px 0; font-weight:bold;">Role:</td><td>${h(cleanRole)}</td></tr>
+          <tr><td style="padding:6px 0; font-weight:bold;">Environment Size:</td><td>${h(cleanEnvSize)}</td></tr>
+          <tr><td style="padding:6px 0; font-weight:bold;">Selected Tier:</td><td>${h(cleanTier || 'None')}</td></tr>
+          <tr><td style="padding:6px 0; font-weight:bold;">Interests:</td><td>${cleanInterests.map(i => `<span style="background:#e0f2fe; color:#0369a1; padding:2px 8px; border-radius:4px; font-size:12px; margin-right:4px;">${h(i)}</span>`).join(' ')}</td></tr>
         </table>
         <hr style="margin:1.5rem 0; border:none; border-top:1px solid #e2e8f0;" />
         <p style="font-size:12px; color:#64748b;">Delivered automatically by QuarkShield Assessment Flow to ${PQCA_INBOX}</p>
@@ -217,10 +223,10 @@ export const submitAssessment = async (req: Request, res: Response) => {
               Assessment Request Confirmed
             </div>
             <h2 style="margin:0 0 16px 0; font-size:20px; color:#ffffff;">
-              Hello ${cleanName},
+              Hello ${h(cleanName)},
             </h2>
             <p style="color:#cbd5e1; font-size:14px; line-height:1.6; margin-bottom:20px;">
-              Thank you for requesting an Enterprise PQC Readiness Assessment for <strong style="color:#ffffff;">${cleanCompany}</strong>. We have logged your scoping parameters under reference token <code style="background:#1e293b; color:#22d3ee; padding:2px 6px; border-radius:4px; font-size:13px;">${assessmentId}</code>.
+              Thank you for requesting an Enterprise PQC Readiness Assessment for <strong style="color:#ffffff;">${h(cleanCompany)}</strong>. We have logged your scoping parameters under reference token <code style="background:#1e293b; color:#22d3ee; padding:2px 6px; border-radius:4px; font-size:13px;">${assessmentId}</code>.
             </p>
 
             <div style="background:#131c31; border:1px solid #26304f; border-radius:8px; padding:18px 20px; margin-bottom:24px;">
@@ -230,15 +236,15 @@ export const submitAssessment = async (req: Request, res: Response) => {
               <table style="width:100%; border-collapse:collapse; font-size:13px; color:#cbd5e1;">
                 <tr>
                   <td style="padding:5px 0; color:#94a3b8; width:140px;">Organization:</td>
-                  <td style="padding:5px 0; font-weight:600; color:#f1f5f9;">${cleanCompany}</td>
+                  <td style="padding:5px 0; font-weight:600; color:#f1f5f9;">${h(cleanCompany)}</td>
                 </tr>
                 <tr>
                   <td style="padding:5px 0; color:#94a3b8;">Environment Size:</td>
-                  <td style="padding:5px 0; font-weight:600; color:#f1f5f9;">${cleanEnvSize}</td>
+                  <td style="padding:5px 0; font-weight:600; color:#f1f5f9;">${h(cleanEnvSize)}</td>
                 </tr>
                 <tr>
                   <td style="padding:5px 0; color:#94a3b8;">Target Tier:</td>
-                  <td style="padding:5px 0; font-weight:600; color:#22d3ee;">${cleanTier || 'Custom / Enterprise'}</td>
+                  <td style="padding:5px 0; font-weight:600; color:#22d3ee;">${h(cleanTier || 'Custom / Enterprise')}</td>
                 </tr>
                 <tr>
                   <td style="padding:5px 0; color:#94a3b8; vertical-align:top;">Focus Areas:</td>

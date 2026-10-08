@@ -1762,7 +1762,7 @@
       const timeoutId = setTimeout(() => controller.abort(), 120000);
 
       try {
-        const res = await fetch('/api/browse', { signal: controller.signal });
+        const res = await fetch('/api/browse', { method: 'POST', signal: controller.signal });
         clearTimeout(timeoutId);
         if (res.ok) {
           const data = await res.json();

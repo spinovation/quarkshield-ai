@@ -70,23 +70,22 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
   const [noticeType, setNoticeType] = useState<'invite' | 'reset'>('invite');
   const [copiedNoticePassword, setCopiedNoticePassword] = useState(false);
 
-  // Available tenants for Super Admin switcher
-  const tenantList = [
-    { name: 'spinovationcorp', display: 'Spinovation Corp' },
-    { name: 'amberoon', display: 'Amberoon Workspace' },
-    { name: 'algomeld', display: 'Algo Meld MSP' },
-    { name: 'democlient', display: 'Demo Client Workspace' },
-    { name: 'vanguard-logistics', display: 'Vanguard Global Logistics' },
-    { name: 'apex-cyber', display: 'Apex Cyber Defense MSP' },
-    { name: 'cybershield-partners', display: 'CyberShield Managed Security' },
-    { name: 'atrireshma', display: 'Atri Reshma Enterprise' },
-    { name: 'jhrzic', display: 'JHR Zic Labs' },
-    { name: 'digitalbloodline', display: 'Digital Bloodline Workspace' },
-    { name: 'joegodfrey', display: 'Azist Inc Defense Node' },
-    { name: 'kamefinvestment', display: 'Kamef Investment Environment' },
-    { name: 'musamobile', display: 'Musa Mobile Secure Core' },
-    { name: 'sridhargs', display: 'Master Superadmin Control Plane' }
-  ];
+  // Tenants for the Super Admin switcher come from the server (never a hardcoded
+  // customer roster shipped in the public bundle).
+  const [tenantList, setTenantList] = useState<{ name: string; display: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/admin/clients', { credentials: 'include' });
+        if (!res.ok) return;
+        const rows = await res.json();
+        if (cancelled || !Array.isArray(rows)) return;
+        setTenantList(rows.map((r: any) => ({ name: String(r.name || ''), display: String(r.displayName || r.name || '') })).filter(t => t.name));
+      } catch { /* non-super sessions cannot list clients; the switcher stays empty */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Fetch Users for selected tenant
   const fetchTenantUsers = async (tenant: string) => {

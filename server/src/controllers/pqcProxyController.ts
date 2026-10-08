@@ -3,7 +3,7 @@ import pool from '../config/db';
 import crypto from 'crypto';
 import tls from 'tls';
 import net from 'net';
-import { assertPublicHost } from '../utils/ssrf';
+import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
 import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 
 /**
@@ -290,7 +290,8 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
 
     // Internal/loopback upstream: validate config only (do not connect — SSRF).
     let isPublic = true;
-    try { await assertPublicHost(upstream.hostname); } catch { isPublic = false; }
+    let pinnedAddress = upstream.hostname;
+    try { pinnedAddress = await resolvePublicHost(upstream.hostname); } catch { isPublic = false; }
 
     if (!isPublic) {
       return res.json({
@@ -303,7 +304,7 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
 
     // Public upstream: do a real TLS/TCP probe and report what actually negotiated.
     const started = Date.now();
-    const result = await probeUpstream(upstream.hostname, port, upstream.protocol === 'https:');
+    const result = await probeUpstream(upstream.hostname, port, upstream.protocol === 'https:', pinnedAddress);
     await pool.query('UPDATE pqc_proxies SET handshake_count = handshake_count + 1 WHERE id = $1', [id]);
 
     // Record the real measured upstream negotiation into the CBOM inventory.
@@ -337,12 +338,12 @@ export const testProxyHandshake = async (req: Request, res: Response) => {
 type ProbeResult = { reachable: boolean; protocol?: string; cipher?: string; group?: string };
 
 /** Probe an upstream: TLS handshake for https, plain TCP connect otherwise. */
-const probeUpstream = (host: string, port: number, https: boolean): Promise<ProbeResult> =>
+const probeUpstream = (host: string, port: number, https: boolean, connectTo: string = host): Promise<ProbeResult> =>
   new Promise((resolve) => {
     let done = false;
     const finish = (r: ProbeResult) => { if (!done) { done = true; resolve(r); } };
     if (https) {
-      const socket = tls.connect({ host, port, servername: host, rejectUnauthorized: false, timeout: 6000 }, () => {
+      const socket = tls.connect({ host: connectTo, port, servername: host, rejectUnauthorized: false, timeout: 6000 }, () => {
         const proto = socket.getProtocol() || undefined;
         const cipher = socket.getCipher()?.name;
         // The negotiated key-exchange group is what determines quantum exposure
@@ -360,7 +361,7 @@ const probeUpstream = (host: string, port: number, https: boolean): Promise<Prob
       socket.on('error', () => finish({ reachable: false }));
       socket.on('timeout', () => { socket.destroy(); finish({ reachable: false }); });
     } else {
-      const socket = net.connect({ host, port, timeout: 6000 }, () => { socket.end(); finish({ reachable: true }); });
+      const socket = net.connect({ host: connectTo, port, timeout: 6000 }, () => { socket.end(); finish({ reachable: true }); });
       socket.on('error', () => finish({ reachable: false }));
       socket.on('timeout', () => { socket.destroy(); finish({ reachable: false }); });
     }

@@ -72,7 +72,7 @@ func getScanStorageDir() string {
 		localApp := os.Getenv("LOCALAPPDATA")
 		if localApp != "" {
 			dir := filepath.Join(localApp, "QuarkShield", "scans")
-			_ = os.MkdirAll(dir, 0755)
+			_ = os.MkdirAll(dir, 0700)
 			return dir
 		}
 	}
@@ -81,7 +81,7 @@ func getScanStorageDir() string {
 		home = "."
 	}
 	dir := filepath.Join(home, ".quarkshield", "scans")
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0700)
 	return dir
 }
 
@@ -174,7 +174,7 @@ func SaveScanResult(scanType string, targetPath string, scannedFiles int, findin
 	}
 
 	filePath := filepath.Join(dir, id+".json")
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
+	if err := os.WriteFile(filePath, data, 0600); err != nil {
 		return nil, fmt.Errorf("failed to save scan to %s: %w", filePath, err)
 	}
 

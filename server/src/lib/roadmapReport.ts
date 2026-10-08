@@ -118,9 +118,11 @@ const worstSeverity = (a: string, b: string): string => (severityRank(a) >= seve
 
 /** Gather + compute the full roadmap report for a scope. */
 export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapReport> => {
-  const where = scope.collective ? '' : 'WHERE LOWER(COALESCE(tenant_name, \'\')) LIKE LOWER($1)';
-  const params: any[] = scope.collective ? [] : [`%${scope.tenant}%`];
-  const mWhere = scope.collective ? '' : 'WHERE LOWER(tenant_name) LIKE LOWER($1)';
+  // EXACT tenant match. A %substring% LIKE leaked other tenants' totals into a
+  // tenant's executive report whenever its slug was a substring of theirs.
+  const where = scope.collective ? '' : 'WHERE LOWER(COALESCE(tenant_name, \'\')) = LOWER($1)';
+  const params: any[] = scope.collective ? [] : [scope.tenant];
+  const mWhere = scope.collective ? '' : 'WHERE LOWER(tenant_name) = LOWER($1)';
 
   const totalsQ = await pool.query(
     `SELECT COUNT(*)::int AS assets,
@@ -249,10 +251,14 @@ export const generateNarrative = async (r: RoadmapReport): Promise<string> => {
   let geminiKey = (process.env.GEMINI_API_KEY || '').trim();
   let anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
   try {
-    const s = await pool.query("SELECT key, value FROM tenant_settings WHERE key IN ('gemini_api_key','anthropic_api_key')");
+    // Only the report's own tenant may supply a BYO model key; the fleet-wide
+    // (collective) report uses the platform keys.
+    if (!r.collective && r.scopeLabel) {
+    const s = await pool.query("SELECT key, value FROM tenant_settings WHERE LOWER(tenant_name) = LOWER($1) AND key IN ('gemini_api_key','anthropic_api_key')", [r.scopeLabel]);
     for (const row of s.rows) {
       if (row.key === 'gemini_api_key' && row.value?.trim()) geminiKey = row.value.trim();
       if (row.key === 'anthropic_api_key' && row.value?.trim()) anthropicKey = row.value.trim();
+    }
     }
   } catch { /* ignore */ }
 

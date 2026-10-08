@@ -253,16 +253,14 @@ func RunScanWithProgress(ctx context.Context, quick bool, customPath string, onP
 				return nil
 			}
 
-			info, err := d.Info()
-			if err != nil || info.Size() == 0 || info.Size() > 2*1024*1024 { // Skip 0B or >2MB
+			// Bounded, symlink-aware read (see readScanFile): the size and file-type
+			// checks apply to the TARGET and the read is capped, so a multi-GB file,
+			// /dev/zero, or a FIFO can neither exhaust memory nor hang the scan.
+			contentBytes, ok := readScanFile(path)
+			if !ok {
 				return nil
 			}
-
 			scannedFilesCount++
-			contentBytes, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
 			content := string(contentBytes)
 			trimmed := strings.TrimSpace(content)
 			ext := strings.ToLower(filepath.Ext(fileName))
@@ -362,10 +360,11 @@ func RunScanWithProgress(ctx context.Context, quick bool, customPath string, onP
 }
 
 func main() {
+	tightenLocalPermissions()
 	// 1. Define Command-Line Flags
 	pathFlag := flag.String("path", ".", "Target local directory path to scan")
 	serverFlag := flag.String("server", "https://quarkshield.ai", "QuarkShield central server URL")
-	tokenFlag := flag.String("token", "", "QuarkShield.AI Fleet Enrollment Token or License Key")
+	tokenFlag := flag.String("token", "", "QuarkShield.AI Fleet Enrollment Token or License Key (or set QS_TOKEN in the environment)")
 	licenseFlag := flag.String("license", "", "QuarkShield Enterprise/Partner License Key")
 	registerFlag := flag.Bool("register", false, "Register findings in the central fleet database")
 	outputFlag := flag.String("output", "", "Output file path to save report")
@@ -403,6 +402,13 @@ func main() {
 	}
 
 	flag.Parse()
+	// Allow the token to come from the environment so service managers can keep it
+	// in a 0600 EnvironmentFile instead of a world-readable unit file / process args.
+	if *tokenFlag == "" {
+		if envTok := strings.TrimSpace(os.Getenv("QS_TOKEN")); envTok != "" {
+			*tokenFlag = envTok
+		}
+	}
 
 	tokenVal := strings.TrimSpace(*tokenFlag)
 	licVal := strings.TrimSpace(*licenseFlag)

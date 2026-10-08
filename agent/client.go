@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -136,9 +137,8 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 
 	// Enforce TLS for telemetry: never ship the fleet token + findings in
 	// cleartext. Allow plain http only for an explicit loopback/dev server.
-	if lo := strings.ToLower(serverURL); strings.HasPrefix(lo, "http://") &&
-		!strings.Contains(lo, "127.0.0.1") && !strings.Contains(lo, "localhost") && !strings.Contains(lo, "[::1]") {
-		return fmt.Errorf("refusing to send telemetry over plaintext http to %s; use https", serverURL)
+	if err := validateServerURL(serverURL); err != nil {
+		return err
 	}
 
 	payloadObj := FleetPayload{
@@ -180,7 +180,7 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return fmt.Errorf("server returned error code %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -193,6 +193,28 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 	cfg.LastSyncTime = time.Now().UTC().Format(time.RFC3339)
 	_ = SaveEnrollmentConfig(cfg)
 	return nil
+}
+
+// validateServerURL accepts https URLs, or plain http ONLY to a loopback host.
+// The previous check was a substring match ("localhost"), which accepted
+// http://localhost.attacker.com and shipped the fleet token in cleartext.
+func validateServerURL(raw string) error {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Host == "" {
+		return fmt.Errorf("invalid server URL %q", raw)
+	}
+	host := strings.ToLower(u.Hostname())
+	switch u.Scheme {
+	case "https":
+		return nil
+	case "http":
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+			return nil
+		}
+		return fmt.Errorf("refusing to send telemetry over plaintext http to %s; use https", raw)
+	default:
+		return fmt.Errorf("unsupported server URL scheme %q (use https)", u.Scheme)
+	}
 }
 
 // RegisterAssets (legacy fallback)
@@ -221,7 +243,7 @@ func RegisterAssets(serverURL string, assets []AuditResult) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return fmt.Errorf("server returned error code %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -232,6 +254,9 @@ func RegisterAssets(serverURL string, assets []AuditResult) error {
 // to the server's push endpoint (POST /api/scan/adcs/report). The fleet
 // enrollment token authenticates and resolves the tenant server-side.
 func ReportADCS(serverURL string, token string, caName string, assets []ADCSAsset) error {
+	if err := validateServerURL(serverURL); err != nil {
+		return err
+	}
 	cleanServer := strings.TrimRight(serverURL, "/")
 	body := map[string]interface{}{
 		"caName": caName,
@@ -265,6 +290,11 @@ func ReportADCS(serverURL string, token string, caName string, assets []ADCSAsse
 // machine (DEF-38). The fleet token authenticates and resolves the tenant; the
 // server returns the machine's pending commands and marks them dispatched.
 func FetchAgentCommands(serverURL string, token string) ([]string, error) {
+	// The fleet token travels with this request: never send it to a plaintext or
+	// non-loopback http URL, even one persisted by an older (laxer) build.
+	if err := validateServerURL(serverURL); err != nil {
+		return nil, err
+	}
 	cleanServer := strings.TrimRight(serverURL, "/")
 	hostname, _ := os.Hostname()
 	body := map[string]string{
@@ -293,7 +323,7 @@ func FetchAgentCommands(serverURL string, token string) ([]string, error) {
 			Command string `json:"command"`
 		} `json:"commands"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&parsed); err != nil {
 		return nil, err
 	}
 	out := []string{}

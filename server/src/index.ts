@@ -2,11 +2,24 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
+import { rateLimit, ipKeyGenerator } from 'express-rate-limit';
+import crypto from 'crypto';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
-import { initDb } from './config/db';
+import pool, { initDb } from './config/db';
+
+// A rejected promise inside an Express 4 async handler is not caught by Express and
+// would terminate the Node 15+ process. Log it and keep serving.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  // State is undefined after an uncaught exception: log and let the supervisor
+  // (docker restart: unless-stopped) bring up a clean process.
+  console.error('Uncaught exception, exiting:', err);
+  setTimeout(() => process.exit(1), 100).unref();
+});
 import { bootstrapAdmin } from './config/bootstrap';
 import routes from './routes/routes';
 import { attachUser } from './middleware/auth';
@@ -26,10 +39,15 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
+const isProduction = process.env.NODE_ENV === 'production';
+if (isProduction && allowedOrigins.length === 0) {
+  console.warn('ALLOWED_ORIGINS is not set: cross-origin browser requests will be refused (same-origin only).');
+}
 app.use(cors({
   origin: (origin, cb) => {
     if (!origin) return cb(null, true); // same-origin / curl
-    if (allowedOrigins.length === 0) return cb(null, true);
+    // Never reflect an arbitrary origin with credentials in production.
+    if (allowedOrigins.length === 0) return cb(null, !isProduction);
     return cb(null, allowedOrigins.includes(origin));
   },
   credentials: true,
@@ -50,18 +68,54 @@ app.use(attachUser);
 
 // Rate limit authentication endpoints to blunt credential stuffing / brute force
 // and password-reset abuse (DEF-04).
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
+// Each concern gets its OWN limiter instance (separate buckets): a NAT'd office
+// submitting support forms must not consume the login budget, and a fleet of agents
+// behind one egress IP must not throttle each other.
+const perIpLimiter = (max: number, windowMs: number, message: string) => rateLimit({
+  windowMs,
+  max,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many attempts. Please wait a few minutes and try again.' },
+  message: { error: message },
 });
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/forgot-password', authLimiter);
-app.use('/api/auth/reset-password', authLimiter);
-app.use('/api/auth/change-password', authLimiter);
-app.use('/api/scan/license/verify', authLimiter);
+const FIFTEEN_MIN = 15 * 60 * 1000;
+const TEN_MIN = 10 * 60 * 1000;
+const tooMany = 'Too many attempts. Please wait a few minutes and try again.';
+app.use('/api/auth/login', perIpLimiter(30, FIFTEEN_MIN, tooMany));
+app.use('/api/auth/forgot-password', perIpLimiter(15, FIFTEEN_MIN, tooMany));
+app.use('/api/auth/reset-password', perIpLimiter(15, FIFTEEN_MIN, tooMany));
+app.use('/api/auth/change-password', perIpLimiter(15, FIFTEEN_MIN, tooMany));
+app.use('/api/2fa', perIpLimiter(30, FIFTEEN_MIN, tooMany));
+app.use('/api/scan/license/verify', perIpLimiter(120, FIFTEEN_MIN, tooMany));
+app.use('/api/billing/checkout', perIpLimiter(20, FIFTEEN_MIN, tooMany));
+app.use('/api/assessment', perIpLimiter(10, FIFTEEN_MIN, tooMany));
+app.use('/api/support', perIpLimiter(10, FIFTEEN_MIN, tooMany));
+app.use('/api/probe', perIpLimiter(60, TEN_MIN, 'Too many probe requests. Please slow down.'));
+app.use('/api/git/ci-gate/evaluate', perIpLimiter(120, TEN_MIN, 'Too many CI gate evaluations. Please slow down.'));
+
+// Agent endpoints: keyed by the fleet token / license key when one is presented
+// (so hundreds of machines behind one corporate NAT each get their own bucket, and a
+// single stolen token still cannot hammer the database), else by source IP.
+const agentKey = (req: express.Request): string => {
+  const auth = req.headers.authorization;
+  const bearer = auth && auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  const tok = String(req.headers['x-connector-token'] || bearer || req.body?.token || req.body?.licenseKey || req.body?.license_key || '').trim();
+  if (tok) return 'tok:' + crypto.createHash('sha256').update(tok).digest('hex').slice(0, 24);
+  return 'ip:' + ipKeyGenerator(req.ip || '');
+};
+const agentLimiter = rateLimit({
+  windowMs: TEN_MIN,
+  // ~one poll every 2 min + syncs per machine; a token is shared by a whole fleet,
+  // so allow for large fleets while still bounding abuse.
+  max: 3000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: agentKey,
+  message: { error: 'Too many agent requests for this token. Please slow down.' },
+});
+app.use('/api/scan/agent/ingest', agentLimiter);
+app.use('/api/scan/agent/commands', agentLimiter);
+app.use('/api/scan/adcs/report', agentLimiter);
 
 // Determine and serve compiled agent downloads
 const possibleDownloadPaths = [
@@ -102,9 +156,23 @@ app.use('/api', (req, res, next) => {
 });
 app.use('/api', routes);
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'desktop-pqc-scanner-api', version: '2.0.0' });
+// Health check: reports the real database state so deploys and uptime monitors
+// cannot see "ok" while every API call is failing.
+app.get('/health', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok', database: 'ok', service: 'desktop-pqc-scanner-api', version: '2.0.0' });
+  } catch (e) {
+    res.status(503).json({ status: 'degraded', database: 'unreachable', service: 'desktop-pqc-scanner-api', version: '2.0.0' });
+  }
+});
+
+// Final API error handler: never leak stack traces or internal messages to clients,
+// and make sure an async handler that throws cannot leave the request hanging.
+app.use('/api', (err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled API error:', err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'Internal server error' });
 });
 
 // Determine and serve React frontend UI
@@ -188,6 +256,14 @@ const startServers = () => {
     console.log('ℹ️ No SSL certificates detected; running HTTP-only mode (Cloudflare Flexible mode).');
   }
 };
+
+// Warn loudly when secondary encryption keys fall back to JWT_SECRET: rotating the
+// JWT secret would then make every stored 2FA secret and connector credential
+// undecryptable. Set dedicated keys before go-live.
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.TWO_FACTOR_ENC_KEY) console.warn('TWO_FACTOR_ENC_KEY is unset; TOTP secrets are encrypted with JWT_SECRET. Set a dedicated key.');
+  if (!process.env.CONNECTOR_ENC_KEY) console.warn('CONNECTOR_ENC_KEY is unset; connector credentials are encrypted with JWT_SECRET. Set a dedicated key.');
+}
 
 // Initialize database & start server
 initDb()

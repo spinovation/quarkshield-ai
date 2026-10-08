@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -44,6 +46,9 @@ type ScanState struct {
 	ScanType     string        `json:"scanType,omitempty"`
 	Findings     []AuditResult `json:"findings,omitempty"`
 	cancelFunc   context.CancelFunc
+	// generation increments on every start; a finishing goroutine only publishes
+	// its result if it is still the current generation (cancel-then-start race).
+	generation uint64
 }
 
 var (
@@ -144,6 +149,7 @@ func unregisterWindowsUninstall() {
 //   - Sec-Fetch-Site (sent by modern browsers) must be same-origin/none; any
 //     cross-site or same-site request (fetch, form, img, navigation) is refused.
 //   - If an Origin header is present it must be this exact local origin.
+//
 // No permissive CORS headers are ever sent, so cross-origin reads are blocked.
 func localGuard(next http.Handler, port int, apiToken string) http.Handler {
 	allowedHosts := map[string]bool{
@@ -170,18 +176,15 @@ func localGuard(next http.Handler, port int, apiToken string) http.Handler {
 				http.Error(w, "Forbidden (origin)", http.StatusForbidden)
 				return
 			}
-			// State-changing calls require the per-install token (set as a cookie
-			// when the dashboard page is served, or read from the 0600 config).
-			// This stops a non-browser local process — which omits Sec-Fetch-Site
-			// and the cookie — from driving sync/enrollment/uninstall/probe.
-			switch r.Method {
-			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
-				if apiToken != "" {
-					c, err := r.Cookie("qs_local_token")
-					if err != nil || c.Value != apiToken {
-						http.Error(w, "Forbidden (token)", http.StatusForbidden)
-						return
-					}
+			// EVERY /api call requires the per-install token (set as a cookie when the
+			// dashboard page is served, or read from the 0600 config). GET responses
+			// include the enrollment token and license, so reads are gated too: a
+			// non-browser local process without the cookie gets nothing.
+			if apiToken != "" {
+				c, err := r.Cookie("qs_local_token")
+				if err != nil || subtle.ConstantTimeCompare([]byte(c.Value), []byte(apiToken)) != 1 {
+					http.Error(w, "Forbidden (token)", http.StatusForbidden)
+					return
 				}
 			}
 		}
@@ -194,7 +197,12 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 	// gracefully tell the previous background process to exit so the new version takes over immediately.
 	checkURL := fmt.Sprintf("http://127.0.0.1:%d/api/status", preferredPort)
 	client := http.Client{Timeout: 800 * time.Millisecond}
-	resp, errCheck := client.Get(checkURL)
+	existingTok := LoadEnrollmentConfig().LocalAPIToken
+	checkReq, _ := http.NewRequest(http.MethodGet, checkURL, nil)
+	if existingTok != "" {
+		checkReq.AddCookie(&http.Cookie{Name: "qs_local_token", Value: existingTok})
+	}
+	resp, errCheck := client.Do(checkReq)
 	if errCheck == nil && resp.StatusCode == http.StatusOK {
 		_ = resp.Body.Close()
 		exitURL := fmt.Sprintf("http://127.0.0.1:%d/api/exit", preferredPort)
@@ -202,8 +210,8 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		// (both instances read it from the same 0600 config).
 		if req, e := http.NewRequest(http.MethodPost, exitURL, nil); e == nil {
 			req.Header.Set("Content-Type", "application/json")
-			if tok := LoadEnrollmentConfig().LocalAPIToken; tok != "" {
-				req.AddCookie(&http.Cookie{Name: "qs_local_token", Value: tok})
+			if existingTok != "" {
+				req.AddCookie(&http.Cookie{Name: "qs_local_token", Value: existingTok})
 			}
 			_, _ = client.Do(req)
 		}
@@ -362,12 +370,18 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		currentScanState.ScanType = req.Mode
 		currentScanState.Findings = nil
 		currentScanState.cancelFunc = cancel
+		currentScanState.generation++
+		myGen := currentScanState.generation
 		currentScanState.Unlock()
 
 		go func(quick bool, targetPath string, mode string, scanCtx context.Context) {
 			defer func() {
 				if r := recover(); r != nil {
 					currentScanState.Lock()
+					if currentScanState.generation != myGen {
+						currentScanState.Unlock()
+						return
+					}
 					currentScanState.Running = false
 					currentScanState.Error = fmt.Sprintf("Audit engine recovered from unexpected fault: %v", r)
 					currentScanState.CurrentPath = "Scan terminated safely."
@@ -377,6 +391,10 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 
 			progressCb := func(curPath string, scanned int, found int) {
 				currentScanState.Lock()
+				if currentScanState.generation != myGen {
+					currentScanState.Unlock()
+					return
+				}
 				currentScanState.CurrentPath = curPath
 				currentScanState.ScannedFiles = scanned
 				currentScanState.FoundAssets = found
@@ -395,6 +413,10 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 
 			currentScanState.Lock()
 			defer currentScanState.Unlock()
+			if currentScanState.generation != myGen {
+				// A newer scan was started after this one was canceled; discard.
+				return
+			}
 			currentScanState.Running = false
 
 			if err != nil {
@@ -447,6 +469,10 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 	})
 
 	mux.HandleFunc("/api/scan/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		currentScanState.Lock()
 		if currentScanState.cancelFunc != nil {
 			currentScanState.cancelFunc()
@@ -808,23 +834,35 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost {
 			var newCfg EnrollmentConfig
-			_ = json.NewDecoder(r.Body).Decode(&newCfg)
+			_ = json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&newCfg)
 			cfg := LoadEnrollmentConfig()
 			if newCfg.ServerURL != "" {
-				cfg.ServerURL = strings.TrimSpace(newCfg.ServerURL)
+				srv := strings.TrimSpace(newCfg.ServerURL)
+				if err := validateServerURL(srv); err != nil {
+					w.WriteHeader(http.StatusBadRequest)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+					return
+				}
+				cfg.ServerURL = strings.TrimRight(srv, "/")
 			}
 			if newCfg.Token != "" {
 				cfg.Token = strings.TrimSpace(newCfg.Token)
 			}
 			cfg.AutoSyncEnabled = newCfg.AutoSyncEnabled
 			if newCfg.SyncIntervalMin > 0 {
+				if newCfg.SyncIntervalMin < 5 {
+					newCfg.SyncIntervalMin = 5
+				}
 				cfg.SyncIntervalMin = newCfg.SyncIntervalMin
 			}
 			_ = SaveEnrollmentConfig(cfg)
+			cfg.LocalAPIToken = "" // never expose the API gate token over HTTP
 			_ = json.NewEncoder(w).Encode(cfg)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(LoadEnrollmentConfig())
+		cfg := LoadEnrollmentConfig()
+		cfg.LocalAPIToken = ""
+		_ = json.NewEncoder(w).Encode(cfg)
 	})
 
 	// 5. Download CycloneDX 1.6 CBOM JSON
@@ -847,6 +885,10 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 	// 6. Graceful Exit API
 	var server *http.Server
 	mux.HandleFunc("/api/exit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "shutting_down"})
 		go func() {
@@ -860,6 +902,10 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 
 	// 7. Complete Uninstall API
 	mux.HandleFunc("/api/uninstall", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		unregisterWindowsUninstall()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "uninstalled"})
@@ -890,6 +936,10 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 
 	// 8. Native Folder Picker API
 	mux.HandleFunc("/api/browse", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		selectedPath := pickFolderOS()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{"path": selectedPath})

@@ -6,6 +6,21 @@ import (
 )
 
 func TestLicenseLifecycle(t *testing.T) {
+	// Isolate ALL on-disk state: never touch the developer's real ~/.quarkshield.
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	t.Setenv("LOCALAPPDATA", tmp)
+	// Offline activation is only honoured for builds with an injected (non-default)
+	// signing secret; emulate such a build for the lifecycle test.
+	prev := LicenseSigningSecret
+	LicenseSigningSecret = "unit-test-signing-secret"
+	t.Cleanup(func() { LicenseSigningSecret = prev })
+	// No network in unit tests: point at a closed port so verification is a
+	// transport failure (which permits the offline path), not a server rejection.
+	prevURL := licenseServerURL
+	licenseServerURL = "http://127.0.0.1:1"
+	t.Cleanup(func() { licenseServerURL = prevURL })
+
 	// 1. Test Default Trial Initialization
 	lic := InitLicense()
 	if lic.Tier != "trial" {

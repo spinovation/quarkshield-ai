@@ -31,7 +31,8 @@ def load_env_file(filepath):
 # Automatically check for local .env.signing
 script_dir = os.path.dirname(os.path.abspath(__file__))
 load_env_file(os.path.join(script_dir, ".env.signing"))
-load_env_file(os.path.join(script_dir, "../.env"))
+# NOTE: deliberately NOT loading ../.env — that is the SERVER's production secret
+# file (JWT/DB/Stripe) and has no business in a code-signing process.
 
 def get_azure_token(tenant_id, client_id, client_secret):
     url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
