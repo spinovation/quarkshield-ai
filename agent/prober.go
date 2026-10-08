@@ -110,16 +110,15 @@ func ProbeEndpoint(rawTarget string) ([]AuditResult, error) {
 			Description:          fmt.Sprintf("🚨 Outbound TLS socket to %s fell back to classical %s. Traffic is vulnerable to recording and retroactive decryption.", host, curveName),
 			Recommendation:       "Configure TLS reverse proxy / edge termination to negotiate X25519MLKEM768 hybrid KEM to eliminate active HNDL exposure.",
 			RemediationSteps: []string{
-				"Update server TLS configuration (Nginx, Envoy, Cloudflare) to enable Post-Quantum supported_groups.",
-				"Mandate TLS 1.3 with X25519MLKEM768 (curve ID 0x11ec) hybrid key share.",
-				"In Java / Spring Boot services, autowire PqcStarterLib HybridHandshakeOrchestrator to secure inter-service communication.",
+				"Update the server/edge TLS configuration (Nginx, Envoy, Cloudflare, HAProxy) to offer Post-Quantum supported_groups.",
+				"Mandate TLS 1.3 with the hybrid X25519MLKEM768 (ML-KEM, FIPS 203) key-exchange group.",
+				"Confirm the serving stack supports the hybrid group (OpenSSL 3.2+ / BoringSSL / recent Go); front any backend that cannot be upgraded with a PQC-terminating reverse proxy.",
+				"Verify on the live connection that the negotiated key-exchange group is actually the hybrid PQC one — not just that it is configured.",
 			},
-			CodeSnippet: `// Spring Boot (PqcStarterLib) Remediation: NIST FIPS 203 ML-KEM Session Key Exchange
-@Autowired
-private HybridHandshakeOrchestrator pqcHandshake;
-
-HandshakeSession session = pqcHandshake.establishHybridSession("` + host + `");
-byte[] sharedSecret = session.getDerivedKey(); // HKDF(ECDHE-P384 || Kyber-768)`,
+			CodeSnippet: `# Verify the LIVE TLS session negotiates a hybrid PQC key-exchange group (not classical):
+openssl s_client -connect ` + target + ` -servername ` + host + ` -tls1_3 </dev/null 2>/dev/null \
+  | grep -E "(Protocol|Cipher|Server Temp Key)"
+#   "Server Temp Key: X25519MLKEM768" confirms the hybrid ML-KEM (FIPS 203) group is in use.`,
 			Explainer:            "Classical ECDH key exchange is completely solvable by Shor's Algorithm running on a future quantum computer.",
 			ComplianceViolations: []string{"NIST FIPS 203", "NSA CNSA 2.0", "EO 14028"},
 		})
