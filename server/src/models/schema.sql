@@ -710,8 +710,7 @@ CREATE TABLE IF NOT EXISTS pqc_assessments (
 );
 CREATE INDEX IF NOT EXISTS idx_pqc_assessments_email ON pqc_assessments(email);
 
--- =========================================================================
--- SECURITY HARDENING (2026-10-07)
+-- ==================================================================-- SECURITY HARDENING (2026-10-07)
 -- =========================================================================
 -- Server-side session revocation: tokens issued before this timestamp are rejected.
 ALTER TABLE admin_users  ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMP WITH TIME ZONE;
@@ -742,3 +741,173 @@ CREATE INDEX IF NOT EXISTS idx_tenant_settings_key   ON tenant_settings (LOWER(t
 -- One account per (tenant, email) regardless of case. Lookups already use LOWER();
 -- without this a second row with different casing could shadow the first.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_users_ci ON tenant_users (LOWER(tenant_name), LOWER(email));
+=======
+
+-- =========================================================================
+-- THREAT & RISK GRAPH (Risk Assurance plan, Phase 1)
+-- Derived tables (tr_*) are fully recomputed per tenant by lib/threatGraph/store.ts
+-- from fleet / CBOM / SBOM / git / PKI / proxy data; relationships are inferred,
+-- never entered manually. tenant_key = lowercase alphanumerics of the tenant name.
+-- State tables (remediation state, context overrides, risk→control links, rebuild
+-- runs) are NOT recomputed and survive every rebuild via stable object ids.
+-- =========================================================================
+
+-- Plan add-ons (e.g. 'risk_assurance' = Threat & Risk Graph + Continuous Monitoring + RMF)
+ALTER TABLE admin_clients ADD COLUMN IF NOT EXISTS plan_addons TEXT[] DEFAULT '{}';
+ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS plan_addons TEXT[] DEFAULT '{}';
+-- Stripe subscription that pays for the Risk Assurance add-on (separate from the base plan subscription)
+ALTER TABLE admin_clients ADD COLUMN IF NOT EXISTS risk_assurance_subscription_id VARCHAR(100);
+
+CREATE TABLE IF NOT EXISTS tr_assets (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(300) NOT NULL,
+  type VARCHAR(40) NOT NULL,
+  name VARCHAR(500) NOT NULL,
+  environment VARCHAR(40),
+  criticality SMALLINT NOT NULL,
+  data_classification VARCHAR(20) NOT NULL,
+  internet_exposed BOOLEAN NOT NULL DEFAULT false,
+  context_origin VARCHAR(20) NOT NULL DEFAULT 'inferred',
+  source_table VARCHAR(60),
+  source_id VARCHAR(300),
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+CREATE TABLE IF NOT EXISTS tr_relationships (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(700) NOT NULL,
+  from_asset VARCHAR(300) NOT NULL,
+  to_asset VARCHAR(300) NOT NULL,
+  kind VARCHAR(40) NOT NULL,
+  confidence VARCHAR(10) NOT NULL,
+  rule_id VARCHAR(20) NOT NULL,
+  data JSONB NOT NULL,
+  first_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_key, id)
+);
+
+-- Component / vulnerability / crypto-finding projections (node_type = component | vuln | crypto)
+CREATE TABLE IF NOT EXISTS tr_nodes (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(400) NOT NULL,
+  node_type VARCHAR(20) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+CREATE INDEX IF NOT EXISTS idx_tr_nodes_asset ON tr_nodes (tenant_key, asset_id);
+
+CREATE TABLE IF NOT EXISTS tr_threats (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(400) NOT NULL,
+  rule_id VARCHAR(20) NOT NULL,
+  category VARCHAR(60) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  likelihood SMALLINT NOT NULL,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+CREATE TABLE IF NOT EXISTS tr_attack_paths (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(100) NOT NULL,
+  entry_threat_id VARCHAR(400) NOT NULL,
+  goal_asset_id VARCHAR(300) NOT NULL,
+  path_risk SMALLINT NOT NULL,
+  level VARCHAR(10) NOT NULL,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+CREATE TABLE IF NOT EXISTS tr_risks (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(500) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  threat_id VARCHAR(400) NOT NULL,
+  attack_path_id VARCHAR(100),
+  likelihood SMALLINT NOT NULL,
+  impact SMALLINT NOT NULL,
+  inherent_score SMALLINT NOT NULL,
+  residual_score SMALLINT NOT NULL,
+  level VARCHAR(10) NOT NULL,
+  priority INTEGER NOT NULL,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+CREATE TABLE IF NOT EXISTS tr_remediations (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(500) NOT NULL,
+  action_type VARCHAR(30) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  breaks_paths INTEGER NOT NULL DEFAULT 0,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+-- STRIDE / ATT&CK / kill-chain tags on core objects (PASTA and others attach the same way)
+CREATE TABLE IF NOT EXISTS tr_framework_tags (
+  tenant_key VARCHAR(255) NOT NULL,
+  object_type VARCHAR(20) NOT NULL,
+  object_id VARCHAR(500) NOT NULL,
+  framework VARCHAR(20) NOT NULL,
+  ref VARCHAR(60) NOT NULL,
+  rule_id VARCHAR(20),
+  rationale TEXT,
+  PRIMARY KEY (tenant_key, object_type, object_id, framework, ref)
+);
+CREATE INDEX IF NOT EXISTS idx_tr_tags_ref ON tr_framework_tags (tenant_key, framework, ref);
+
+-- ---- Persistent state (survives rebuilds) ----
+CREATE TABLE IF NOT EXISTS tr_remediation_state (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(500) NOT NULL,
+  owner VARCHAR(255),
+  target_date DATE,
+  status VARCHAR(20) NOT NULL DEFAULT 'open', -- open | in_progress | done | verified | risk_accepted
+  notes TEXT,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_key, id)
+);
+
+-- Admin corrections to INFERRED context only (criticality / classification / environment).
+-- Relationships are never entered manually.
+CREATE TABLE IF NOT EXISTS tr_context_overrides (
+  tenant_key VARCHAR(255) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  criticality SMALLINT,
+  data_classification VARCHAR(20),
+  environment VARCHAR(40),
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_key, asset_id)
+);
+
+-- RMF / MGC attach point: risk → NIST SP 800-53 control (populated in the RMF phase).
+CREATE TABLE IF NOT EXISTS tr_risk_controls (
+  tenant_key VARCHAR(255) NOT NULL,
+  risk_id VARCHAR(500) NOT NULL,
+  control_ref VARCHAR(40) NOT NULL,          -- e.g. SC-8, SI-2, IA-5(1)
+  framework VARCHAR(40) NOT NULL DEFAULT 'nist-800-53r5',
+  project_id VARCHAR(100),
+  origin VARCHAR(20) NOT NULL DEFAULT 'rule',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_key, risk_id, control_ref, framework)
+);
+
+-- Every rebuild is recorded: the time series that Continuous Monitoring trends and alerts on.
+CREATE TABLE IF NOT EXISTS tr_rebuild_runs (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_key VARCHAR(255) NOT NULL,
+  tenant_name VARCHAR(255),
+  trigger VARCHAR(40) NOT NULL,
+  status VARCHAR(20) NOT NULL,                -- success | error
+  stats JSONB,
+  error TEXT,
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  finished_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_tr_runs_tenant ON tr_rebuild_runs (tenant_key, started_at DESC);

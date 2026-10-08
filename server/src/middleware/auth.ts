@@ -359,7 +359,25 @@ export interface EntitlementRecord {
   integrations: boolean;
   tier: string;
   seats: number;
+  /** Plan add-ons held via the client record or an active license (e.g. 'risk_assurance'). */
+  addons?: string[];
+  /** Risk Assurance plan: Threat & Risk Graph, Continuous Monitoring, RMF. */
+  riskAssurance?: boolean;
+  /** Tenant is on an Enterprise-class tier and may subscribe to Risk Assurance. */
+  riskAssuranceEligible?: boolean;
 }
+
+/** Add-on that unlocks Threat & Risk Graph, Continuous Monitoring and RMF. */
+export const RISK_ASSURANCE_ADDON = 'risk_assurance';
+
+/**
+ * Risk Assurance is sold per tenant per month, ONLY to Enterprise-class tenants
+ * (enterprise subscription, or corporate/corp/partner enterprise license keys). It is
+ * not bundled: the add-on must be subscribed, and it lapses if the tenant drops below
+ * an Enterprise-class tier.
+ */
+export const ENTERPRISE_TIERS = new Set(['enterprise', 'corporate', 'corp', 'partner']);
+export const isEnterpriseTier = (tier?: string | null): boolean => ENTERPRISE_TIERS.has(String(tier || '').toLowerCase());
 
 // BILL-3: the CENTRAL plane is the single source of truth for a tenant's plan.
 // A tenant pod (separate DB) resolves entitlement by asking central and caching the
@@ -372,7 +390,7 @@ const entCache = new Map<string, { at: number; val: EntitlementRecord }>();
 
 /** Resolve a tenant's entitlement from THIS instance's own database. */
 export const localTenantEntitlement = async (tenant?: string | null): Promise<EntitlementRecord> => {
-  if (!tenant) return { integrations: false, tier: 'none', seats: 0 };
+  if (!tenant) return { integrations: false, tier: 'none', seats: 0, addons: [], riskAssurance: false, riskAssuranceEligible: false };
   try {
     const r = await pool.query(
       `SELECT
@@ -387,7 +405,17 @@ export const localTenantEntitlement = async (tenant?: string | null): Promise<En
          (SELECT subscription_tier FROM admin_clients
             WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-',''))) LIMIT 1) AS cli_tier,
          (SELECT mca_limit FROM admin_clients
-            WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-',''))) LIMIT 1) AS cli_seats`,
+            WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-',''))) LIMIT 1) AS cli_seats,
+         ARRAY(
+           SELECT DISTINCT a FROM (
+             SELECT UNNEST(plan_addons) AS a FROM admin_clients
+              WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-','')))
+             UNION
+             SELECT UNNEST(plan_addons) AS a FROM admin_licenses
+              WHERE (LOWER(tenant_name)=LOWER($1) OR LOWER(REPLACE(tenant_name,' ',''))=LOWER(REPLACE($1,' ','')))
+                AND status <> 'revoked' AND (expires_at IS NULL OR expires_at > NOW())
+           ) s WHERE a IS NOT NULL
+         ) AS addons`,
       [tenant]
     );
     const row = r.rows[0] || {};
@@ -398,12 +426,17 @@ export const localTenantEntitlement = async (tenant?: string | null): Promise<En
     // Display the highest-ranked tier the tenant holds (so a panel-set 'enterprise' beats an older 'corp' license).
     const tier = [licTier, cliTier].filter(Boolean).sort((a, b) => (TIER_RANK[b] || 0) - (TIER_RANK[a] || 0))[0] || 'entry';
     const seats = Math.max(Number(row.lic_seats || 0), Number(row.cli_seats || 0)) || 0;
-    return { integrations, tier, seats };
+    const addons: string[] = (row.addons || []).map((a: string) => String(a).toLowerCase());
+    const riskAssuranceEligible = isEnterpriseTier(licTier) || isEnterpriseTier(cliTier);
+    return {
+      integrations, tier, seats, addons, riskAssuranceEligible,
+      riskAssurance: riskAssuranceEligible && addons.includes(RISK_ASSURANCE_ADDON),
+    };
   } catch (e) {
     // Fail CLOSED: a DB error must not silently grant paid entitlements to an
     // unentitled tenant (the old fail-open handed every tenant the integrations
     // surface on any transient hiccup). Briefly withholding a paid feature is the
-    // safer failure mode than leaking it.
+    // safer failure mode than leaking it. Add-ons (Risk Assurance) are absent, i.e. denied.
     console.warn('localTenantEntitlement failed; denying entitlement (fail-closed):', (e as Error).message);
     return { integrations: false, tier: 'unknown', seats: 0 };
   }
@@ -434,7 +467,7 @@ const fetchCentralEntitlement = async (tenant: string): Promise<EntitlementRecor
 
 /** Resolve entitlement: central-first on tenant pods, local on the central plane. */
 export const getTenantEntitlement = async (tenant?: string | null): Promise<EntitlementRecord> => {
-  if (!tenant) return { integrations: false, tier: 'none', seats: 0 };
+  if (!tenant) return { integrations: false, tier: 'none', seats: 0, addons: [], riskAssurance: false, riskAssuranceEligible: false };
   if (CENTRAL_URL && CENTRAL_SERVICE_TOKEN) {
     const remote = await fetchCentralEntitlement(tenant);
     if (remote) return remote;
@@ -468,5 +501,34 @@ export const requireIntegrationsEntitlement = async (req: Request, res: Response
   res.status(403).json({
     error: 'Integrations & Gateways require a Growth or Enterprise plan.',
     code: 'UPGRADE_REQUIRED',
+  });
+};
+
+/**
+ * Route guard for the Risk Assurance plan (Threat & Risk Graph, Continuous Monitoring,
+ * RMF). Super roles always pass. Unlike integrations, reads are gated too: the graph
+ * itself is the paid deliverable.
+ */
+export const requireRiskAssuranceEntitlement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (isSuperRole(req.user.role)) {
+    next();
+    return;
+  }
+  const ent = await getTenantEntitlement(req.user.tenant);
+  if (ent.riskAssurance) {
+    next();
+    return;
+  }
+  res.status(403).json({
+    error: ent.riskAssuranceEligible
+      ? 'Threat & Risk Graph requires a Risk Assurance subscription.'
+      : 'Risk Assurance is available to Enterprise subscribers.',
+    code: 'UPGRADE_REQUIRED',
+    plan: RISK_ASSURANCE_ADDON,
+    eligible: !!ent.riskAssuranceEligible,
   });
 };

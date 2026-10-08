@@ -1184,6 +1184,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       console.warn('Could not record daily snapshot:', snapErr);
     }
 
+    // Tenant resolved from the fleet token, for the Threat & Risk Graph rebuild hook.
+    res.locals.tenant = assignedTenant;
     res.status(201).json({
       success: true,
       tokenName: tokenRow.name,

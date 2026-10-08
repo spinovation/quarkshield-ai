@@ -35,6 +35,7 @@ import {
   Database,
   Radio,
   Network,
+  Radar,
   FileText,
   Package
 } from 'lucide-react';
@@ -49,7 +50,10 @@ import SbomInventory from './components/SbomInventory';
 import ResetPasswordPage from './components/ResetPasswordPage';
 import { CryptographicPostureCard, calculatePostureMetrics } from './components/CryptographicPostureCard';
 
-export type TabType = 'dashboard' | 'cbom' | 'sbom' | 'tokens' | 'git' | 'pki' | 'proxy' | 'planner' | 'admin';
+// Threat & Risk Graph pulls in React Flow; load it only when the tab is opened.
+const ThreatRiskGraph = React.lazy(() => import('./components/ThreatRiskGraph/ThreatRiskGraph'));
+
+export type TabType = 'dashboard' | 'cbom' | 'sbom' | 'tokens' | 'git' | 'pki' | 'proxy' | 'planner' | 'threat' | 'admin';
 
 interface FleetMachine {
   id: string;
@@ -298,7 +302,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const urlParams = new URLSearchParams(window.location.search);
     const tabParam = urlParams.get('tab') as TabType;
-    const validTabs: TabType[] = ['dashboard', 'cbom', 'sbom', 'tokens', 'git', 'pki', 'proxy', 'planner', 'admin'];
+    const validTabs: TabType[] = ['dashboard', 'cbom', 'sbom', 'tokens', 'git', 'pki', 'proxy', 'planner', 'threat', 'admin'];
     if (tabParam && validTabs.includes(tabParam)) {
       return tabParam;
     }
@@ -1478,6 +1482,32 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
             <Network size={17} color={isIntegrationsTab ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               Integrations &amp; Gateways
+            </span>
+          </button>
+
+          {/* Threat & Risk Graph (Risk Assurance plan) */}
+          <button
+            onClick={() => setActiveTab('threat')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.7rem',
+              padding: '0.6rem 0.75rem',
+              borderRadius: '6px',
+              background: activeTab === 'threat' ? 'rgba(0, 242, 254, 0.12)' : 'transparent',
+              border: activeTab === 'threat' ? '1px solid rgba(0, 242, 254, 0.3)' : '1px solid transparent',
+              color: activeTab === 'threat' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              fontSize: '0.85rem',
+              fontWeight: activeTab === 'threat' ? 600 : 500,
+              textAlign: 'left',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              width: '100%'
+            }}
+          >
+            <Radar size={17} color={activeTab === 'threat' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
+            <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              Threat &amp; Risk Graph
             </span>
           </button>
         </div>
@@ -2973,6 +3003,19 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               </div>
             )}
           </div>
+        )}
+
+        {/* THREAT & RISK GRAPH — per tenant (Risk Assurance plan) */}
+        {activeTab === 'threat' && (
+          selectedTenantFilter === 'all' ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+              Select a tenant in the tenant filter to view its Threat &amp; Risk Graph.
+            </div>
+          ) : (
+            <React.Suspense fallback={<div style={{ padding: '1rem', color: 'var(--text-muted)' }}>Loading Threat &amp; Risk Graph…</div>}>
+              <ThreatRiskGraph tenant={selectedTenantOption?.rawName || selectedTenantOption?.key || selectedTenantFilter} />
+            </React.Suspense>
+          )
         )}
 
         {/* TAB 6: REPLICATED ADMINISTRATIVE ORCHESTRATION PANEL */}

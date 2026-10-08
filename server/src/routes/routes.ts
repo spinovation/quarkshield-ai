@@ -1,5 +1,10 @@
-import { Router } from 'express';
-import { requireAuth, requireSuperAdmin, requirePlatformAdmin, requireTenantAccess, requireTenantAdmin, requireIntegrationsEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole, safeEqual } from '../middleware/auth';
+import { Router, Request, Response, NextFunction } from 'express';
+import { requireAuth, requireSuperAdmin, requirePlatformAdmin, requireTenantAccess, requireTenantAdmin, requireIntegrationsEntitlement, requireRiskAssuranceEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole, safeEqual, RISK_ASSURANCE_ADDON } from '../middleware/auth';
+import {
+  getThreatOverview, getThreatGraph, getRelationshipEvidence, listThreatScenarios, getThreatScenario,
+  listRiskAssets, getAssetRiskDetail, updateRemediation, overrideAssetContext, rebuildThreatGraph,
+  listRebuildRuns, getThreatGraphCatalog, scheduleRebuild,
+} from '../controllers/threatGraphController';
 import { exportExecutiveReport, getReportStakeholders, saveReportStakeholders, sendRoadmapReport } from '../controllers/reportController';
 import { twoFactorStatusSafe as twoFactorStatus, twoFactorSetupSafe as twoFactorSetup, twoFactorVerifySafe as twoFactorVerify, twoFactorDisableSafe as twoFactorDisable } from '../controllers/twoFactorController';
 import {
@@ -32,6 +37,7 @@ import {
   getClientStats,
   updateSubscription,
   updateClientPlan,
+  updateClientAddons,
   deployInlineClient,
   createClient,
   deleteClient,
@@ -127,10 +133,24 @@ import {
   sendCustomCheckoutEmail,
   getCustomCheckoutInvites,
   createCustomerPortalSession,
-  handleStripeWebhook
+  handleStripeWebhook,
+  getRiskAssuranceOffer,
+  createRiskAssuranceCheckout,
 } from '../controllers/billingController';
 
 const router = Router();
+
+/**
+ * After a successful write that changes graph inputs, schedule a debounced Threat & Risk
+ * Graph rebuild for the tenant (only tenants on the Risk Assurance plan are rebuilt).
+ */
+const rebuildAfter = (trigger: string) => (req: Request, res: Response, next: NextFunction): void => {
+  res.on('finish', () => {
+    if (res.statusCode >= 400) return;
+    scheduleRebuild(res.locals.tenant || (req.query.tenant as string) || req.body?.tenantName || req.user?.tenant, trigger);
+  });
+  next();
+};
 
 // ==========================================
 // AUTH (public) + session
@@ -163,7 +183,7 @@ router.post('/2fa/disable', requireAuth, twoFactorDisable);
 router.get('/news/cnsa', getCnsaNews);
 router.get('/scan/agent/install.sh', getInstallerScript);
 router.get('/scan/agent/install.ps1', getPowerShellInstallerScript);
-router.post('/scan/agent/ingest', ingestTelemetry);
+router.post('/scan/agent/ingest', rebuildAfter('agent_ingest'), ingestTelemetry);
 router.post('/scan/agent/commands', agentFetchCommands);
 router.post('/scan/adcs/report', reportAdcs);
 router.post('/scan/license/verify', verifyLicenseKey);
@@ -205,6 +225,7 @@ router.get('/admin/clients/:name/stats', requireSuperAdmin, getClientStats);
 router.post('/admin/clients/deploy-inline', requirePlatformAdmin, deployInlineClient);
 router.post('/admin/clients/:name/subscription', requirePlatformAdmin, updateSubscription);
 router.post('/admin/clients/:name/plan', requirePlatformAdmin, updateClientPlan);
+router.post('/admin/clients/:name/addons', requirePlatformAdmin, updateClientAddons);
 router.post('/admin/clients', requirePlatformAdmin, createClient);
 router.delete('/admin/clients/:id', requirePlatformAdmin, deleteClient);
 router.delete('/admin/clients/:name', requirePlatformAdmin, deleteClient);
@@ -252,7 +273,7 @@ router.get('/tenant/:tenant/portal-data', requireAuth, requireTenantAccess, getT
 // ==========================================
 // GIT SCANNER (authenticated, tenant-scoped)
 // ==========================================
-router.post('/scan/remote-git', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, scanRemoteGitRepo);
+router.post('/scan/remote-git', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, rebuildAfter('git_scan'), scanRemoteGitRepo);
 router.get('/scan/remote-git/history', requireAuth, requireTenantAccess, getGitScanHistory);
 router.post('/scan/remote-git/export-cbom', requireAuth, requireTenantAccess, exportGitCBOM);
 
@@ -287,7 +308,7 @@ router.get('/git/ci-gate/runner.sh', (req, res) => getCITemplate({ ...req, param
 router.get('/entitlements', requireAuth, async (req, res) => {
   try {
     if (isSuperRole(req.user?.role)) {
-      res.json({ integrations: true, tier: 'enterprise', seats: 250, super: true });
+      res.json({ integrations: true, tier: 'enterprise', seats: 250, addons: [RISK_ASSURANCE_ADDON], riskAssurance: true, riskAssuranceEligible: true, super: true });
       return;
     }
     const ent = await getTenantEntitlement(req.user?.tenant);
@@ -312,6 +333,23 @@ router.get('/central/entitlement', async (req, res) => {
   res.json(await localTenantEntitlement(tenant));
 });
 
+// ==========================================
+// THREAT & RISK GRAPH (Risk Assurance plan, authenticated, tenant-scoped)
+// ==========================================
+const tg = [requireAuth, requireTenantAccess, requireRiskAssuranceEntitlement];
+router.get('/threat-graph/catalog', requireAuth, getThreatGraphCatalog);
+router.get('/threat-graph/overview', ...tg, getThreatOverview);
+router.get('/threat-graph/graph', ...tg, getThreatGraph);
+router.get('/threat-graph/relationships/:id', ...tg, getRelationshipEvidence);
+router.get('/threat-graph/scenarios', ...tg, listThreatScenarios);
+router.get('/threat-graph/scenarios/:id', ...tg, getThreatScenario);
+router.get('/threat-graph/assets', ...tg, listRiskAssets);
+router.get('/threat-graph/assets/:id', ...tg, getAssetRiskDetail);
+router.put('/threat-graph/assets/:id/context', ...tg, overrideAssetContext);
+router.patch('/threat-graph/remediations/:id', ...tg, updateRemediation);
+router.post('/threat-graph/rebuild', ...tg, rebuildThreatGraph);
+router.get('/threat-graph/runs', ...tg, listRebuildRuns);
+
 // Projects (BILL-4 / BILL-4b) — framework-based authorization boundaries with per-control
 // assessment; each yields its own OSCAL SSP/POA&M.
 router.get('/compliance/frameworks', requireAuth, getFrameworks);
@@ -328,17 +366,17 @@ router.get('/projects/:id/poam.xlsx', requireAuth, requireTenantAccess, exportPr
 router.get('/pki/connectors', requireAuth, requireTenantAccess, getPkiConnectors);
 router.post('/pki/connectors', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, createPkiConnector);
 router.post('/pki/connectors/:id/test', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, testPkiConnector);
-router.post('/pki/connectors/:id/sync', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, syncPkiConnector);
-router.delete('/pki/connectors/:id', requireAuth, requireTenantAccess, deletePkiConnector);
+router.post('/pki/connectors/:id/sync', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, rebuildAfter('pki_sync'), syncPkiConnector);
+router.delete('/pki/connectors/:id', requireAuth, requireTenantAccess, rebuildAfter('pki_change'), deletePkiConnector);
 router.get('/pki/assets', requireAuth, requireTenantAccess, getPkiSyncedAssets);
 
 // ==========================================
 // TRANSPARENT HYBRID QUANTUM TLS PROXY (authenticated, tenant-scoped)
 // ==========================================
 router.get('/proxy/instances', requireAuth, requireTenantAccess, getProxies);
-router.post('/proxy/instances', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, createProxy);
+router.post('/proxy/instances', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, rebuildAfter('proxy_change'), createProxy);
 router.patch('/proxy/instances/:id/state', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, toggleProxyState);
-router.delete('/proxy/instances/:id', requireAuth, requireTenantAccess, deleteProxy);
+router.delete('/proxy/instances/:id', requireAuth, requireTenantAccess, rebuildAfter('proxy_change'), deleteProxy);
 router.post('/proxy/instances/:id/test', requireAuth, requireTenantAccess, requireIntegrationsEntitlement, testProxyHandshake);
 router.get('/proxy/templates/:format', getProxyTemplate);
 router.get('/proxy/template', (req, res) => {
@@ -365,6 +403,8 @@ router.post('/billing/custom-checkout', requirePlatformAdmin, createCustomChecko
 router.post('/billing/custom-checkout/:id/send', requirePlatformAdmin, sendCustomCheckoutEmail);
 router.get('/billing/custom-checkout/invites', requireSuperAdmin, getCustomCheckoutInvites);
 router.post('/billing/portal-session', requireAuth, requireTenantAccess, createCustomerPortalSession);
+router.get('/billing/risk-assurance', requireAuth, getRiskAssuranceOffer);
+router.post('/billing/risk-assurance/checkout', requireAuth, createRiskAssuranceCheckout);
 
 export default router;
 

@@ -52,6 +52,7 @@ import {
   File,
   Calendar,
   ShieldCheck,
+  Radar,
   Users,
   QrCode,
   Settings,
@@ -69,6 +70,9 @@ import { PqcProxyGateway } from './PqcProxyGateway';
 import { GitRepoAuditor } from './GitRepoAuditor';
 import SbomInventory from './SbomInventory';
 import ComplianceProjects from './ComplianceProjects';
+
+// Threat & Risk Graph pulls in React Flow; load it only when the tab is opened.
+const ThreatRiskGraph = React.lazy(() => import('./ThreatRiskGraph/ThreatRiskGraph'));
 import { CryptographicPostureCard, calculatePostureMetrics } from './CryptographicPostureCard';
 
 export interface InternalUserLog {
@@ -529,7 +533,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     avgRiskScore: 87
   });
   const [sessionExpired, setSessionExpired] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'compliance' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'compliance' | 'threat' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
     try {
       const p = new URLSearchParams(window.location.search);
       const t = p.get('tab');
@@ -1264,10 +1268,14 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   };
 
   useEffect(() => {
+    // Load only once signed in: an anonymous fetch 401s and would latch "session expired",
+    // which then showed right after a successful login.
+    if (!isAuthenticated && !isSupportMirror) return;
+    setSessionExpired(false);
     fetchTenantData();
     fetchPullSchedules();
     fetchFleetGroups();
-  }, [cleanSlug]);
+  }, [cleanSlug, isAuthenticated, isSupportMirror]);
 
   const completeTenantLogin = (data?: any) => {
     setIsAuthenticated(true);
@@ -2803,6 +2811,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             { id: 'overview', label: 'Fleet Overview', icon: Laptop },
             { id: 'cbom', label: 'Cryptographic BOM (CBOM)', icon: FileCode },
             { id: 'compliance', label: 'Compliance (OSCAL)', icon: ShieldCheck },
+            { id: 'threat', label: 'Threat & Risk Graph', icon: Radar },
             { id: 'integrations_gw', label: 'Integrations & Gateways', icon: Network },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
             { id: 'settings', label: 'Settings', icon: Settings }
@@ -4991,6 +5000,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             {/* Compliance (OSCAL) — authorization boundaries / Projects (BILL-4) */}
             {activeTab === 'compliance' && (
               <ComplianceProjects tenantName={client.displayName} />
+            )}
+
+            {/* Threat & Risk Graph (Risk Assurance plan) — tenant is pinned server-side */}
+            {activeTab === 'threat' && (
+              <React.Suspense fallback={<div style={{ padding: '1rem', color: 'var(--text-muted)' }}>Loading Threat &amp; Risk Graph…</div>}>
+                <ThreatRiskGraph />
+              </React.Suspense>
             )}
 
             {/* 4. PQC COPILOT ASSISTANT TAB */}

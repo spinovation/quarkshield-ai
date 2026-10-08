@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
-import { signSession, setSessionCookie, clearSessionCookie, isSuperRole, isPlatformAdmin, sanitizeTenantRole, revokeUserSessions, forgetUserState } from '../middleware/auth';
+import { signSession, setSessionCookie, clearSessionCookie, isSuperRole, isPlatformAdmin, sanitizeTenantRole, revokeUserSessions, forgetUserState, localTenantEntitlement, RISK_ASSURANCE_ADDON } from '../middleware/auth';
 
 /** Escape untrusted text for inclusion in HTML email bodies. */
 const escapeHtml = (v: unknown): string => String(v ?? '')
@@ -233,6 +233,45 @@ export const updateSubscription = async (req: Request, res: Response) => {
  * AND the tenant's ACTIVE license (tier + seats, which drives the displayed tier/scale),
  * transactionally so the two never diverge. Tier vocabulary: partner | corporate.
  */
+/**
+ * Grant or revoke a plan add-on (e.g. 'risk_assurance' = Threat & Risk Graph, Continuous
+ * Monitoring, RMF) on a client and its active licenses. Body: { addon, enabled }.
+ */
+const KNOWN_ADDONS = new Set(['risk_assurance']);
+export const updateClientAddons = async (req: Request, res: Response) => {
+  const { name } = req.params;
+  const addon = String(req.body?.addon || '').toLowerCase();
+  const enabled = req.body?.enabled !== false;
+  if (!KNOWN_ADDONS.has(addon)) {
+    return res.status(400).json({ error: `Unknown add-on. Expected one of: ${[...KNOWN_ADDONS].join(', ')}` });
+  }
+  if (enabled && addon === RISK_ASSURANCE_ADDON && !(await localTenantEntitlement(name)).riskAssuranceEligible) {
+    return res.status(409).json({ error: 'Risk Assurance can only be enabled for Enterprise subscribers. Upgrade the tenant to Enterprise first.' });
+  }
+  const op = enabled
+    ? `(SELECT ARRAY(SELECT DISTINCT UNNEST(COALESCE(plan_addons, '{}') || ARRAY[$1::text])))`
+    : `ARRAY_REMOVE(COALESCE(plan_addons, '{}'), $1::text)`;
+  try {
+    const cli = await pool.query(
+      `UPDATE admin_clients SET plan_addons = ${op}
+        WHERE LOWER(name) = LOWER($2) OR LOWER(REPLACE(name,'-','')) = LOWER(REPLACE($2,'-','')) OR id = $2
+        RETURNING plan_addons`,
+      [addon, name]
+    );
+    const lic = await pool.query(
+      `UPDATE admin_licenses SET plan_addons = ${op}
+        WHERE (LOWER(tenant_name) = LOWER($2) OR LOWER(REPLACE(tenant_name,' ','')) = LOWER(REPLACE($2,' ','')))
+          AND status = 'active'`,
+      [addon, name]
+    );
+    if (!cli.rowCount && !lic.rowCount) return res.status(404).json({ error: 'Client not found' });
+    res.json({ success: true, addon, enabled, addons: cli.rows[0]?.plan_addons || [], licensesUpdated: lic.rowCount });
+  } catch (err: any) {
+    console.error('Error updating client add-ons:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
 export const updateClientPlan = async (req: Request, res: Response) => {
   const { name } = req.params;
   const tier = ['partner', 'corporate'].includes((req.body.tier || '').toLowerCase())
