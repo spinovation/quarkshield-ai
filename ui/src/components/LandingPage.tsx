@@ -369,6 +369,39 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const [supportSubmitted, setSupportSubmitted] = useState(false);
   const [isSubmittingSupport, setIsSubmittingSupport] = useState(false);
 
+  // The Contact Support view is a dedicated page reached at #support (or #contact).
+  // Both the landing-page "Support"/"Contact" nav links and the desktop agent dashboard's
+  // "Help & Support" (which opens quarkshield.ai/#support) land on this same page, rendered
+  // full-screen over the site rather than as a dimmed popup over the last-viewed section.
+  useEffect(() => {
+    const openIfSupportHash = () => {
+      const h = window.location.hash.toLowerCase();
+      if (h === '#support' || h === '#contact') setShowSupportModalState(true);
+    };
+    openIfSupportHash();
+    window.addEventListener('hashchange', openIfSupportHash);
+    return () => window.removeEventListener('hashchange', openIfSupportHash);
+  }, []);
+
+  // Open the support page by routing to #support so the URL is shareable and Back works.
+  const openSupportPage = () => {
+    if (window.location.hash.toLowerCase() === '#support') {
+      setShowSupportModalState(true); // hashchange won't fire if already there
+    } else {
+      window.location.hash = 'support';
+    }
+    try { window.scrollTo(0, 0); } catch { /* no-op */ }
+  };
+
+  // Close the support page and drop the #support/#contact hash from the URL.
+  const closeSupportPage = () => {
+    setShowSupportModalState(false);
+    const h = window.location.hash.toLowerCase();
+    if (h === '#support' || h === '#contact') {
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  };
+
   const validateSupport = () => {
     const errs: Record<string, string> = {};
     if (!supportForm.name.trim()) errs.name = 'Please enter your name.';
@@ -812,10 +845,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
             </div>
             <a
-              href="#"
+              href="#support"
               onClick={(e) => {
                 e.preventDefault();
-                setShowSupportModalState(true);
+                openSupportPage();
               }}
               style={{ textDecoration: 'none' }}
             >
@@ -1895,8 +1928,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <ul>
                 <li><a href="#about-us">About Us</a></li>
                 <li><a href="#careers" onClick={() => setShowCareerModal(true)}>Careers</a></li>
-                <li><a href="#" onClick={(e) => { e.preventDefault(); setShowSupportModalState(true); }}>Support</a></li>
-                <li><a href="#" onClick={(e) => { e.preventDefault(); setShowSupportModalState(true); }}>Contact</a></li>
+                <li><a href="#support" onClick={(e) => { e.preventDefault(); openSupportPage(); }}>Support</a></li>
+                <li><a href="#support" onClick={(e) => { e.preventDefault(); openSupportPage(); }}>Contact</a></li>
               </ul>
             </div>
 
@@ -2166,14 +2199,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
         </div>
       )}
 
-      {/* ===================== SUPPORT MODAL ===================== */}
+      {/* ===================== SUPPORT PAGE ===================== */}
       {showSupportModalState && (
-        <div className="overlay open" role="dialog" aria-modal="true" onClick={(e) => {
-          if (e.target === e.currentTarget) setShowSupportModalState(false);
-        }}>
+        <div className="overlay open support-page" role="dialog" aria-modal="true" aria-label="Contact Support">
           <div className="modal">
-            <button className="modal-close" onClick={() => setShowSupportModalState(false)} aria-label="Close">×</button>
+            <button className="modal-close" onClick={closeSupportPage} aria-label="Close support">×</button>
             <div className="modal-head">
+              <div className="support-brand">
+                <span className="support-brand-mark">QS</span>
+                <span className="support-brand-name">QuarkShield Support</span>
+              </div>
               <h2 className="modal-title">Contact Support</h2>
               <p className="modal-desc">Tell us what's going on — our enterprise support desk will get back to you.</p>
             </div>
@@ -2283,7 +2318,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                   {isSubmittingSupport ? 'Sending…' : 'Send request'}
                 </button>
               ) : (
-                <button className="btn btn-primary btn-sm" onClick={() => setShowSupportModalState(false)}>
+                <button className="btn btn-primary btn-sm" onClick={closeSupportPage}>
                   Close
                 </button>
               )}

@@ -1857,6 +1857,32 @@ footer { border-top: 1px solid var(--line-soft); padding-block: 44px 26px; color
   max-height: calc(100dvh - 40px); display: flex; flex-direction: column;
 }
 .overlay.open .modal { transform: none; }
+
+/* Support rendered as a dedicated full-screen page (not a dimmed popup).
+   Opaque brand background covers the landing content behind it. */
+.overlay.support-page {
+  background: var(--bg);
+  backdrop-filter: none;
+  align-items: start;
+  overflow-y: auto;
+  padding: clamp(24px, 8vh, 96px) 20px 48px;
+}
+.overlay.support-page .modal {
+  max-width: 560px;
+  background: var(--bg-2);
+}
+.support-brand { display: flex; align-items: center; gap: 10px; }
+.support-brand-mark {
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  display: grid; place-items: center;
+  font-family: var(--font-display); font-weight: 800; font-size: 0.82rem; letter-spacing: 0.02em;
+  color: #fff; background: linear-gradient(135deg, var(--purple), var(--cyan));
+}
+.support-brand-name {
+  font-family: var(--font-display); font-weight: 700; font-size: 0.9rem;
+  color: var(--muted); letter-spacing: 0.01em;
+}
+
 .modal-head { padding: 20px 22px 0; }
 .modal-close { position: absolute; top: 16px; right: 18px; background: none; border: 0; color: var(--faint); font-size: 1.5rem; cursor: pointer; line-height: 1; padding: 4px; }
 .modal-close:hover { color: var(--text); }

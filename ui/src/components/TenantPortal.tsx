@@ -2765,55 +2765,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               }} 
             />
           </div>
-          <button
-            onClick={() => {
-              if (onNavigateHome) onNavigateHome();
-              else window.location.href = 'https://quarkshield.ai';
-            }}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted, #64748b)',
-              cursor: 'pointer',
-              padding: '0.2rem',
-              display: 'flex',
-              alignItems: 'center'
-            }}
-            title="Exit to QuarkShield.ai Landing Page"
-          >
-            <Globe size={16} />
-          </button>
-        </div>
-
-        {/* Tenant Identification Badge */}
-        <div style={{
-          padding: '0.55rem 0.75rem',
-          borderRadius: '6px',
-          background: 'rgba(56, 189, 248, 0.06)',
-          border: '1px solid rgba(56, 189, 248, 0.2)',
-          marginBottom: '0.75rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.2rem'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={client.displayName || displayCustomerName}>
-              {client.displayName || displayCustomerName}
-            </span>
-            <span style={{
-              fontSize: '0.65rem',
-              padding: '0.1rem 0.35rem',
-              borderRadius: '3px',
-              background: 'rgba(34, 197, 94, 0.15)',
-              color: '#4ade80',
-              fontWeight: 700
-            }}>
-              ACTIVE
-            </span>
-          </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', fontFamily: 'monospace' }}>
-            {client.customerId || 'CORP-9812'} • Port: {client.appPort || 5002}
-          </div>
         </div>
 
         {/* Primary Vertical Navigation Tabs */}
@@ -2983,63 +2934,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           })}
         </div>
 
-        {/* Subscription Scale Card */}
+        {/* Account / profile footer — subscription scale moved up into the header banner */}
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.65rem', paddingTop: '1rem' }}>
-          <div style={{
-            background: 'rgba(13, 19, 33, 0.85)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '8px',
-            padding: '0.85rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.55rem'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted, #64748b)', letterSpacing: '0.06em', textTransform: 'uppercase', lineHeight: 1.25 }}>
-                SUBSCRIPTION<br />SCALE
-              </div>
-              <div style={{
-                border: '1px solid rgba(255, 255, 255, 0.35)',
-                borderRadius: '4px',
-                padding: '0.18rem 0.45rem',
-                fontSize: '0.68rem',
-                fontWeight: 700,
-                color: '#ffffff',
-                letterSpacing: '0.04em',
-                lineHeight: 1.1,
-                textAlign: 'center'
-              }}>
-                CORPORATE<br />TIER
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#ffffff' }}>Scale Monitored</span>
-              <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#ffffff' }}>
-                {machines.length} <span style={{ color: 'var(--text-muted, #64748b)', fontWeight: 400, fontSize: '0.82rem' }}>/</span> {totalCapacity}
-              </span>
-            </div>
-
-            {/* Progress Bar */}
-            <div style={{ width: '100%', height: '4px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden' }}>
-              <div style={{
-                width: `${Math.min(100, Math.max(8, Math.round((machines.length / Math.max(1, totalCapacity)) * 100)))}%`,
-                height: '100%',
-                background: 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
-                borderRadius: '2px',
-                boxShadow: '0 0 8px rgba(0, 242, 254, 0.6)'
-              }} />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.68rem', color: 'var(--text-muted, #64748b)' }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 6px rgba(16, 185, 129, 0.8)' }} />
-              <span>Continuous asset tracking active</span>
-            </div>
-          </div>
-
-          {/* Separator */}
-          <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)' }} />
-
           {/* Bottom User Profile Bar (Customer ID / Customer Name) */}
           <div style={{
             display: 'flex',
@@ -3189,7 +3085,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               zIndex: 1
             }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem', flexWrap: 'wrap' }}>
                   <h1 style={{ fontSize: '1.45rem', fontWeight: 800, margin: 0, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Shield size={22} color="#38bdf8" />
                     <span>{client.displayName || displayCustomerName}</span>
@@ -3206,17 +3102,26 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   }}>
                     {client.customerId || 'CORP-9812'}
                   </span>
-                  <span style={{
-                    fontSize: '0.68rem',
-                    color: '#4ade80',
-                    background: 'rgba(34, 197, 94, 0.12)',
-                    border: '1px solid rgba(34, 197, 94, 0.3)',
-                    padding: '0.15rem 0.45rem',
-                    borderRadius: '4px',
-                    fontWeight: 600,
-                    textTransform: 'uppercase'
-                  }}>
-                    Active Corporate Tenant
+                  <span
+                    title={`Corporate Tier license — ${machines.length} of ${totalCapacity} seats monitored · continuous asset tracking active`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      color: '#38bdf8',
+                      background: 'rgba(56, 189, 248, 0.1)',
+                      border: '1px solid rgba(56, 189, 248, 0.28)',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '4px'
+                    }}
+                  >
+                    <Key size={11} />
+                    <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>Corporate Tier</span>
+                    <span style={{ color: 'rgba(255,255,255,0.35)' }}>•</span>
+                    <span style={{ color: '#ffffff', fontWeight: 800, fontFamily: 'monospace' }}>{machines.length}</span>
+                    <span style={{ color: 'var(--text-muted, #64748b)' }}>/ {totalCapacity} seats</span>
                   </span>
                 </div>
                 <div style={{ fontSize: '0.76rem', color: 'var(--text-muted, #94a3b8)' }}>
