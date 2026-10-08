@@ -164,7 +164,7 @@
       const pollStatus = async () => {
         try {
           attempts++;
-          const res = await fetch(`/api/billing/registration-status/${sessionId}`);
+          const res = await fetch(`/api/billing/registration-status/${encodeURIComponent(sessionId)}`);
           if (res.ok) {
             const data = await res.json();
             if (data.status === 'completed') {
@@ -173,21 +173,18 @@
               descEl.innerText = 'Your subscription is active. Your isolated cryptographic workspace and license keys have been generated.';
               
               detailsEl.style.display = 'block';
-              detailsEl.innerHTML = `
-                <div class="detail-row">
-                  <span class="detail-label">Status</span>
-                  <span class="detail-val" style="color: #4ade80;">Active & Provisioned</span>
-                </div>
-                <div class="detail-row">
-                  <span class="detail-label">Subdomain</span>
-                  <span class="detail-val">${data.subdomain}.quarkshield.ai</span>
-                </div>
-                ${data.licenseKey ? `
-                <div class="detail-row">
-                  <span class="detail-label">License Key</span>
-                  <span class="detail-val" style="font-size: 0.78rem;">${data.licenseKey}</span>
-                </div>` : ''}
-              `;
+              // Build with DOM APIs (textContent), never innerHTML from server JSON.
+              detailsEl.textContent = '';
+              const addRow = (label, value, color) => {
+                const row = document.createElement('div'); row.className = 'detail-row';
+                const l = document.createElement('span'); l.className = 'detail-label'; l.textContent = label;
+                const v = document.createElement('span'); v.className = 'detail-val'; v.textContent = value;
+                if (color) v.style.color = color;
+                row.appendChild(l); row.appendChild(v); detailsEl.appendChild(row);
+              };
+              addRow('Status', 'Active & Provisioned', '#4ade80');
+              addRow('Subdomain', String(data.subdomain || '') + '.quarkshield.ai');
+              if (data.licenseIssued) addRow('License Key', 'Issued — delivered by email');
 
               actionBtn.style.display = 'inline-flex';
               actionBtn.innerText = 'Launch Workspace Login';

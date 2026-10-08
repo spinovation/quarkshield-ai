@@ -45,7 +45,7 @@ func TestClassifyADCSAlgo(t *testing.T) {
 		{"RSA", 2048, "RSA-2048", true},
 		{"ECC", 256, "ECDSA-P256", true},
 		{"1.2.840.113549.1.1.1", 3072, "RSA-3072", true},
-		{"", 0, "unknown", false},
+		{"", 0, "Unknown", true}, // unknown algorithms are treated as vulnerable (fail closed)
 	}
 	for _, c := range cases {
 		algo, vuln, _, _ := classifyADCSAlgo(c.in, c.size)

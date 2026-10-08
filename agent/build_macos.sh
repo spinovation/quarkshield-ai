@@ -3,6 +3,13 @@
 # QuarkShield Agent Build & Packaging Automation for macOS
 # ==============================================================================
 set -e
+# The agent's offline license check is only meaningful when a PRIVATE signing
+# secret is compiled in; the default in license.go is public. Require it.
+if [ -z "${LICENSE_SIGNING_SECRET:-}" ] || [ "${#LICENSE_SIGNING_SECRET}" -lt 32 ]; then
+  echo "❌ LICENSE_SIGNING_SECRET must be set (>=32 chars) and match the server's value before building release binaries." >&2
+  exit 1
+fi
+GO_LDFLAGS="-s -w -X main.LicenseSigningSecret=${LICENSE_SIGNING_SECRET}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -19,10 +26,10 @@ echo "======================================================================"
 
 # 1. Compile Apple Silicon (arm64) and Intel (amd64) binaries
 echo "⚙️ [1/6] Compiling darwin-arm64 binary..."
-GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o quarkshield-scanner-darwin-arm64 .
+GOOS=darwin GOARCH=arm64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-darwin-arm64 .
 
 echo "⚙️ [2/6] Compiling darwin-amd64 binary..."
-GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-darwin-amd64 .
+GOOS=darwin GOARCH=amd64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-darwin-amd64 .
 
 # 2. Create Universal Mach-O binary
 echo "🔗 [3/6] Creating universal Mach-O binary (Apple Silicon + Intel)..."

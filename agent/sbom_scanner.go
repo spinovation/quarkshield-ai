@@ -794,8 +794,8 @@ func auditProjectManifests(ctx context.Context, reportProgress func(string)) []A
 
 func parseManifestForCryptoDependencies(filePath, fileName string) []AuditResult {
 	var findings []AuditResult
-	data, err := os.ReadFile(filePath)
-	if err != nil || len(data) == 0 {
+	data, ok := readScanFile(filePath)
+	if !ok {
 		return findings
 	}
 

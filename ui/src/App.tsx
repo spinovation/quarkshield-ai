@@ -325,49 +325,77 @@ export default function App() {
   });
 
   const [currentAccountType, setCurrentAccountType] = useState<string>(() => {
-    const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
-    if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'superadmin';
     return localStorage.getItem('quarkshield_account_type') || sessionStorage.getItem('quarkshield_account_type') || 'user';
   });
 
   const [currentUserRole, setCurrentUserRole] = useState<string>(() => {
-    const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
-    if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'Super Admin';
     return localStorage.getItem('quarkshield_role') || sessionStorage.getItem('quarkshield_role') || 'Security Operator';
   });
 
   const [currentCustomerId, setCurrentCustomerId] = useState<string>(() => {
-    const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
-    if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'QS-ADMIN-001';
     return localStorage.getItem('quarkshield_customer_id') || sessionStorage.getItem('quarkshield_customer_id') || '';
   });
 
   const [currentCustomerName, setCurrentCustomerName] = useState<string>(() => {
-    const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
-    if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'INTERNAL USER';
     return localStorage.getItem('quarkshield_customer_name') || sessionStorage.getItem('quarkshield_customer_name') || '';
   });
 
   const [currentLicenseTier, setCurrentLicenseTier] = useState<string>(() => {
-    const email = (localStorage.getItem('quarkshield_user') || sessionStorage.getItem('quarkshield_user') || '').toLowerCase();
-    if (email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com') return 'INTERNAL ROOT';
     return localStorage.getItem('quarkshield_license_tier') || sessionStorage.getItem('quarkshield_license_tier') || 'CORPORATE PRO';
   });
 
-  // Dynamically synchronize account identity only for verified internal superadmins
+  // Authoritative session sync: ask the server who we are. Privilege is NEVER
+  // inferred client-side (the old code promoted anyone whose stored email
+  // contained "@quarkshield.ai" to Super Admin in the UI). A 401 clears any stale
+  // local state; the server still enforces every API call regardless.
   useEffect(() => {
-    if (!currentUserEmail) return;
-    const email = currentUserEmail.toLowerCase();
-    const isSuper = email.includes('@quarkshield.ai') || email === 'superadmin' || email === 'sridhargs@gmail.com';
-    
-    if (isSuper) {
-      setCurrentUserRole('Super Admin');
-      setCurrentAccountType('superadmin');
-      setCurrentCustomerId('QS-ADMIN-001');
-      setCurrentCustomerName('INTERNAL USER');
-      setCurrentLicenseTier('INTERNAL ROOT');
-    }
-  }, [currentUserEmail]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        if (cancelled) return;
+        if (res.status === 401) {
+          const keys = ['quarkshield_user', 'quarkshield_account_type', 'quarkshield_role', 'quarkshield_customer_id',
+            'quarkshield_customer_name', 'quarkshield_license_tier', 'quarkshield_token'];
+          keys.forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
+          setCurrentAccountType('user');
+          setCurrentUserRole('Security Operator');
+          // No session: the central console must not render for an anonymous visitor
+          // (every data call would 401 anyway). Send them to the landing page.
+          if (viewMode === 'console') {
+            try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+            setViewMode('landing');
+          }
+          return;
+        }
+        if (!res.ok) return;
+        const data = await res.json();
+        const u = data?.user;
+        if (!u) return;
+        const superRoles = ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor'];
+        if (u.accountType === 'superadmin' || superRoles.includes(String(u.role))) {
+          setCurrentAccountType('superadmin');
+          setCurrentUserRole('Super Admin');
+          setCurrentCustomerId('QS-ADMIN-001');
+          setCurrentCustomerName('INTERNAL USER');
+          setCurrentLicenseTier('INTERNAL ROOT');
+          localStorage.setItem('quarkshield_account_type', 'superadmin');
+          sessionStorage.setItem('quarkshield_account_type', 'superadmin');
+          localStorage.setItem('quarkshield_role', 'Super Admin');
+          sessionStorage.setItem('quarkshield_role', 'Super Admin');
+        } else if (currentAccountType === 'superadmin') {
+          // Stored state claims superadmin but the server disagrees: demote.
+          setCurrentAccountType(u.accountType || 'user');
+          setCurrentUserRole('Security Operator');
+          localStorage.setItem('quarkshield_account_type', u.accountType || 'user');
+          sessionStorage.setItem('quarkshield_account_type', u.accountType || 'user');
+        }
+        if (u.email && u.email !== currentUserEmail) setCurrentUserEmail(u.email);
+      } catch { /* offline: keep whatever the server last told us */ }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep viewMode and activeTab persisted in storage
   useEffect(() => {
@@ -385,6 +413,14 @@ export default function App() {
   }, [activeTab]);
 
   const handleLogout = () => {
+    // Revoke the server session (httpOnly cookie) — clearing web storage alone left
+    // the cookie alive and the next /api/auth/me probe would silently sign back in.
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
+    localStorage.removeItem('quarkshield_platform_operators');
+    localStorage.removeItem('quarkshield_account_type');
+    sessionStorage.removeItem('quarkshield_account_type');
+    localStorage.removeItem('quarkshield_customer_name');
+    sessionStorage.removeItem('quarkshield_customer_name');
     localStorage.removeItem('quarkshield_token');
     sessionStorage.removeItem('quarkshield_token');
     localStorage.removeItem('quarkshield_user');
@@ -460,123 +496,9 @@ export default function App() {
       const data = await res.json();
       setMachines(data);
     } catch (err: any) {
-      console.warn('Could not fetch machines from server, using sample fleet data:', err);
-      setMachines([
-        {
-          id: 'mach-01',
-          hostname: 'secops-macbook-pro.local',
-          os: 'darwin',
-          arch: 'arm64',
-          ip: '192.168.1.104',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'high',
-          quantumRiskScore: 78,
-          assetCount: 14,
-          vulnerableCount: 11,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 4).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Engineering Workstations',
-          tenantName: 'Apex Defense Labs (MSP)',
-          licenseKey: 'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E',
-          licenseTier: 'Enterprise Pro (500 Seats)'
-        },
-        {
-          id: 'mach-02',
-          hostname: 'prod-k8s-worker-03.internal',
-          os: 'linux',
-          arch: 'amd64',
-          ip: '10.240.0.18',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'critical',
-          quantumRiskScore: 92,
-          assetCount: 28,
-          vulnerableCount: 22,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Production Clusters',
-          tenantName: 'Apex Defense Labs (MSP)',
-          licenseKey: 'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E',
-          licenseTier: 'Enterprise Pro (500 Seats)'
-        },
-        {
-          id: 'mach-03',
-          hostname: 'partner-audit-node-01.lan',
-          os: 'linux',
-          arch: 'amd64',
-          ip: '172.16.20.12',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'medium',
-          quantumRiskScore: 45,
-          assetCount: 8,
-          vulnerableCount: 3,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Audit Network',
-          tenantName: 'PARTNERTEST (MSP Partner)',
-          licenseKey: 'QS-PARTNER-PARTNERTEST-6AF00609-C7486296',
-          licenseTier: 'MSP Partner (50 Seats)'
-        },
-        {
-          id: 'mach-04',
-          hostname: 'partner-jumpbox-win.ad',
-          os: 'windows',
-          arch: 'amd64',
-          ip: '172.16.20.15',
-          agentVersion: '2.0.0',
-          status: 'offline',
-          riskLevel: 'high',
-          quantumRiskScore: 68,
-          assetCount: 12,
-          vulnerableCount: 8,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Management Jumpbox',
-          tenantName: 'PARTNERTEST (MSP Partner)',
-          licenseKey: 'QS-PARTNER-PARTNERTEST-6AF00609-C7486296',
-          licenseTier: 'MSP Partner (50 Seats)'
-        },
-        {
-          id: 'mach-05',
-          hostname: 'Ganapatis-MBP',
-          os: 'darwin',
-          arch: 'arm64',
-          ip: '192.168.1.151',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'high',
-          quantumRiskScore: 80,
-          assetCount: 16,
-          vulnerableCount: 12,
-          lastSeen: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Executive Fleet',
-          tenantName: 'Executive Engineering Fleet',
-          licenseKey: 'QS-CORP-DEMOCLIENT-6AF00609-C7486296',
-          licenseTier: 'Growth Tier (12/250)'
-        },
-        {
-          id: 'mach-06',
-          hostname: 'finance-win11-corp.ad',
-          os: 'windows',
-          arch: 'amd64',
-          ip: '10.0.12.45',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'medium',
-          quantumRiskScore: 42,
-          assetCount: 9,
-          vulnerableCount: 4,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Corporate Laptops',
-          tenantName: 'Executive Engineering Fleet',
-          licenseKey: 'QS-CORP-DEMOCLIENT-6AF00609-C7486296',
-          licenseTier: 'Growth Tier (12/250)'
-        }
-      ]);
+      // No sample fleet: an empty list and the real error, never invented machines.
+      console.warn('Could not fetch machines from server:', err);
+      setMachines([]);
     } finally {
       setLoading(false);
     }
@@ -593,29 +515,11 @@ export default function App() {
         setSelectedDeploymentToken(data[0].token);
       }
     } catch (err: any) {
-      console.warn('Could not fetch tokens from server, using demo token:', err);
-      const fallbackTokens: FleetToken[] = [
-        {
-          id: 'tok-01',
-          name: 'Engineering Workstations 2026',
-          token: 'pqc_agent_8a7b9c0d1e2f3a4b5c6d',
-          status: 'active',
-          lastSync: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          machineCount: 14
-        },
-        {
-          id: 'tok-02',
-          name: 'Production Hypervisors',
-          token: 'pqc_agent_9f8e7d6c5b4a3a2b1c0d',
-          status: 'active',
-          lastSync: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          machineCount: 28
-        }
-      ];
-      setTokens(fallbackTokens);
-      setSelectedDeploymentToken(fallbackTokens[0].token);
+      // Never substitute fabricated tokens: an operator would copy a fake value
+      // into real deployment commands. Show an empty list and the real error.
+      console.warn('Could not fetch fleet tokens from server:', err);
+      setTokens([]);
+      setSelectedDeploymentToken('');
     }
   };
 
@@ -628,94 +532,9 @@ export default function App() {
       const data = await res.json();
       setCbomData(data);
     } catch (err: any) {
-      console.warn('Could not fetch CBOM from server, using sample CBOM data:', err);
-      setCbomData({
-        bomFormat: "CycloneDX",
-        specVersion: "1.6",
-        serialNumber: "urn:uuid:7c8b9d0e-1f2a-4b3c-9d8e-5a6b7c8d9e0f",
-        version: 1,
-        metadata: {
-          timestamp: new Date().toISOString(),
-          component: {
-            type: "platform",
-            name: "Desktop & Host PQC Fleet CBOM"
-          }
-        },
-        components: [
-          {
-            type: "cryptographic-asset",
-            bomRef: "cbom-item-01",
-            name: "id_ed25519",
-            cryptoProperties: {
-              assetType: "key",
-              algorithmProperties: {
-                name: "Ed25519",
-                keyLength: 256,
-                quantumSecurityLevel: 0
-              },
-              detectionContext: {
-                filePath: "/Users/developer/.ssh/id_ed25519",
-                machineHostname: "secops-macbook-pro.local",
-                operatingSystem: "darwin"
-              }
-            },
-            properties: [
-              { name: "quarkshield:quantumStatus", value: "Quantum Vulnerable" },
-              { name: "quarkshield:riskLevel", value: "high" },
-              { name: "quarkshield:recommendation", value: "Upgrade to OpenSSH 9.8+ with hybrid mlkem768x25519-sha256 key exchange." },
-              { name: "quarkshield:explainer", value: "Classical elliptic curve signatures (Ed25519) are susceptible to Shor's algorithm on a quantum computer." }
-            ]
-          },
-          {
-            type: "cryptographic-asset",
-            bomRef: "cbom-item-02",
-            name: "server.crt",
-            cryptoProperties: {
-              assetType: "certificate",
-              algorithmProperties: {
-                name: "RSA",
-                keyLength: 2048,
-                quantumSecurityLevel: 0
-              },
-              detectionContext: {
-                filePath: "/etc/ssl/certs/server.crt",
-                machineHostname: "prod-k8s-worker-03.internal",
-                operatingSystem: "linux"
-              }
-            },
-            properties: [
-              { name: "quarkshield:quantumStatus", value: "Quantum Vulnerable" },
-              { name: "quarkshield:riskLevel", value: "high" },
-              { name: "quarkshield:recommendation", value: "Deploy composite X.509 certificates with ML-DSA-65 (NIST FIPS 204)." },
-              { name: "quarkshield:explainer", value: "RSA-2048 integer factorization can be resolved in polynomial time via quantum phase estimation." }
-            ]
-          },
-          {
-            type: "cryptographic-asset",
-            bomRef: "cbom-item-03",
-            name: "id_mldsa65",
-            cryptoProperties: {
-              assetType: "key",
-              algorithmProperties: {
-                name: "ML-DSA-65",
-                keyLength: 1952,
-                quantumSecurityLevel: 3
-              },
-              detectionContext: {
-                filePath: "/Users/developer/.ssh/id_mldsa65",
-                machineHostname: "secops-macbook-pro.local",
-                operatingSystem: "darwin"
-              }
-            },
-            properties: [
-              { name: "quarkshield:quantumStatus", value: "Post-Quantum Secure" },
-              { name: "quarkshield:riskLevel", value: "secure" },
-              { name: "quarkshield:recommendation", value: "Maintain deployment. Fully compliant with NIST FIPS 204 post-quantum standards." },
-              { name: "quarkshield:explainer", value: "Lattice-based Module-LWE signature scheme resilient against both classical and quantum cryptanalysis." }
-            ]
-          }
-        ]
-      });
+      // No sample CBOM: show nothing rather than fabricated cryptographic findings.
+      console.warn('Could not fetch CBOM from server:', err);
+      setCbomData(null);
     }
   };
 
@@ -1161,29 +980,7 @@ export default function App() {
       }
     });
 
-    // 3. Fallback seeds if both sources are empty
-    if (tenantMap.size === 0) {
-      tenantMap.set('algomeld', {
-        key: 'algomeld',
-        displayName: 'Algomeld',
-        rawName: 'algomeld',
-        customerId: 'PART-4421',
-        isMSP: true,
-        accountType: 'partner',
-        aliases: ['algomeld', 'part-4421'],
-        machineCount: 0
-      });
-      tenantMap.set('spinovationcorp', {
-        key: 'spinovationcorp',
-        displayName: 'Spinovation Corp',
-        rawName: 'spinovationcorp',
-        customerId: 'CORP-9812',
-        isMSP: false,
-        accountType: 'corporate',
-        aliases: ['spinovationcorp', 'spinovation', 'corp-9812'],
-        machineCount: 0
-      });
-    }
+    // (No fabricated fallback tenants: an empty map means no tenants are enrolled.)
 
     // 4. Calculate enrolled machine count for each tenant
     const list = Array.from(tenantMap.values()).map(tenant => {
@@ -1433,7 +1230,9 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           }
 
           // Strict boundary: Only verified internal superadmin accounts may launch the central management console
-          const isInternalAdmin = userEmail && (userEmail.includes('@quarkshield.ai') || userEmail === 'superadmin@quarkshield.ai' || userEmail === 'sridhargs@gmail.com');
+          // Only the server-confirmed account type (stored by the sign-in handler from
+          // the login response, re-checked by /api/auth/me) may open the central console.
+          const isInternalAdmin = (localStorage.getItem('quarkshield_account_type') || sessionStorage.getItem('quarkshield_account_type')) === 'superadmin';
           if (isInternalAdmin) {
             if (window.history.pushState) {
               const consoleUrl = window.location.protocol + '//' + window.location.host + window.location.pathname + '?view=console';
@@ -1505,12 +1304,10 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
     );
   }
 
-  const isSuperAdmin = (currentUserEmail.toLowerCase().includes('@quarkshield.ai') ||
-    currentUserEmail.toLowerCase() === 'superadmin' ||
-    currentUserEmail.toLowerCase() === 'sridhargs@gmail.com') &&
-    currentUserRole === 'Super Admin';
+  // Server-confirmed account type only (see the /api/auth/me sync above).
+  const isSuperAdmin = currentAccountType === 'superadmin';
 
-  const displayCustomerId = isSuperAdmin ? 'QS-ADMIN-001' : (currentCustomerId || 'PART-4421');
+  const displayCustomerId = isSuperAdmin ? 'QS-ADMIN-001' : (currentCustomerId || '');
   const displayCustomerName = isSuperAdmin ? 'INTERNAL USER' : (currentCustomerName || (currentAccountType === 'partner' ? 'MSP PARTNER PRO' : 'CORPORATE CLIENT'));
   const displayRole = isSuperAdmin ? 'Super Admin' : (currentUserRole || 'Security Operator');
 
@@ -3581,10 +3378,10 @@ echo "✓ Linux host ${inoculationScriptModal.hostname} successfully hardened."`
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem', display: 'block' }}>{isSuperAdmin ? 'Root Master Authority Key' : 'Cryptographic License Key'}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.2rem' }}>
                       <code style={{ background: 'rgba(0,0,0,0.4)', padding: '0.35rem 0.65rem', borderRadius: '4px', fontSize: '0.78rem', color: 'var(--accent-cyan)', border: '1px solid rgba(255,255,255,0.08)', flex: 1, overflowX: 'auto' }}>
-                        {isSuperAdmin ? 'QS-SUPERADMIN-MASTER-88B92-FIPS203' : 'QS-LIC-' + displayCustomerId + '-SECURE-KYBER'}
+                        {isSuperAdmin ? 'Platform root account — licenses are issued per tenant (see Licenses)' : 'Issued per tenant — see Licenses'}
                       </code>
                       <button
-                        onClick={() => copyToClipboard(isSuperAdmin ? 'QS-SUPERADMIN-MASTER-88B92-FIPS203' : 'QS-LIC-' + displayCustomerId + '-SECURE-KYBER', 'superadmin-key')}
+                        onClick={() => copyToClipboard(displayCustomerId, 'superadmin-key')}
                         className="btn-secondary"
                         style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
                       >

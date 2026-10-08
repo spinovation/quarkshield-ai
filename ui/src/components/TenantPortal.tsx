@@ -571,13 +571,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const handleOpenStripePortal = async () => {
     setPortalLoading(true);
     try {
-      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
       const res = await fetch('/api/billing/portal-session', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenantSlug: client.name })
       });
       const data = await res.json();
@@ -601,9 +598,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const isPartner = client.accountType === 'partner' ||
     (client.customerId && client.customerId.startsWith('PART-')) ||
     cleanSlug.includes('algomeld') ||
-    cleanSlug.includes('partner') ||
-    emailInput.toLowerCase().includes('algomeld') ||
-    emailInput.toLowerCase().includes('partner');
+    cleanSlug.includes('partner');
 
   const displayCustomerId = client.customerId || (cleanSlug.includes('algomeld') ? 'PART-4421' : (cleanSlug.includes('partner') || isPartner ? 'PART-7000' : `CORP-${cleanSlug.slice(0, 4).toUpperCase()}`));
   const displayCustomerName = client.displayName || (cleanSlug.includes('algomeld') ? 'Algomeld' : (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)));
@@ -1077,6 +1072,14 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       const res = await fetch(`/api/tenant/${cleanSlug}/portal-data`);
       if (res.ok) {
         const data = await res.json();
+        // A successful portal-data read proves a valid server session (the cookie is
+        // apex-scoped, while the client-side tenant_auth flag is per-origin and is NOT
+        // set after the landing-page redirect). Treat it as authenticated.
+        if (!isAuthenticated) {
+          setIsAuthenticated(true);
+          try { sessionStorage.setItem(`tenant_auth_${cleanSlug}`, 'true'); } catch { /* ignore */ }
+        }
+        setSessionExpired(false);
         if (data.client) setClient(data.client);
         if (data.machines) setMachines(data.machines);
         if (data.assets) setAssets(data.assets);
@@ -1304,26 +1307,25 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         })
       });
 
-      let data: any = null;
-      if (res.ok) {
-        data = await res.json();
-      } else {
-        const errJson = await res.json().catch(() => null);
-        if (res.status === 401 || res.status === 400 || res.status === 403) {
-          throw new Error(errJson?.error || 'Invalid credentials. Please verify your password.');
-        }
+      const data: any = await res.json().catch(() => null);
+      // Only an explicit success from the server signs the user in. The old code
+      // treated ANY non-401/400/403 response (500, 502, 429, or 200 without
+      // success) as a successful login with a fabricated "Corporate Admin" role.
+      if (!res.ok || !data || !data.success) {
+        // A 2FA challenge arrives as 200 {success:false, twoFactorRequired:true, message}.
+        throw new Error(data?.error || data?.message || `Sign-in failed (server returned ${res.status}). Please try again.`);
       }
-
-      if (data && data.success) {
-        if (data.mustChangePassword) {
-          setShowTenantForceChangeModal(true);
-          return;
-        }
-        completeTenantLogin(data);
-      } else {
-        // Fallback login
-        completeTenantLogin();
+      if (data.mustChangePassword) {
+        setShowTenantForceChangeModal(true);
+        return;
       }
+      completeTenantLogin(data);
+      // The pre-login portal-data fetch 401s and latches "session expired"; clear
+      // that now and load the real data for this session.
+      setSessionExpired(false);
+      fetchTenantData();
+      fetchPullSchedules();
+      fetchFleetGroups();
     } catch (err: any) {
       setLoginError(err.message || 'Authentication failed. Please verify credentials.');
     } finally {
@@ -1363,11 +1365,25 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       }
 
       setTenantForceSuccess('Password successfully updated. Signing into workspace...');
-      setTimeout(() => {
-        setShowTenantForceChangeModal(false);
-        setPasswordInput(tenantForceNewPassword);
-        completeTenantLogin();
-      }, 1200);
+      // Re-authenticate with the new password so role/account data come from the
+      // server (never a client-side default).
+      const loginRes = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: emailInput.trim(), password: tenantForceNewPassword, totpCode: login2FACode })
+      });
+      const loginData = await loginRes.json().catch(() => null);
+      setShowTenantForceChangeModal(false);
+      setPasswordInput(tenantForceNewPassword);
+      if (!loginRes.ok || !loginData?.success) {
+        setLoginError('Password updated. Please sign in again with your new password.');
+        return;
+      }
+      completeTenantLogin(loginData);
+      setSessionExpired(false);
+      fetchTenantData();
+      fetchPullSchedules();
+      fetchFleetGroups();
     } catch (err: any) {
       setTenantForceError(err.message || 'Failed to change password. Please try again.');
     } finally {
@@ -1405,9 +1421,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   };
 
   const handleSignOut = () => {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
     setIsAuthenticated(false);
     sessionStorage.removeItem(`tenant_auth_${cleanSlug}`);
     localStorage.removeItem(`tenant_auth_${cleanSlug}`);
+    // Copilot transcripts can contain hostnames and remediation details; never leave
+    // them for the next user of this browser.
+    try { localStorage.removeItem(`quarkshield_copilot_sessions_${cleanSlug}`); } catch { /* ignore */ }
     if (onLogout) onLogout();
   };
 
@@ -1813,35 +1833,18 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         throw new Error('AI service error');
       }
     } catch (err) {
-      console.warn('Backend AI endpoint fallback, generating local PQC response:', err);
-      let fallbackReply = '';
-      const lower = text.toLowerCase();
-      if (lower.includes('factor') || lower.includes('rsa') || lower.includes('prime')) {
-        fallbackReply = `### RSA Factorization Vulnerability (Shor's Algorithm)\n\nClassical RSA relies on the computational hardness of prime integer factorization ($N = p \\times q$).\n\n| Algorithm | Modulus Size | Classical Security | Quantum Vulnerability (Shor's) | Logical Qubits Needed |\n| :--- | :--- | :--- | :--- | :--- |\n| **RSA-2048** | 2,048 bits | 112 bits (GNFS resistant) | **Completely broken in $O((\\log N)^3)$** | ~4,096 logical qubits |\n| **RSA-3072** | 3,072 bits | 128 bits | **Completely broken** | ~6,144 logical qubits |\n| **RSA-4096** | 4,096 bits | 144 bits | **Completely broken** | ~8,192 logical qubits |\n\n• **Polynomial-Time Breakdown**: Shor's algorithm solves factorization in polynomial time $O((\\log N)^3)$ using quantum period-finding via the Quantum Fourier Transform (QFT).\n• **Key Size Inefficacy**: Increasing key length to 4096 or 8192 bits offers zero defense against quantum computers—only a linear increase in qubits is required.\n• **Remediation**: Migrate RSA to **ML-KEM (FIPS 203)** for key exchange and **ML-DSA (FIPS 204)** or **SLH-DSA (FIPS 205)** for signatures.`;
-      } else if (lower.includes('elliptic') || lower.includes('ecc') || lower.includes('ecdsa') || lower.includes('diffie') || lower.includes('2300')) {
-        fallbackReply = `### Elliptic Curve Collapse & Diffie-Hellman Vulnerabilities\n\nECDSA (P-256 / secp256k1) and Diffie-Hellman rely on the Discrete Logarithm Problem ($Q = k \\cdot G$).\n\n| Cryptosystem | Classical Bits | Qubits to Break (Shor's) | Relative Threat vs RSA-2048 |\n| :--- | :--- | :--- | :--- |\n| **ECDSA P-256 (NIST)** | 128 bits | **~2,330 logical qubits** | **Falls ~45% FASTER than RSA-2048** |\n| **secp256k1 (Bitcoin/ETH)** | 128 bits | **~2,330 logical qubits** | **Falls ~45% FASTER than RSA-2048** |\n| **Ed25519 / X25519** | 128 bits | **~2,330 logical qubits** | **Falls ~45% FASTER than RSA-2048** |\n| **Diffie-Hellman 2048** | 112 bits | **~4,096 logical qubits** | Breaks simultaneously with RSA-2048 |\n\n• **Why ECC Collapses Faster**: Because elliptic curves use smaller operand sizes, Shor's algorithm requires only **~2,330 logical qubits**—meaning ECDSA will collapse before RSA-2048!\n• **Remediation**: Upgrade ECDH to **ML-KEM-768 (FIPS 203)** and ECDSA to **ML-DSA-65 (FIPS 204)**.`;
-      } else if (lower.includes('production') || lower.includes('pervasive') || lower.includes('99%') || lower.includes('underpin')) {
-        fallbackReply = `### Pervasive Classical Cryptography in Production (99% Exposure)\n\nClassical RSA and ECC underpin **over 99% of digital enterprise infrastructure** globally:\n\n| Production Layer | Classical Dependency | Quantum Threat Impact | Remediation Standard |\n| :--- | :--- | :--- | :--- |\n| **TLS / HTTPS Ingress** | RSA / ECDSA certificates, ECDH KEX | Retroactive decryption (HNDL), MITM session hijacking | Hybrid TLS 1.3 (\`X25519MLKEM768\`) |\n| **SSH Administration** | \`ssh-rsa\`, \`ecdsa-sha2\` keys | Complete remote server & root access compromise | OpenSSH 9.8+ (\`mlkem768x25519-sha256\`) |\n| **Enterprise VPNs** | IPsec / IKEv2 / OpenVPN DH groups | Adversary eavesdropping on corporate WAN tunnels | Post-quantum IPsec / ML-KEM |\n| **API Tokens & JWTs** | RS256 / ES256 signatures | Forged auth claims, privilege escalation | ML-DSA tokens or symmetric HS256 HMAC |\n| **Code Signing & CI/CD** | Authenticode, Apple Developer, Git commits | Malicious firmware & software supply-chain injection | ML-DSA-65 / NIST SP 800-208 (LMS/XMSS) |\n\nBecause classical algorithms are hardcoded into OS trust stores and HSMs, migration takes 3 to 7 years. Waiting is not an option.`;
-      } else if (lower.includes('harvest') || lower.includes('hndl') || lower.includes('mosca') || lower.includes('traffic')) {
-        fallbackReply = `### Harvested Traffic Threat ('Harvest Now, Decrypt Later' / HNDL) & Mosca's Theorem\n\nAdversaries and state intelligence services are tapping fiber lines and public clouds today to store encrypted traffic for future quantum decryption.\n\n**Mosca's Theorem Risk Equation**:\n$$\\mathbf{X + Y > Z} \\implies \\text{Your Confidentiality Is ALREADY Lost!}$$\n\n• **$X$ (Shelf-Life)**: Number of years sensitive data must remain secret (defense: 30+ yrs, healthcare PII: 50+ yrs, IP: 15-20 yrs).\n• **$Y$ (Migration Time)**: Years required to migrate legacy systems (enterprise average: 4 to 8 years).\n• **$Z$ (CRQC Horizon)**: Years until a Cryptanalytically Relevant Quantum Computer arrives (~2029 - 2033).\n\nIf $X + Y > Z$, data intercepted today is already compromised! Immediate deployment of hybrid key exchange (\`X25519MLKEM768\`) is mandatory.`;
-      } else {
-        fallbackReply = `### QuarkShield Post-Quantum Security Posture\n\n**Organization Overview:**\n- **Tenant:** ${client.displayName} (${client.customerId})\n- **Discovered Assets:** ${stats.totalAssets || assets.length || 98} cryptographic keys, certificates, and ciphers.\n- **Vulnerable Footprint:** Approximately 98% of discovered assets rely on classical RSA and ECDSA, which Shor's algorithm renders insecure.\n\n**Immediate Recommended Actions:**\n1. **OpenSSH Upgrade:** Ensure macOS and Linux workstations run OpenSSH 9.8+ to enforce hybrid \`mlkem768x25519-sha256\`.\n2. **TLS Ingress:** Deploy hybrid \`X25519MLKEM768\` across NGINX and reverse proxies.\n3. **Continuous Discovery:** Keep the QuarkShield endpoint agent active to populate real-time CBOM inventories.`;
-      }
-
+      // Never fabricate an "AI" answer (the old fallback invented asset counts and a
+      // "98% vulnerable" figure). Surface the failure honestly.
+      console.warn('AI copilot request failed:', err);
       const fallbackAiMsg: CopilotMessage = {
         id: 'msg-ai-' + Date.now(),
         sender: 'ai',
-        text: fallbackReply,
+        text: 'The PQC Copilot is temporarily unavailable (the AI service did not respond). Please try again in a moment.',
         timestamp: new Date().toISOString()
       };
-
       setCopilotSessions(prev => prev.map(s => {
         if (s.id === activeSessionId) {
-          return {
-            ...s,
-            updatedAt: new Date().toISOString(),
-            messages: [...s.messages, fallbackAiMsg]
-          };
+          return { ...s, updatedAt: new Date().toISOString(), messages: [...s.messages, fallbackAiMsg] };
         }
         return s;
       }));

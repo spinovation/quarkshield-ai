@@ -2,8 +2,20 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
-import { signSession, setSessionCookie, clearSessionCookie, isSuperRole, sanitizeTenantRole } from '../middleware/auth';
-import { assertPublicHost } from '../utils/ssrf';
+import { signSession, setSessionCookie, clearSessionCookie, isSuperRole, isPlatformAdmin, sanitizeTenantRole, revokeUserSessions, forgetUserState } from '../middleware/auth';
+
+/** Escape untrusted text for inclusion in HTML email bodies. */
+const escapeHtml = (v: unknown): string => String(v ?? '')
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+const EMAIL_RE = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+/** Strict address check: also blocks CR/LF header injection into the sendmail path. */
+const isValidEmail = (v: unknown): v is string =>
+  typeof v === 'string' && v.length <= 254 && EMAIL_RE.test(v) && !/[\r\n]/.test(v);
+/** Strip CR/LF so a subject can never inject additional mail headers. */
+const safeHeader = (v: unknown): string => String(v ?? '').replace(/[\r\n]+/g, ' ').slice(0, 500);
+import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
 /**
@@ -46,6 +58,10 @@ export const sendSupportEmail = async (options: {
   html: string;
   text: string;
 }): Promise<{ success: boolean; messageId?: string; error?: string }> => {
+  if (!isValidEmail(options.to)) {
+    return { success: false, error: 'Invalid recipient address.' };
+  }
+  options = { ...options, subject: safeHeader(options.subject) };
   let resendApiKey = process.env.RESEND_API_KEY || '';
   if (!resendApiKey) {
     try {
@@ -282,6 +298,17 @@ export const createClient = async (req: Request, res: Response) => {
     }
 
     const sanitizedName = name.trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
+    if (!sanitizedName) return res.status(400).json({ error: 'Tenant / Client name is invalid.' });
+    // Tenant slugs are compared with hyphens/case stripped everywhere else (normTenant),
+    // so "acme-corp" and "acmecorp" would be the SAME tenant to the auth layer. Refuse
+    // to create a second client that collapses to an existing one.
+    const clash = await pool.query(
+      "SELECT name FROM admin_clients WHERE LOWER(REPLACE(name, '-', '')) = LOWER(REPLACE($1, '-', '')) LIMIT 1",
+      [sanitizedName]
+    );
+    if (clash.rowCount) {
+      return res.status(409).json({ error: `A tenant with an equivalent name already exists (${clash.rows[0].name}).` });
+    }
     const id = 'client-' + crypto.randomUUID().substring(0, 8);
 
     const portQuery = await pool.query('SELECT MAX(app_port) as max_app, MAX(db_port) as max_db FROM admin_clients');
@@ -340,7 +367,9 @@ export const deleteClient = async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     // 2. Cascade delete tenant users (GDPR / PII right to be forgotten)
+    const purgedUsers = await client.query('SELECT id FROM tenant_users WHERE LOWER(tenant_name) = LOWER($1)', [tenantName]);
     await client.query('DELETE FROM tenant_users WHERE LOWER(tenant_name) = LOWER($1)', [tenantName]);
+    for (const r of purgedUsers.rows) forgetUserState('tenant', r.id);
 
     // 3. Cascade delete tenant settings
     await client.query('DELETE FROM tenant_settings WHERE LOWER(tenant_name) = LOWER($1)', [tenantName]);
@@ -427,12 +456,20 @@ export const getUsers = async (req: Request, res: Response) => {
 export const toggleUserRole = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { role } = req.body;
+    const role = String(req.body.role || '').toLowerCase().trim();
+    const ALLOWED_ADMIN_ROLES = ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor', 'user'];
+    if (!ALLOWED_ADMIN_ROLES.includes(role)) {
+      return res.status(400).json({ error: 'Invalid role.' });
+    }
+    if (req.user && req.user.sub === id) {
+      return res.status(400).json({ error: 'You cannot change your own role.' });
+    }
     const result = await pool.query(
-      'UPDATE admin_users SET role = $1 WHERE id = $2 RETURNING id, role',
+      'UPDATE admin_users SET role = $1, sessions_revoked_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING id, role',
       [role, id]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'User not found' });
+    forgetUserState('admin', id);
     res.json({ success: true, message: `User role successfully updated to '${role}'.` });
   } catch (err: any) {
     console.error('Error toggling user role:', err);
@@ -444,11 +481,15 @@ export const toggleUserLock = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { locked } = req.body;
+    if (req.user && req.user.sub === id) {
+      return res.status(400).json({ error: 'You cannot lock your own account.' });
+    }
     const result = await pool.query(
-      'UPDATE admin_users SET row_locked = $1 WHERE id = $2 RETURNING id, row_locked',
+      'UPDATE admin_users SET row_locked = $1, sessions_revoked_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE sessions_revoked_at END WHERE id = $2 RETURNING id, row_locked',
       [!!locked, id]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'User not found' });
+    forgetUserState('admin', id);
     res.json({ success: true, message: `User configuration row successfully ${locked ? 'locked' : 'unlocked'}.` });
   } catch (err: any) {
     console.error('Error toggling lock:', err);
@@ -518,24 +559,18 @@ export const resetUserPassword = async (req: Request, res: Response) => {
       ? password.trim()
       : ('QS-' + crypto.randomBytes(4).toString('hex').toUpperCase());
 
-    const salt = crypto.randomBytes(16).toString('hex');
-    const passwordHash = crypto.createHash('sha256').update(targetPassword + salt).digest('hex');
+    // bcrypt (cost 12); salt column is NULL for bcrypt rows.
+    const salt: string | null = null;
+    const passwordHash = await hashPassword(targetPassword);
 
-    // Update in admin_users with must_change_password = true
+    // Update in admin_users with must_change_password = true and revoke existing sessions.
+    // (No cross-write into tenant_users: a platform account and a tenant account that
+    // share an email are different principals; reset tenant users via the tenant route.)
     await pool.query(
-      'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
-      [passwordHash, salt, targetEmail]
+      'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = true, sessions_revoked_at = CURRENT_TIMESTAMP WHERE id = $3',
+      [passwordHash, salt, userRes.rows[0].id]
     );
-
-    // Also synchronize password to tenant_users if this user exists in a tenant pod
-    try {
-      await pool.query(
-        'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
-        [passwordHash, salt, targetEmail]
-      );
-    } catch (tuErr) {
-      console.warn('Syncing password reset to tenant_users notice:', tuErr);
-    }
+    forgetUserState('admin', userRes.rows[0].id);
 
     // Send email from Support@quarkshield.ai
     const loginUrl = 'https://quarkshield.ai';
@@ -629,7 +664,7 @@ export const getOperators = async (req: Request, res: Response) => {
     };
 
     const operators = result.rows.map(u => {
-      const isRoot = u.role === 'superadmin' || u.role === 'root_admin' || u.email === 'sridhargs@gmail.com' || u.email === 'admin@quarkshield.ai';
+      const isRoot = u.role === 'superadmin' || u.role === 'root_admin';
       const cleanRole = u.role || 'support_engineer';
       return {
         id: u.id,
@@ -659,21 +694,28 @@ export const getOperators = async (req: Request, res: Response) => {
 export const inviteOperator = async (req: Request, res: Response) => {
   try {
     const { name, email, role = 'support_engineer', mfaType = 'TOTP Authenticator' } = req.body;
-    if (!email || !email.includes('@')) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Valid email address is required.' });
     }
 
     const cleanEmail = email.toLowerCase().trim();
     const id = 'op-' + crypto.randomUUID().substring(0, 8);
     const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-    const salt = crypto.randomBytes(16).toString('hex');
-    const passwordHash = crypto.createHash('sha256').update(tempPassword + salt).digest('hex');
+    // bcrypt (cost 12); salt column is NULL for bcrypt rows.
+    const salt: string | null = null;
+    const passwordHash = await hashPassword(tempPassword);
 
-    await pool.query(`
+    const OPERATOR_ROLES = ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor'];
+    const cleanRole = OPERATOR_ROLES.includes(String(role)) ? String(role) : 'support_engineer';
+    // Create-only: re-inviting an existing operator must not reset their password or role.
+    const ins = await pool.query(`
       INSERT INTO admin_users (id, email, password_hash, salt, role, must_change_password, email_verified, cmdb_enabled, playbook_enabled, web3_enabled, company)
       VALUES ($1, $2, $3, $4, $5, true, true, true, true, true, $6)
-      ON CONFLICT (email) DO UPDATE SET password_hash = $3, salt = $4, role = $5, must_change_password = true, company = $6
-    `, [id, cleanEmail, passwordHash, salt, role, name || cleanEmail.split('@')[0]]);
+      ON CONFLICT (email) DO NOTHING
+    `, [id, cleanEmail, passwordHash, salt, cleanRole, name || cleanEmail.split('@')[0]]);
+    if (!ins.rowCount) {
+      return res.status(409).json({ error: 'An operator with this email already exists. Use "reset password" instead.' });
+    }
 
     const loginUrl = 'https://quarkshield.ai';
     const emailSubject = 'Your QuarkShield Platform Operator Access Credentials';
@@ -756,6 +798,10 @@ export const deleteUser = async (req: Request, res: Response) => {
       client.release();
       return res.status(404).json({ error: 'User not found.' });
     }
+    if (req.user && req.user.sub === userRes.rows[0].id) {
+      client.release();
+      return res.status(400).json({ error: 'You cannot delete your own account.' });
+    }
 
     const user = userRes.rows[0];
     if (user.row_locked) {
@@ -769,10 +815,13 @@ export const deleteUser = async (req: Request, res: Response) => {
     await client.query('UPDATE admin_clients SET admin_email = NULL WHERE LOWER(admin_email) = LOWER($1)', [user.email]);
 
     // 3. Purge user from tenant_users to remove any organization credentials / 2FA secrets
+    const tuIds = await client.query('SELECT id FROM tenant_users WHERE LOWER(email) = LOWER($1)', [user.email]);
     await client.query('DELETE FROM tenant_users WHERE LOWER(email) = LOWER($1)', [user.email]);
+    for (const r of tuIds.rows) forgetUserState('tenant', r.id);
 
     // 4. Delete from admin_users
     await client.query('DELETE FROM admin_users WHERE id = $1', [user.id]);
+    forgetUserState('admin', user.id); // sessions die immediately, not after the 30s cache
 
     await client.query('COMMIT');
     client.release();
@@ -925,7 +974,7 @@ export const getSystemHealth = async (req: Request, res: Response) => {
 // hardcoded value shipped in the repo and the agent binary, so anyone could
 // forge keys; set LICENSE_SIGNING_SECRET to a fresh random value and re-issue
 // keys. Falls back only outside production for local runs.
-const getLicenseSecret = (): string => {
+export const getLicenseSecret = (): string => {
   const s = process.env.LICENSE_SIGNING_SECRET;
   if (s && s.length >= 16) return s;
   if (process.env.NODE_ENV === 'production') {
@@ -934,7 +983,7 @@ const getLicenseSecret = (): string => {
   return 'dev-insecure-license-secret-change-me';
 };
 
-const computeLicenseSig = (tier: string, tenant: string, expiryHex: string): string => {
+export const computeLicenseSig = (tier: string, tenant: string, expiryHex: string): string => {
   const hmac = crypto.createHmac('sha256', getLicenseSecret());
   hmac.update(`${tier}:${tenant}:${expiryHex}`);
   return hmac.digest('hex').substring(0, 8).toUpperCase();
@@ -1435,7 +1484,7 @@ export const sendNextStepsEmail = async (req: Request, res: Response) => {
       tenantName,
       contactName,
       customerId,
-      tempPassword = 'QS-Amberoon7033!',
+      tempPassword,
       licenseKey
     } = req.body;
 
@@ -1453,7 +1502,7 @@ export const sendNextStepsEmail = async (req: Request, res: Response) => {
         LEFT JOIN admin_licenses l ON LOWER(l.tenant_name) = LOWER(c.name)
         WHERE LOWER(c.admin_email) = LOWER($1) OR LOWER(c.name) = LOWER($2) OR c.customer_id = $3
         LIMIT 1
-      `, [targetEmail || 'shirish.netke@amberoon.com', targetOrg || 'amberoon', targetCustId || 'PART-7033']);
+      `, [targetEmail || '', targetOrg || '', targetCustId || '']);
 
       if (clientLookup.rows.length > 0) {
         const row = clientLookup.rows[0];
@@ -1461,17 +1510,17 @@ export const sendNextStepsEmail = async (req: Request, res: Response) => {
         targetName = targetName || row.contact_name || row.display_name || 'Partner Admin';
         targetOrg = targetOrg || row.display_name || row.name;
         targetCustId = targetCustId || row.customer_id;
-        targetLicense = targetLicense || row.license_key || 'QS-PARTNER-AMBEROON-6B273FAD-218F40C9';
+        targetLicense = targetLicense || row.license_key || '';
       }
     }
 
-    if (!targetEmail) {
-      targetEmail = 'shirish.netke@amberoon.com';
+    if (!isValidEmail(targetEmail)) {
+      return res.status(400).json({ error: 'A valid recipient email (or a resolvable tenant/customer id) is required.' });
     }
-    if (!targetName) targetName = 'Shirish Netke';
-    if (!targetOrg) targetOrg = 'Amberoon';
-    if (!targetCustId) targetCustId = 'PART-7033';
-    if (!targetLicense) targetLicense = 'QS-PARTNER-AMBEROON-6B273FAD-218F40C9';
+    if (!targetName) targetName = 'Partner Admin';
+    if (!targetOrg || !targetCustId || !targetLicense || !tempPassword) {
+      return res.status(400).json({ error: 'tenantName, customerId, licenseKey and tempPassword are required when they cannot be resolved from the client record.' });
+    }
 
     const tenantWorkspace = targetOrg.toLowerCase().replace(/[^a-z0-9]/g, '');
     const portalUrl = `https://${tenantWorkspace}.quarkshield.ai`;
@@ -1869,11 +1918,13 @@ export const getTenantUsers = async (req: Request, res: Response) => {
 export const createTenantUser = async (req: Request, res: Response) => {
   try {
     const { tenant } = req.params;
-    const { email, firstName, lastName } = req.body;
+    const { email } = req.body;
+    const firstName = String(req.body.firstName || '').slice(0, 100);
+    const lastName = String(req.body.lastName || '').slice(0, 100);
     // Never trust a client-supplied role verbatim: a tenant login signs the stored
     // role straight into the JWT, so an unvalidated 'superadmin' here = platform takeover.
     const role = sanitizeTenantRole(req.body.role);
-    if (!email || !email.includes('@')) {
+    if (!isValidEmail(email)) {
       return res.status(400).json({ error: 'Valid email address is required.' });
     }
 
@@ -1881,14 +1932,20 @@ export const createTenantUser = async (req: Request, res: Response) => {
     const cleanEmail = email.toLowerCase().trim();
     const id = 'tu-' + crypto.randomUUID().substring(0, 8);
     const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-    const salt = crypto.randomBytes(16).toString('hex');
-    const passwordHash = crypto.createHash('sha256').update(tempPassword + salt).digest('hex');
+    // bcrypt (cost 12); salt column is NULL for bcrypt rows.
+    const salt: string | null = null;
+    const passwordHash = await hashPassword(tempPassword);
 
-    await pool.query(`
+    // Create-only. The old ON CONFLICT ... DO UPDATE silently reset an EXISTING user's
+    // password and role when their email was "re-invited" (account takeover by invite).
+    const ins = await pool.query(`
       INSERT INTO tenant_users (id, tenant_name, email, first_name, last_name, role, two_factor_enabled, status, password_hash, salt, must_change_password)
       VALUES ($1, $2, $3, $4, $5, $6, false, 'active', $7, $8, true)
-      ON CONFLICT (tenant_name, email) DO UPDATE SET role = $6, first_name = $4, last_name = $5, password_hash = $7, salt = $8, must_change_password = true
-    `, [id, cleanTenant, cleanEmail, firstName || '', lastName || '', role, passwordHash, salt]);
+      ON CONFLICT (tenant_name, email) DO NOTHING
+    `, [id, cleanTenant, cleanEmail, firstName, lastName, role, passwordHash, salt]);
+    if (!ins.rowCount) {
+      return res.status(409).json({ error: 'A user with this email already exists in this workspace. Use "reset password" instead.' });
+    }
 
     const loginUrl = `https://${cleanTenant}.quarkshield.ai`;
     const emailSubject = `Your QuarkShield Workspace Access Credentials (${cleanTenant})`;
@@ -1905,8 +1962,8 @@ export const createTenantUser = async (req: Request, res: Response) => {
           <div style="padding: 28px;">
             <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Workspace Invitation</h2>
             <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
-              Hello <strong>${firstName || cleanEmail}</strong>,<br/>
-              You have been invited to join the <strong>${cleanTenant}</strong> workspace on QuarkShield as a <strong>${role}</strong>.
+              Hello <strong>${escapeHtml(firstName || cleanEmail)}</strong>,<br/>
+              You have been invited to join the <strong>${escapeHtml(cleanTenant)}</strong> workspace on QuarkShield as a <strong>${escapeHtml(role)}</strong>.
             </p>
             <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 18px; margin: 20px 0; text-align: center;">
               <div style="font-size: 12px; text-transform: uppercase; color: #94a3b8; letter-spacing: 1px; margin-bottom: 6px;">Your Temporary Password</div>
@@ -1960,11 +2017,22 @@ export const updateTenantUser = async (req: Request, res: Response) => {
       ? null
       : sanitizeTenantRole(req.body.role);
 
-    await pool.query(`
+    if (req.user && req.user.sub === id && role !== null && role !== req.user.role) {
+      return res.status(400).json({ error: 'You cannot change your own role.' });
+    }
+    const safeStatus = status === undefined || status === null ? null : (['active', 'disabled', 'suspended'].includes(String(status)) ? String(status) : null);
+    if (status !== undefined && status !== null && safeStatus === null) {
+      return res.status(400).json({ error: 'Invalid status.' });
+    }
+
+    const upd = await pool.query(`
       UPDATE tenant_users
-      SET role = COALESCE($1, role), status = COALESCE($2, status)
+      SET role = COALESCE($1, role), status = COALESCE($2, status), sessions_revoked_at = CURRENT_TIMESTAMP
       WHERE id = $3 AND tenant_name = $4
-    `, [role, status, id, cleanTenant]);
+    `, [role, safeStatus, id, cleanTenant]);
+    if (!upd.rowCount) return res.status(404).json({ error: 'User not found in tenant' });
+    // A role/status change must take effect immediately, not when the old JWT expires.
+    forgetUserState('tenant', id);
 
     res.json({ success: true, message: 'User updated successfully.' });
   } catch (err: any) {
@@ -1978,7 +2046,12 @@ export const deleteTenantUser = async (req: Request, res: Response) => {
     const { tenant, id } = req.params;
     const cleanTenant = tenant.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    await pool.query('DELETE FROM tenant_users WHERE id = $1 AND tenant_name = $2', [id, cleanTenant]);
+    if (req.user && req.user.sub === id) {
+      return res.status(400).json({ error: 'You cannot remove your own account.' });
+    }
+    const del = await pool.query('DELETE FROM tenant_users WHERE id = $1 AND tenant_name = $2', [id, cleanTenant]);
+    if (!del.rowCount) return res.status(404).json({ error: 'User not found in tenant' });
+    forgetUserState('tenant', id);
     res.json({ success: true, message: 'User removed from tenant.' });
   } catch (err: any) {
     console.error('Error deleting tenant user:', err);
@@ -1991,10 +2064,12 @@ export const resetTenantUser2FA = async (req: Request, res: Response) => {
     const { tenant, id } = req.params;
     const cleanTenant = tenant.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    await pool.query(
-      'UPDATE tenant_users SET two_factor_secret = NULL, two_factor_enabled = false WHERE id = $1 AND tenant_name = $2',
+    const upd = await pool.query(
+      'UPDATE tenant_users SET two_factor_secret = NULL, two_factor_enabled = false, two_factor_recovery_codes = NULL, sessions_revoked_at = CURRENT_TIMESTAMP WHERE id = $1 AND tenant_name = $2',
       [id, cleanTenant]
     );
+    if (!upd.rowCount) return res.status(404).json({ error: 'User not found in tenant' });
+    forgetUserState('tenant', id);
 
     res.json({ success: true, message: '2FA reset successfully. User can re-enroll on their next login.' });
   } catch (err: any) {
@@ -2016,13 +2091,15 @@ export const resetTenantUserPassword = async (req: Request, res: Response) => {
 
     const user = userRes.rows[0];
     const tempPassword = 'QS-' + crypto.randomBytes(4).toString('hex').toUpperCase();
-    const salt = crypto.randomBytes(16).toString('hex');
-    const passwordHash = crypto.createHash('sha256').update(tempPassword + salt).digest('hex');
+    // bcrypt (cost 12); salt column is NULL for bcrypt rows.
+    const salt: string | null = null;
+    const passwordHash = await hashPassword(tempPassword);
 
     await pool.query(
-      'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = true WHERE id = $3 AND tenant_name = $4',
+      'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = true, sessions_revoked_at = CURRENT_TIMESTAMP WHERE id = $3 AND tenant_name = $4',
       [passwordHash, salt, id, cleanTenant]
     );
+    forgetUserState('tenant', id);
 
     // SECURITY: do NOT mirror this reset into admin_users. A tenant password reset
     // must never touch the platform admin table — matching on email let any tenant
@@ -2043,7 +2120,7 @@ export const resetTenantUserPassword = async (req: Request, res: Response) => {
           <div style="padding: 28px;">
             <h2 style="margin-top: 0; font-size: 18px; color: #ffffff;">Password Reset Requested</h2>
             <p style="color: #cbd5e1; font-size: 14px; line-height: 1.6;">
-              Hello <strong>${user.first_name || user.email}</strong>,<br/>
+              Hello <strong>${escapeHtml(user.first_name || user.email)}</strong>,<br/>
               An administrative password reset was initiated for your workspace account on <strong>${cleanTenant}.quarkshield.ai</strong>.
             </p>
             <div style="background: #1e293b; border: 1px solid #38bdf8; border-radius: 8px; padding: 18px; margin: 20px 0; text-align: center;">
@@ -2278,8 +2355,9 @@ export const onboardUser = async (req: Request, res: Response) => {
 
     // Generate initial secure temporary password
     const initialTempPassword = `QS-${crypto.randomBytes(9).toString('base64url')}!`;
-    const salt = crypto.randomBytes(16).toString('hex');
-    const passwordHash = crypto.createHash('sha256').update(initialTempPassword + salt).digest('hex');
+    // bcrypt (cost 12); salt column is NULL for bcrypt rows.
+    const salt: string | null = null;
+    const passwordHash = await hashPassword(initialTempPassword);
 
     // Also register user into tenant_users with customer_id and credentials
     const userId = 'tu-' + crypto.randomUUID().substring(0, 8);
@@ -2452,9 +2530,12 @@ export const probeEndpoint = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Invalid port.' });
     }
 
-    // SSRF guard: refuse internal/loopback/link-local targets before connecting.
+    // SSRF guard: refuse internal/loopback/link-local targets, and connect to the
+    // address verified here (SNI = hostname) so a rebinding DNS answer cannot swap
+    // in an internal IP between the check and the connection.
+    let pinnedAddress: string;
     try {
-      await assertPublicHost(host);
+      pinnedAddress = await resolvePublicHost(host);
     } catch (ssrfErr: any) {
       return res.status(400).json({ error: `Refused: ${ssrfErr.message}. Only public internet endpoints can be probed.` });
     }
@@ -2531,7 +2612,7 @@ export const probeEndpoint = async (req: Request, res: Response) => {
     function fallbackSocketProbe() {
       let responded = false;
       const socket = tls.connect({
-        host,
+        host: pinnedAddress,
         port,
         servername: host,
         rejectUnauthorized: false,
@@ -2638,7 +2719,7 @@ export const unifiedLogin = async (req: Request, res: Response) => {
     if (adminUserResult.rows.length > 0) {
       const u = adminUserResult.rows[0];
       if (!u.password_hash) {
-        return res.status(401).json({ error: 'This account has no password set. Ask an administrator to send a reset.' });
+        return res.status(401).json({ error: INVALID }); // no enumeration of password-less accounts
       }
       const v = await verifyPassword(password, u.password_hash, u.salt);
       if (!v.ok) return res.status(401).json({ error: INVALID });
@@ -2687,7 +2768,7 @@ export const unifiedLogin = async (req: Request, res: Response) => {
     if (tenantUserResult.rows.length > 0) {
       const tu = tenantUserResult.rows[0];
       if (!tu.password_hash) {
-        return res.status(401).json({ error: 'This account has no password set. Ask your administrator to send a reset.' });
+        return res.status(401).json({ error: INVALID });
       }
       const v = await verifyPassword(password, tu.password_hash, tu.salt);
       if (!v.ok) return res.status(401).json({ error: INVALID });
@@ -2765,8 +2846,11 @@ export const unifiedLogin = async (req: Request, res: Response) => {
   }
 };
 
-/** End the current session. */
-export const logout = async (_req: Request, res: Response) => {
+/** End the current session. Revokes every session for the account server-side. */
+export const logout = async (req: Request, res: Response) => {
+  if (req.user) {
+    await revokeUserSessions(req.user.accountType === 'tenant' ? 'tenant_users' : 'admin_users', req.user.sub);
+  }
   clearSessionCookie(res);
   return res.json({ success: true });
 };
@@ -2894,14 +2978,16 @@ export const resetPassword = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'This reset link is invalid or has expired. Request a new one.' });
     }
     const newHash = await hashPassword(String(newPassword));
-    await pool.query('UPDATE admin_users SET password_hash = $1, salt = NULL, must_change_password = false WHERE LOWER(email) = LOWER($2)', [newHash, row.email]);
-    await pool.query(
-      `UPDATE tenant_users SET password_hash = $1, salt = NULL, must_change_password = false 
+    const affectedAdmins = await pool.query('UPDATE admin_users SET password_hash = $1, salt = NULL, must_change_password = false, sessions_revoked_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER($2) RETURNING id', [newHash, row.email]);
+    for (const r of affectedAdmins.rows) forgetUserState('admin', r.id);
+    const affectedTenantUsers = await pool.query(
+      `UPDATE tenant_users SET password_hash = $1, salt = NULL, must_change_password = false, sessions_revoked_at = CURRENT_TIMESTAMP
        WHERE LOWER(email) = LOWER($2) 
           OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.com', '@algomeld.ai')) 
-          OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.ai', '@algomeld.com'))`,
+          OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.ai', '@algomeld.com')) RETURNING id`,
       [newHash, row.email]
     );
+    for (const r of affectedTenantUsers.rows) forgetUserState('tenant', r.id);
     await pool.query('UPDATE password_reset_tokens SET used = true WHERE id = $1', [row.id]);
     return res.json({ success: true, message: 'Password updated. You can now sign in.' });
   } catch (err: any) {
@@ -2912,52 +2998,41 @@ export const resetPassword = async (req: Request, res: Response) => {
 
 export const changePassword = async (req: Request, res: Response) => {
   try {
-    const { email, currentPassword, newPassword } = req.body;
-    if (!email || !currentPassword || !newPassword) {
-      return res.status(400).json({ error: 'Email, current password, and new password are required.' });
+    // Requires a session (routes.ts). The caller may only change THEIR OWN password,
+    // identified by the verified JWT — never by a body-supplied email. The previous
+    // version was unauthenticated, skipped 2FA, wrote the same hash into both user
+    // tables by email, only understood legacy sha256 hashes (so it failed for every
+    // account that had logged in since the bcrypt upgrade), and downgraded bcrypt
+    // hashes back to sha256 on success.
+    if (!req.user) return res.status(401).json({ error: 'Authentication required.' });
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: 'Current password and new password are required.' });
     }
-
     if (typeof newPassword !== 'string' || newPassword.trim().length < 8) {
       return res.status(400).json({ error: 'New password must be at least 8 characters long.' });
     }
 
-    const cleanEmail = email.toLowerCase().trim();
+    const table = req.user.accountType === 'tenant' ? 'tenant_users' : 'admin_users';
+    const row = (await pool.query(`SELECT id, password_hash, salt FROM ${table} WHERE id = $1`, [req.user.sub])).rows[0];
+    if (!row) return res.status(401).json({ error: 'Authentication required.' });
 
-    // Verify current password against admin_users or tenant_users
-    const adminRes = await pool.query('SELECT password_hash, salt FROM admin_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
-    const tenantRes = await pool.query('SELECT password_hash, salt FROM tenant_users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
-
-    let valid = false;
-    if (adminRes.rowCount && adminRes.rowCount > 0 && adminRes.rows[0].password_hash && adminRes.rows[0].salt) {
-      const testHash = crypto.createHash('sha256').update(currentPassword + adminRes.rows[0].salt).digest('hex');
-      if (testHash === adminRes.rows[0].password_hash) {
-        valid = true;
-      }
-    }
-
-    if (!valid && tenantRes.rowCount && tenantRes.rowCount > 0 && tenantRes.rows[0].password_hash && tenantRes.rows[0].salt) {
-      const testHash = crypto.createHash('sha256').update(currentPassword + tenantRes.rows[0].salt).digest('hex');
-      if (testHash === tenantRes.rows[0].password_hash) {
-        valid = true;
-      }
-    }
-
-    if (!valid) {
+    const v = await verifyPassword(String(currentPassword), row.password_hash, row.salt);
+    if (!v.ok) {
       return res.status(401).json({ error: 'Current / temporary password is incorrect.' });
     }
 
-    const newSalt = crypto.randomBytes(16).toString('hex');
-    const newHash = crypto.createHash('sha256').update(newPassword.trim() + newSalt).digest('hex');
-
+    const newHash = await hashPassword(newPassword.trim());
     await pool.query(
-      'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = false WHERE LOWER(email) = LOWER($3)',
-      [newHash, newSalt, cleanEmail]
+      `UPDATE ${table} SET password_hash = $1, salt = NULL, must_change_password = false, sessions_revoked_at = CURRENT_TIMESTAMP WHERE id = $2`,
+      [newHash, row.id]
     );
+    forgetUserState(req.user.accountType === 'tenant' ? 'tenant' : 'admin', row.id);
 
-    await pool.query(
-      'UPDATE tenant_users SET password_hash = $1, salt = $2, must_change_password = false WHERE LOWER(email) = LOWER($3)',
-      [newHash, newSalt, cleanEmail]
-    );
+    // Every other session for this account is now invalid; re-issue this one so the
+    // caller stays signed in.
+    const { sub, email, role, accountType, tenant } = req.user;
+    setSessionCookie(res, signSession({ sub, email, role, accountType, tenant }));
 
     res.json({
       success: true,
@@ -2999,29 +3074,13 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
          OR LOWER(customer_id) = $1
          OR LOWER(admin_email) = $1
          OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(name) IN ('spinovation', 'spinovationcorp'))
+      ORDER BY CASE WHEN LOWER(name) = $1 THEN 0 ELSE 1 END, created_at ASC
       LIMIT 1;
     `, [cleanTenant]);
 
     let client = clientQuery.rows[0];
 
-    // Safe fallback if client is spinovationcorp
-    if (!client && (cleanTenant.includes('spinovation') || cleanTenant === 'corp-9812')) {
-      client = {
-        id: 'client-090e8814',
-        name: 'spinovationcorp',
-        displayName: 'Spinovation Corp',
-        customerId: 'CORP-9812',
-        appPort: 5002,
-        dbPort: 5434,
-        status: 'active',
-        subscriptionTier: 'growth',
-        mcaLimit: 100,
-        contactName: 'Ganapati Sridhar',
-        adminEmail: 'sridhargs@spinovation.com',
-        accountType: 'corporate',
-        createdAt: new Date(Date.now() - 86400000 * 30).toISOString()
-      };
-    }
+    // No synthetic client rows: an unknown tenant is reported as such.
 
     const tenantNameSearch = client ? client.name : cleanTenant;
 
@@ -3120,7 +3179,10 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
          OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(tenant_name) LIKE '%spinovation%' OR LOWER(name) = 'engg'))
       ORDER BY created_at DESC;
     `, [tenantNameSearch]);
-    const tokens = tokensQuery.rows;
+    // Enrollment tokens are bearer credentials: only tenant admins / platform roles
+    // get the secret value. Other roles see the token list with the value masked.
+    const canSeeTokens = isSuperRole(req.user?.role) || req.user?.role === 'admin';
+    const tokens = tokensQuery.rows.map((t: any) => canSeeTokens ? t : { ...t, token: t.token ? `${String(t.token).slice(0, 10)}••••••••` : t.token });
 
     // 6. Fetch 30-day Daily Historical Snapshots
     const snapshotsQuery = await pool.query(`

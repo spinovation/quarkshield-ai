@@ -29,6 +29,7 @@ export interface GitFinding {
 }
 
 export interface GitScanSummary {
+  tenantName?: string;
   id: string;
   provider: 'github' | 'bitbucket' | 'gitlab' | 'generic';
   repoUrl: string;
@@ -553,6 +554,31 @@ function buildAuthenticatedUrl(repoUrl: string, token?: string, username?: strin
 // 2. REMOTE GIT SCANNER ENDPOINT (POST /api/scan/remote-git)
 // ==============================================================================
 
+// git is given a MINIMAL environment (no JWT/DB/Stripe secrets inherited from the
+// server process) and is forbidden from following redirects or switching protocols,
+// so a public host that 302s to an internal address cannot turn the clone into SSRF.
+const GIT_ENV: NodeJS.ProcessEnv = {
+  PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
+  HOME: process.env.HOME || '/tmp',
+  LANG: 'C',
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: 'echo',
+  GIT_CONFIG_NOSYSTEM: '1',
+  // Egress proxy / custom CA bundle are the only operator settings git needs.
+  ...(process.env.HTTPS_PROXY ? { HTTPS_PROXY: process.env.HTTPS_PROXY } : {}),
+  ...(process.env.HTTP_PROXY ? { HTTP_PROXY: process.env.HTTP_PROXY } : {}),
+  ...(process.env.NO_PROXY ? { NO_PROXY: process.env.NO_PROXY } : {}),
+  ...(process.env.GIT_SSL_CAINFO ? { GIT_SSL_CAINFO: process.env.GIT_SSL_CAINFO } : {}),
+};
+const GIT_HARDENING = [
+  '-c', 'http.followRedirects=false',
+  '-c', 'protocol.allow=never',
+  '-c', 'protocol.https.allow=always',
+  '-c', 'protocol.http.allow=always',
+  '-c', 'core.hooksPath=/dev/null',
+  '-c', 'submodule.recurse=false',
+];
+
 export const scanRemoteGitRepo = async (req: Request, res: Response) => {
   const startTime = Date.now();
   const { 
@@ -609,13 +635,9 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
       }
       gitArgs.push(safeUrl, tmpDir);
 
-      execFile('git', gitArgs, {
+      execFile('git', [...GIT_HARDENING, ...gitArgs], {
         timeout: 60000, // 60s timeout
-        env: {
-          ...process.env,
-          GIT_TERMINAL_PROMPT: '0', // Do not prompt for password
-          GIT_ASKPASS: 'echo'
-        }
+        env: GIT_ENV
       }, (error, stdout, stderr) => {
         if (error) {
           // Sanitize any token from error message
@@ -625,9 +647,9 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
           // If branch was specified and failed, retry default branch clone
           if (branch && branch !== 'master' && (sanitizedErr.includes('Remote branch') || sanitizedErr.includes('not found'))) {
             // Attempt fallback to default branch
-            execFile('git', ['clone', '--depth', '1', safeUrl, tmpDir], {
+            execFile('git', [...GIT_HARDENING, 'clone', '--depth', '1', safeUrl, tmpDir], {
               timeout: 60000,
-              env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' }
+              env: GIT_ENV
             }, (fallbackErr, fbStdout, fbStderr) => {
               if (fallbackErr) {
                 const fbSanitized = (fbStderr || fallbackErr.message).replace(/https?:\/\/[^@]+@/gi, 'https://***@');
@@ -697,6 +719,7 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
 
     const summary: GitScanSummary = {
       id: scanId,
+      tenantName: cleanTenant,
       provider: provider as any,
       repoUrl: sanitizedDisplayUrl,
       repoName,
@@ -875,16 +898,15 @@ export const getGitScanHistory = async (req: Request, res: Response) => {
     query += ` ORDER BY created_at DESC LIMIT 20`;
 
     const result = await pool.query(query, params);
-
-    if (result.rows && result.rows.length > 0) {
-      return res.json(result.rows);
-    }
+    // An EMPTY result is a valid answer (this tenant has no scans). Only a DB error
+    // falls through to the process-wide cache, and that cache is tenant-filtered.
+    return res.json(result.rows || []);
   } catch (dbErr) {
     console.warn('DB read for git_scans failed, returning cached scans:', dbErr);
   }
 
-  // Fallback to memory cache
-  const list = recentScansCache.map(s => ({
+  const cacheTenant = String(req.query.tenant || req.user?.tenant || '').toLowerCase();
+  const list = recentScansCache.filter(s => cacheTenant && String(s.tenantName || '').toLowerCase() === cacheTenant).map(s => ({
     id: s.id,
     provider: s.provider,
     repoUrl: s.repoUrl,

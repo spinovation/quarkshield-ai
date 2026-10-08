@@ -32,18 +32,24 @@ if [ ! -f .env ]; then
   GEN_JWT="$(openssl rand -hex 32)"
   GEN_LIC="$(openssl rand -hex 32)"
   GEN_CBOM="$(openssl rand -hex 32)"
+  GEN_DB="$(openssl rand -hex 24)"
+  GEN_2FA="$(openssl rand -hex 32)"
+  GEN_CONN="$(openssl rand -hex 32)"
   # Replace the template secret lines with generated random values (portable sed).
   sed -i.bak \
     -e "s|^JWT_SECRET=.*|JWT_SECRET=${GEN_JWT}|" \
     -e "s|^LICENSE_SIGNING_SECRET=.*|LICENSE_SIGNING_SECRET=${GEN_LIC}|" \
     -e "s|^CBOM_SIGNING_SECRET=.*|CBOM_SIGNING_SECRET=${GEN_CBOM}|" \
+    -e "s|^DB_PASSWORD=.*|DB_PASSWORD=${GEN_DB}|" \
+    -e "s|^TWO_FACTOR_ENC_KEY=.*|TWO_FACTOR_ENC_KEY=${GEN_2FA}|" \
+    -e "s|^CONNECTOR_ENC_KEY=.*|CONNECTOR_ENC_KEY=${GEN_CONN}|" \
     .env && rm -f .env.bak
-  echo "   ✓ Generated JWT_SECRET / LICENSE_SIGNING_SECRET / CBOM_SIGNING_SECRET."
+  echo "   ✓ Generated JWT_SECRET / LICENSE_SIGNING_SECRET / CBOM_SIGNING_SECRET / DB_PASSWORD / TWO_FACTOR_ENC_KEY / CONNECTOR_ENC_KEY."
   echo "   ⚠️  Set a strong BOOTSTRAP_ADMIN_PASSWORD in .env before first login (still a placeholder)."
 fi
 
 # Fail closed: refuse to deploy if any critical secret is still a placeholder/too short.
-if grep -qiE '^(JWT_SECRET|LICENSE_SIGNING_SECRET)=.*(replace-with|change[-_]?me|changeme|example|placeholder|your[-_])' .env; then
+if grep -qiE '^(JWT_SECRET|LICENSE_SIGNING_SECRET|DB_PASSWORD|TWO_FACTOR_ENC_KEY|CONNECTOR_ENC_KEY)=.*(replace-with|change[-_]?me|changeme|example|placeholder|your[-_])' .env; then
   echo "❌ Refusing to deploy: .env still contains placeholder secrets. Set strong random JWT_SECRET / LICENSE_SIGNING_SECRET." >&2
   exit 1
 fi

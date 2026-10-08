@@ -87,6 +87,19 @@ const parseVaultConfig = (row: any): VaultConfig => {
   };
 };
 
+/**
+ * SSRF guard for the endpoints a connector will actually contact. `endpoint_url`
+ * alone is not enough: Vault/Azure/AWS endpoints (and the Azure authority host) can
+ * also come from the config blob, which the old check never looked at.
+ */
+const assertConnectorTargetsPublic = async (row: any): Promise<void> => {
+  const cfg = rawConfig(row);
+  const targets = [row.endpoint_url, cfg.address, cfg.vaultUrl, cfg.endpointUrl, cfg.authorityHost]
+    .map((v) => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean);
+  for (const t of targets) await assertConnectorHostPublic(t);
+};
+
 const parseAzureConfig = (row: any): AzureConfig => {
   const cfg = rawConfig(row);
   return {
@@ -144,7 +157,7 @@ export const createPkiConnector = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Connector name and provider type are required.' });
     }
     try {
-      await assertConnectorHostPublic(endpointUrl);
+      await assertConnectorTargetsPublic({ endpoint_url: endpointUrl, config_summary: config });
     } catch (e: any) {
       return res.status(400).json({ error: `Endpoint URL rejected: ${e.message}` });
     }
@@ -213,7 +226,7 @@ export const testPkiConnector = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Connector not found.' });
     }
     try {
-      await assertConnectorHostPublic(c.endpoint_url);
+      await assertConnectorTargetsPublic(c);
     } catch (e: any) {
       return res.status(400).json({ success: false, error: `Endpoint URL rejected: ${e.message}` });
     }
@@ -452,7 +465,7 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
   if (REAL_PROVIDERS.has(provider)) {
     const row = (await pool.query('SELECT config_summary, endpoint_url FROM pki_connectors WHERE id = $1', [connectorId])).rows[0] || {};
     try {
-      await assertConnectorHostPublic(row.endpoint_url);
+      await assertConnectorTargetsPublic(row);
       let assets: DiscoveredAsset[] = [];
       if (provider === 'aws_kms') assets = await discoverKmsKeys(parseKmsConfig(row));
       else if (provider === 'hashicorp_vault') assets = await discoverVaultKeys(parseVaultConfig(row));

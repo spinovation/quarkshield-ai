@@ -49,17 +49,10 @@ export const QUARKSHIELD_PLANS: Record<string, PlanTierConfig> = {
   }
 };
 
-const getLicenseSecret = (): string => {
-  const s = process.env.LICENSE_SIGNING_SECRET;
-  if (s && s.length >= 16) return s;
-  return 'dev-insecure-license-secret-change-me';
-};
-
-const computeLicenseSig = (tier: string, tenant: string, expiryHex: string): string => {
-  const hmac = crypto.createHmac('sha256', getLicenseSecret());
-  hmac.update(`${tier}:${tenant}:${expiryHex}`);
-  return hmac.digest('hex').substring(0, 8).toUpperCase();
-};
+// Single source of truth for license signing (fails closed in production when the
+// secret is missing/weak). The previous local copy silently fell back to a public
+// dev secret, so Stripe-issued licenses were forgeable.
+import { computeLicenseSig } from './adminController';
 
 /**
  * POST /api/billing/checkout

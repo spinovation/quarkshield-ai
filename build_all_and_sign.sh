@@ -4,6 +4,13 @@
 # Ensures 100% of Windows and macOS releases are automatically signed and trusted.
 # ==============================================================================
 set -e
+# The agent's offline license check is only meaningful when a PRIVATE signing
+# secret is compiled in; the default in license.go is public. Require it.
+if [ -z "${LICENSE_SIGNING_SECRET:-}" ] || [ "${#LICENSE_SIGNING_SECRET}" -lt 32 ]; then
+  echo "❌ LICENSE_SIGNING_SECRET must be set (>=32 chars) and match the server's value before building release binaries." >&2
+  exit 1
+fi
+GO_LDFLAGS="-s -w -X main.LicenseSigningSecret=${LICENSE_SIGNING_SECRET}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$SCRIPT_DIR/agent"
@@ -18,7 +25,7 @@ cd "$AGENT_DIR"
 # 1. WINDOWS BUILD & AZURE TRUSTED SIGNING
 # ------------------------------------------------------------------------------
 echo "⚙️ [1/4] Building and Signing Windows Agent (x86_64)..."
-GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-windows-amd64.exe .
+GOOS=windows GOARCH=amd64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-windows-amd64.exe .
 
 SIGNED_WIN=false
 if [ -f ".env.signing" ] || [ -n "$AZURE_CLIENT_ID" ]; then
@@ -35,7 +42,7 @@ if [ "$SIGNED_WIN" = false ]; then
   if command -v osslsigncode >/dev/null 2>&1; then
     osslsigncode sign \
       -pkcs12 certs/fedmitigate-codesign.p12 \
-      -pass fedmitigate \
+      -pass "${FEDMITIGATE_P12_PASSWORD:?set FEDMITIGATE_P12_PASSWORD for local signing}" \
       -h sha256 \
       -n "QuarkShield Post-Quantum Guard" \
       -i "https://quarkshield.ai" \
@@ -44,7 +51,7 @@ if [ "$SIGNED_WIN" = false ]; then
       -out quarkshield-scanner-windows-amd64.exe.signed || \
     osslsigncode sign \
       -pkcs12 certs/fedmitigate-codesign.p12 \
-      -pass fedmitigate \
+      -pass "${FEDMITIGATE_P12_PASSWORD:?set FEDMITIGATE_P12_PASSWORD for local signing}" \
       -h sha256 \
       -n "QuarkShield Post-Quantum Guard" \
       -i "https://quarkshield.ai" \
@@ -101,8 +108,8 @@ fi
 # 2. MACOS BUILD, CODE SIGNING & DMG / ZIP PACKAGING
 # ------------------------------------------------------------------------------
 echo "🍏 [2/4] Building macOS Universal Agent (.app, .dmg, .zip)..."
-GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o quarkshield-scanner-darwin-arm64 .
-GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-darwin-amd64 .
+GOOS=darwin GOARCH=arm64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-darwin-arm64 .
+GOOS=darwin GOARCH=amd64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-darwin-amd64 .
 lipo -create -output quarkshield-scanner-darwin-universal quarkshield-scanner-darwin-amd64 quarkshield-scanner-darwin-arm64
 
 APP_STAGE="/tmp/quarkshield_app_stage_$$"
@@ -219,8 +226,8 @@ fi
 # 3. LINUX BUILDS
 # ------------------------------------------------------------------------------
 echo "🐧 [3/4] Building Linux Agents (amd64, arm64)..."
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-linux-amd64 .
-GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o quarkshield-scanner-linux-arm64 .
+GOOS=linux GOARCH=amd64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-linux-amd64 .
+GOOS=linux GOARCH=arm64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-linux-arm64 .
 
 # Package Linux Release Tarball & Zip with 1-Click Installer
 echo "📦 Packaging quarkshield-scanner-linux.tar.gz and .zip..."

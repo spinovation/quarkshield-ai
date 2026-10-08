@@ -61,83 +61,9 @@ export interface PlatformOperator {
   isRootOwner?: boolean;
 }
 
-export const DEFAULT_PLATFORM_OPERATORS: PlatformOperator[] = [
-  {
-    id: 'op-root-1',
-    name: 'Super Admin (Platform Owner)',
-    email: 'superadmin@quarkshield.ai',
-    role: 'root_admin',
-    roleDisplayName: 'Root Master Administrator',
-    status: 'active',
-    mfaEnforced: true,
-    mfaType: 'Hardware Security Key (YubiKey)',
-    accessScope: 'Global Control Plane • Infrastructure & License Authority • Cluster Root',
-    lastLogin: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-    lastIp: '13.140.40.99 (Platform Host)',
-    createdAt: '2025-01-10T08:00:00Z',
-    isRootOwner: true
-  },
-  {
-    id: 'op-root-2',
-    name: 'Sridhar GS',
-    email: 'sridhargs@gmail.com',
-    role: 'root_admin',
-    roleDisplayName: 'Root Platform Architect',
-    status: 'active',
-    mfaEnforced: true,
-    mfaType: 'FIDO2 / WebAuthn',
-    accessScope: 'Full Control Plane & Tenant Orchestration Privileges',
-    lastLogin: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
-    lastIp: '73.189.44.120',
-    createdAt: '2025-01-15T09:30:00Z',
-    isRootOwner: false
-  },
-  {
-    id: 'op-secops-1',
-    name: 'Elena Rostova',
-    email: 'secops-lead@quarkshield.ai',
-    role: 'secops_lead',
-    roleDisplayName: 'Platform SecOps Lead',
-    status: 'active',
-    mfaEnforced: true,
-    mfaType: 'TOTP Authenticator',
-    accessScope: 'PQC Algorithm Governance • FIPS 203/204 Handshake Telemetry • Key Audit',
-    lastLogin: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
-    lastIp: '54.210.12.88',
-    createdAt: '2025-02-01T11:15:00Z',
-    isRootOwner: false
-  },
-  {
-    id: 'op-support-1',
-    name: 'Marcus Vance',
-    email: 'support-tier3@quarkshield.ai',
-    role: 'support_engineer',
-    roleDisplayName: 'Tier-3 Support Escalations',
-    status: 'active',
-    mfaEnforced: true,
-    mfaType: 'TOTP Authenticator',
-    accessScope: 'Support Mirror Diagnostics • Fleet Sync Telemetry • License Health',
-    lastLogin: new Date(Date.now() - 1000 * 60 * 60 * 18).toISOString(),
-    lastIp: '34.205.81.14',
-    createdAt: '2025-02-18T14:00:00Z',
-    isRootOwner: false
-  },
-  {
-    id: 'op-audit-1',
-    name: 'Compliance Audit Office',
-    email: 'auditor@quarkshield.ai',
-    role: 'compliance_auditor',
-    roleDisplayName: 'SOC2 / FedRAMP Auditor',
-    status: 'active',
-    mfaEnforced: true,
-    mfaType: 'Hardware Security Key (YubiKey)',
-    accessScope: 'Read-Only Control Plane Audit • Cryptographic Inventory Verification',
-    lastLogin: new Date(Date.now() - 1000 * 60 * 60 * 52).toISOString(),
-    lastIp: '52.14.88.90',
-    createdAt: '2025-03-01T10:00:00Z',
-    isRootOwner: false
-  }
-];
+// The operator roster is loaded from /api/admin/operators. No names or emails are
+// shipped in the bundle.
+export const DEFAULT_PLATFORM_OPERATORS: PlatformOperator[] = [];
 
 export interface EnrolledMachine {
   id: string;
@@ -252,26 +178,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [activeSubTab, setActiveSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics' | 'platform_sbom'>(initialSubTab);
 
   // Platform Operators (Super Admin User Registry) State
-  const [operators, setOperators] = useState<PlatformOperator[]>(() => {
-    try {
-      const saved = localStorage.getItem('quarkshield_platform_operators');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return DEFAULT_PLATFORM_OPERATORS;
-  });
+  // Operators are loaded from the API only. They are never persisted to web storage
+  // (the roster is PII and must not outlive the session on a shared browser).
+  const [operators, setOperators] = useState<PlatformOperator[]>(DEFAULT_PLATFORM_OPERATORS);
+  try { localStorage.removeItem('quarkshield_platform_operators'); } catch { /* ignore */ }
 
   const saveOperators = (newOps: PlatformOperator[]) => {
     setOperators(newOps);
-    try {
-      localStorage.setItem('quarkshield_platform_operators', JSON.stringify(newOps));
-    } catch {
-      // ignore
-    }
   };
 
   const [operatorSearch, setOperatorSearch] = useState('');
@@ -301,10 +214,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       const res = await fetch('/api/admin/operators');
       if (res.ok) {
         const data = await res.json();
-        if (Array.isArray(data) && data.length > 0) {
-          setOperators(data);
-          localStorage.setItem('quarkshield_platform_operators', JSON.stringify(data));
-        }
+        if (Array.isArray(data)) setOperators(data);
       }
     } catch (err) {
       console.warn('Failed to load operators from backend, using cached state:', err);
@@ -364,29 +274,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       setOpToast(`Platform operator ${newOpEmail.trim()} invited. Temporary password emailed from Support@quarkshield.ai.`);
       setTimeout(() => setOpToast(null), 5000);
     } catch (err: any) {
-      // Local fallback if offline
-      const newOp: PlatformOperator = {
-        id: `op-${Date.now()}`,
-        name: newOpName.trim(),
-        email: newOpEmail.trim().toLowerCase(),
-        role: newOpRole,
-        roleDisplayName: roleNameMap[newOpRole] || 'Operator',
-        status: 'active',
-        mfaEnforced: true,
-        mfaType: newOpMfaType,
-        accessScope: scopeMap[newOpRole] || 'Platform Control Plane Access',
-        lastLogin: 'Never (Pending Activation)',
-        lastIp: 'Pending First Session',
-        createdAt: new Date().toISOString(),
-        isRootOwner: false
-      };
-      const updated = [newOp, ...operators];
-      saveOperators(updated);
-      setNewOpName('');
-      setNewOpEmail('');
-      setShowAddOperatorModal(false);
-      setOpToast(`Operator added (${err.message}).`);
-      setTimeout(() => setOpToast(null), 4000);
+      // Do not fabricate an operator row when the API call fails.
+      setOpToast(`Could not invite operator: ${err.message || 'server unavailable'}.`);
+      setTimeout(() => setOpToast(null), 6000);
     }
   };
 
@@ -926,34 +816,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       setOnboardSuccessData(data.client || data.tenant || data);
       fetchClients();
     } catch (err: any) {
-      console.warn('API onboard-user error, applying fallback:', err);
-      const slug = onboardOrg.toLowerCase().replace(/[^a-z0-9]/g, '');
-      const customerPrefix = onboardTier === 'partner' ? 'PART-' : 'CORP-';
-      const fallbackCustomerId = customerPrefix + Math.floor(1000 + Math.random() * 9000);
-      const newClient: ClientInfo = {
-        name: slug,
-        displayName: onboardOrg.trim(),
-        customerId: fallbackCustomerId,
-        appPort: 5020 + clients.length,
-        dbPort: 5440 + clients.length,
-        status: 'pending_licensing',
-        contactName: onboardContactName.trim(),
-        adminEmail: onboardAdminEmail.trim(),
-        phone: onboardPhone.trim(),
-        address: onboardAddress.trim(),
-        city: onboardCity.trim(),
-        state: onboardState.trim(),
-        country: onboardCountry.trim(),
-        postalCode: onboardPostalCode.trim(),
-        accountType: onboardTier,
-        mcaLimit: onboardSeats,
-        subscriptionTier: onboardTier === 'partner' ? 'partner' : 'growth',
-        stripePaymentLink: cleanStripeLink,
-        stripePaymentStatus: cleanStripeLink ? 'link_generated' : 'ach_check_invoice',
-        createdAt: new Date().toISOString()
-      };
-      setClients(prev => [newClient, ...prev]);
-      setOnboardSuccessData(newClient);
+      // Never pretend a tenant was provisioned when the API call failed.
+      console.warn('API onboard-user error:', err);
+      setOnboardError(`Onboarding failed: ${err.message || 'server unavailable'}. Nothing was created.`);
     } finally {
       setOnboardingLoading(false);
     }
@@ -992,304 +857,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
         const mData = await machRes.value.json();
         setFleetMachines(mData);
       }
-    } catch (err) {
-      console.warn('Backend licenses endpoint failed, loading simulated licenses & machines:', err);
-      setLicenses([
-        // Corporate 1: SPINOVATIONCORP
-        {
-          id: 'lic-corp-1',
-          licenseKey: 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8',
-          tenantName: 'SPINOVATIONCORP',
-          customerId: 'CORP-9812',
-          contactName: 'GS Sridhar',
-          contactEmail: 'sridhargs@spinovation.com',
-          tier: 'corporate',
-          durationDays: 365,
-          seats: 100,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 364 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        // Corporate 2: APEXDEFENSELABS
-        {
-          id: 'lic-corp-2',
-          licenseKey: 'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E',
-          tenantName: 'APEXDEFENSELABS',
-          customerId: 'CORP-4821',
-          contactName: 'Sarah Jenkins',
-          contactEmail: 's.jenkins@vanguardlogistics.com',
-          tier: 'corporate',
-          durationDays: 365,
-          seats: 500,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 355 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        // Corporate 3: DEMOCLIENT
-        {
-          id: 'lic-corp-3',
-          licenseKey: 'QS-CORP-DEMOCLIENT-6C8A00AF-E49AB1C1',
-          tenantName: 'DEMOCLIENT',
-          customerId: 'CORP-5120',
-          contactName: 'Demo Client Administrator',
-          contactEmail: 'democlient@example.com',
-          tier: 'corporate',
-          durationDays: 365,
-          seats: 250,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 365 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        // Partner 1: APEXCYBERDEFENSEMSP (6 Sub-Licenses)
-        {
-          id: 'lic-part-1-1',
-          licenseKey: 'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF8523-56AAF752',
-          tenantName: 'APEXCYBERDEFENSEMSP',
-          customerId: 'PART-9148',
-          contactName: 'Marcus Vance',
-          contactEmail: 'm.vance@apexcyberdefense.io',
-          tier: 'partner',
-          durationDays: 30,
-          seats: 50,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'lic-part-1-2',
-          licenseKey: 'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF8540-E2611017',
-          tenantName: 'APEXCYBERDEFENSEMSP',
-          customerId: 'PART-9148',
-          contactName: 'Marcus Vance',
-          contactEmail: 'm.vance@apexcyberdefense.io',
-          tier: 'partner',
-          durationDays: 30,
-          seats: 50,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'lic-part-1-3',
-          licenseKey: 'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF87F9-B61B99FC',
-          tenantName: 'APEXCYBERDEFENSEMSP',
-          customerId: 'PART-9148',
-          contactName: 'Marcus Vance',
-          contactEmail: 'm.vance@apexcyberdefense.io',
-          tier: 'partner',
-          durationDays: 30,
-          seats: 50,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 30 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'lic-part-1-4',
-          licenseKey: 'QS-PARTNER-APEXCYBERDEFENSEMSP-6AF7E81F-457D9F5B',
-          tenantName: 'APEXCYBERDEFENSEMSP',
-          customerId: 'PART-9148',
-          contactName: 'Marcus Vance',
-          contactEmail: 'm.vance@apexcyberdefense.io',
-          tier: 'partner',
-          durationDays: 60,
-          seats: 50,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 60 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'lic-part-1-5',
-          licenseKey: 'QS-PARTNER-APEXCYBERDEFENSEMSP-6B05175B-D5CF3CE4',
-          tenantName: 'APEXCYBERDEFENSEMSP',
-          customerId: 'PART-9148',
-          contactName: 'Marcus Vance',
-          contactEmail: 'm.vance@apexcyberdefense.io',
-          tier: 'partner',
-          durationDays: 60,
-          seats: 50,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 60 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: 'lic-part-1-6',
-          licenseKey: 'QS-PARTNER-APEXCYBERDEFENSEMSP-6B124697-74B82994',
-          tenantName: 'APEXCYBERDEFENSEMSP',
-          customerId: 'PART-9148',
-          contactName: 'Marcus Vance',
-          contactEmail: 'm.vance@apexcyberdefense.io',
-          tier: 'partner',
-          durationDays: 90,
-          seats: 50,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 90 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        },
-        // Partner 2: PARTNERTEST
-        {
-          id: 'lic-part-2-1',
-          licenseKey: 'QS-PARTNER-PARTNERTEST-6AF00609-C7486296',
-          tenantName: 'PARTNERTEST',
-          customerId: 'PART-8830',
-          contactName: 'David Chen',
-          contactEmail: 'd.chen@cybershieldsec.com',
-          tier: 'partner',
-          durationDays: 30,
-          seats: 50,
-          status: 'active',
-          expiresAt: new Date(Date.now() + 55 * 86400000).toISOString(),
-          createdAt: new Date().toISOString()
-        }
-      ]);
-      setFleetMachines([
-        {
-          id: 'mach-1a3a27bc80a7f8ce7ff6',
-          hostname: 'Ganapatis-MBP',
-          os: 'darwin',
-          arch: 'arm64',
-          ip: '192.168.1.151',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'high',
-          quantumRiskScore: 60,
-          assetCount: 4,
-          vulnerableCount: 4,
-          lastSeen: new Date().toISOString(),
-          tenantName: 'SPINOVATIONCORP',
-          licenseKey: 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'
-        },
-        {
-          id: 'mach-61bf817fd5925e33c423',
-          hostname: 'DESKTOP-QFOTIIO',
-          os: 'windows',
-          arch: 'amd64',
-          ip: '169.254.137.140',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'critical',
-          quantumRiskScore: 100,
-          assetCount: 49,
-          vulnerableCount: 49,
-          lastSeen: new Date().toISOString(),
-          tenantName: 'SPINOVATIONCORP',
-          licenseKey: 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'
-        },
-        {
-          id: 'mach-apex-sub1',
-          hostname: 'msp-client-win11.apex',
-          os: 'windows',
-          arch: 'amd64',
-          ip: '10.50.1.22',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'low',
-          quantumRiskScore: 15,
-          assetCount: 6,
-          vulnerableCount: 1,
-          lastSeen: new Date().toISOString(),
-          tenantName: 'APEXCYBERDEFENSEMSP',
-          licenseKey: 'QS-PARTNER-APEXCYBERDEFENSEMSP-6B124697-74B82994'
-        },
-        {
-          id: 'mach-apex-sub2',
-          hostname: 'msp-director-mbp.apex',
-          os: 'darwin',
-          arch: 'arm64',
-          ip: '10.50.1.45',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'medium',
-          quantumRiskScore: 32,
-          assetCount: 12,
-          vulnerableCount: 4,
-          lastSeen: new Date().toISOString(),
-          tenantName: 'APEXCYBERDEFENSEMSP',
-          licenseKey: 'QS-PARTNER-APEXCYBERDEFENSEMSP-6B05175B-D5CF3CE4'
-        },
-        {
-          id: 'mach-apex-01',
-          hostname: 'secops-macbook-pro.local',
-          os: 'darwin',
-          arch: 'arm64',
-          ip: '192.168.1.104',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'high',
-          quantumRiskScore: 78,
-          assetCount: 14,
-          vulnerableCount: 11,
-          lastSeen: new Date(Date.now() - 3600000).toISOString(),
-          tenantName: 'APEXDEFENSELABS',
-          licenseKey: 'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E'
-        },
-        {
-          id: 'mach-apex-02',
-          hostname: 'prod-k8s-worker-03.internal',
-          os: 'linux',
-          arch: 'amd64',
-          ip: '10.240.0.18',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'critical',
-          quantumRiskScore: 92,
-          assetCount: 28,
-          vulnerableCount: 22,
-          lastSeen: new Date(Date.now() - 7200000).toISOString(),
-          tenantName: 'APEXDEFENSELABS',
-          licenseKey: 'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E'
-        },
-        {
-          id: 'mach-partner-01',
-          hostname: 'partner-audit-node-01.lan',
-          os: 'linux',
-          arch: 'amd64',
-          ip: '172.16.20.12',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'medium',
-          quantumRiskScore: 45,
-          assetCount: 8,
-          vulnerableCount: 3,
-          lastSeen: new Date(Date.now() - 10800000).toISOString(),
-          tenantName: 'PARTNERTEST',
-          licenseKey: 'QS-PARTNER-PARTNERTEST-6AF00609-C7486296'
-        },
-        {
-          id: 'mach-partner-02',
-          hostname: 'partner-jumpbox-win.ad',
-          os: 'windows',
-          arch: 'amd64',
-          ip: '172.16.20.15',
-          agentVersion: '2.0.0',
-          status: 'offline',
-          riskLevel: 'high',
-          quantumRiskScore: 68,
-          assetCount: 12,
-          vulnerableCount: 8,
-          lastSeen: new Date(Date.now() - 86400000).toISOString(),
-          tenantName: 'PARTNERTEST',
-          licenseKey: 'QS-PARTNER-PARTNERTEST-6AF00609-C7486296'
-        },
-        {
-          id: 'mach-demo-02',
-          hostname: 'finance-win11-corp.ad',
-          os: 'windows',
-          arch: 'amd64',
-          ip: '10.0.12.45',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'medium',
-          quantumRiskScore: 42,
-          assetCount: 9,
-          vulnerableCount: 4,
-          lastSeen: new Date(Date.now() - 14400000).toISOString(),
-          tenantName: 'DEMOCLIENT',
-          licenseKey: 'QS-CORP-DEMOCLIENT-6C8A00AF-E49AB1C1'
-        }
-      ]);
-    } finally {
-      setLoadingLicenses(false);
-      fetchMailSettings();
+    } catch (err: any) {
+      // Never show simulated licenses/machines: an operator would act on fake data.
+      console.warn('Backend licenses endpoint failed:', err);
+      setLicenses([]);
+      setFleetMachines([]);
+      setErrorMessage(`Could not load licenses: ${err?.message || 'server unavailable'}`);
     }
   };
 
@@ -1337,55 +910,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
         alert(errData.error || 'Failed to generate license key.');
       }
     } catch (err: any) {
-      // Local cryptographic simulation fallback
-      const cleanTier = licenseTier === 'corporate' ? 'CORP' : 'PARTNER';
-      const cleanOrg = licenseOrg.toUpperCase().replace(/[^A-Z0-9]/g, '');
-      const expiry = Math.floor((Date.now() + licenseDays * 86400000) / 1000).toString(16).toUpperCase();
-      const fakeSig = Math.random().toString(16).substring(2, 10).toUpperCase();
-      const key = `QS-${cleanTier}-${cleanOrg}-${expiry}-${fakeSig}`;
-      const selClient = clients.find(c => 
-        c.name === selectedOnboardedSlug || 
-        c.name.toLowerCase() === cleanOrg.toLowerCase() || 
-        c.displayName?.toLowerCase() === cleanOrg.toLowerCase() ||
-        c.name.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanOrg.toLowerCase()
-      );
-      const simData = {
-        success: true,
-        licenseKey: key,
-        tier: licenseTier,
-        tenantName: cleanOrg,
-        contactEmail: selClient?.adminEmail || '',
-        contactName: selClient?.contactName || selClient?.displayName || cleanOrg,
-        durationDays: licenseDays,
-        seats: licenseSeats,
-        expiresAt: new Date(Date.now() + licenseDays * 86400000).toISOString().split('T')[0],
-        curlCommand: `curl -fsSL https://quarkshield.ai/downloads/quarkshield-scanner-windows.zip -o scanner.zip`,
-        intuneGuidance: `Deploy with argument: quarkshield-scanner-windows-amd64.exe --token "${key}"`
-      };
-      setGeneratedLicense(simData);
-      setLicenseOrg('');
-      setSelectedOnboardedSlug('');
-      setClients(prev => prev.map(c => 
-        (c.name.toLowerCase() === cleanOrg.toLowerCase() || c.displayName?.toLowerCase() === cleanOrg.toLowerCase())
-          ? { ...c, status: 'active' }
-          : c
-      ));
-      setLicenses(prev => [
-        {
-          id: 'lic-' + Date.now(),
-          licenseKey: key,
-          tenantName: cleanOrg,
-          tier: licenseTier,
-          durationDays: licenseDays,
-          seats: licenseSeats,
-          status: 'active',
-          createdAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + licenseDays * 86400000).toISOString()
-        },
-        ...prev
-      ]);
-    } finally {
-      setIsGeneratingLicense(false);
+      // Never mint a license client-side: a locally "simulated" key is unsigned and
+      // would be rejected by every agent that tries to enroll with it.
+      alert(`License generation failed: ${err.message || 'server unavailable'}. No key was issued.`);
     }
   };
 
@@ -1551,43 +1078,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
         if (dlRes.ok) setDownloadData(await dlRes.json());
       } catch { /* non-fatal */ }
     } catch (err) {
-      console.warn('Backend analytics endpoint failed, loading client-side fallback:', err);
-      setAnalyticsData({
-        crawlerStats: [
-          { name: 'PerplexityBot', hits: 184, lastActive: new Date(Date.now() - 15 * 60 * 1000).toISOString() },
-          { name: 'Googlebot', hits: 142, lastActive: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString() },
-          { name: 'GPTBot', hits: 118, lastActive: new Date(Date.now() - 55 * 60 * 1000).toISOString() },
-          { name: 'ClaudeBot', hits: 54, lastActive: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString() },
-          { name: 'Bingbot', hits: 39, lastActive: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString() }
-        ],
-        referrerStats: [
-          { source: 'Direct', hits: 320 },
-          { source: 'Google Search', hits: 245 },
-          { source: 'Perplexity AI', hits: 168 },
-          { source: 'OpenAI Search', hits: 94 },
-          { source: 'Claude', hits: 28 },
-          { source: 'External Link', hits: 45 }
-        ],
-        directGeoStats: [
-          { country: 'US', region: 'California', hits: 145 },
-          { country: 'GB', region: 'London', hits: 58 },
-          { country: 'DE', region: 'Frankfurt', hits: 42 },
-          { country: 'JP', region: 'Tokyo', hits: 36 },
-          { country: 'US', region: 'Virginia', hits: 24 },
-          { country: 'IN', region: 'Karnataka', hits: 15 }
-        ],
-        auditReport: {
-          titlePresent: true,
-          titleValue: 'QuarkShield | Post-Quantum Cryptographic Asset Management',
-          descriptionPresent: true,
-          descriptionValue: 'Enterprise cryptographic discovery database and planning dashboard to secure endpoints and servers against Shor\'s algorithm threat vectors.',
-          openGraphPresent: true,
-          twitterPresent: true,
-          jsonLdSoftwarePresent: true,
-          jsonLdFaqPresent: true,
-          score: 100
-        }
-      });
+      // No invented crawler/referrer numbers: leave analytics empty on failure.
+      console.warn('Backend analytics endpoint failed:', err);
+      setAnalyticsData(null);
     } finally {
       setLoadingAnalytics(false);
     }
@@ -1688,32 +1181,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       });
       setUsers(loadedUsers);
     } catch (err: any) {
-      console.warn('Backend admin endpoints unavailable, loading simulation mode:', err);
-      // Mock Client List fallback with all enterprise and partner tenants
-      const mockClients: ClientInfo[] = [
-        { name: 'spinovationcorp', displayName: 'Spinovation Corp', customerId: 'CORP-9812', appPort: 5050, dbPort: 5432, status: 'active', accountType: 'corporate', adminEmail: 'sridhargs@gmail.com', createdAt: new Date(Date.now() - 86400000 * 30).toISOString() },
-        { name: 'apex-cyber', displayName: 'Apex Cyber Defense MSP', customerId: 'PARTNER-5501', appPort: 5052, dbPort: 5434, status: 'active', accountType: 'partner', adminEmail: 'ops@apexcybermsp.com', createdAt: new Date(Date.now() - 86400000 * 20).toISOString() },
-        { name: 'vanguard-logistics', displayName: 'Vanguard Global Logistics', customerId: 'CORP-4402', appPort: 5051, dbPort: 5433, status: 'active', accountType: 'corporate', adminEmail: 'security@vanguard-logistics.com', createdAt: new Date(Date.now() - 86400000 * 15).toISOString() },
-        { name: 'cybershield-partners', displayName: 'CyberShield Managed Security', customerId: 'PARTNER-7720', appPort: 5053, dbPort: 5435, status: 'active', accountType: 'partner', adminEmail: 'soc@cybershield-sec.com', createdAt: new Date(Date.now() - 86400000 * 10).toISOString() },
-        { name: 'democlient', displayName: 'Demo Client Corp', customerId: 'DEMO-1001', appPort: 5001, dbPort: 5436, status: 'active', accountType: 'corporate', adminEmail: 'democlient@example.com', createdAt: new Date(Date.now() - 3600000).toISOString() }
-      ];
-      setClients(mockClients);
-      setClientStats({
-        'spinovationcorp': { name: 'spinovationcorp', appPort: 5050, dbPort: 5432, status: 'active', userCount: 2, assetCount: 14 },
-        'apex-cyber': { name: 'apex-cyber', appPort: 5052, dbPort: 5434, status: 'active', userCount: 6, assetCount: 38 },
-        'vanguard-logistics': { name: 'vanguard-logistics', appPort: 5051, dbPort: 5433, status: 'active', userCount: 1, assetCount: 9 },
-        'cybershield-partners': { name: 'cybershield-partners', appPort: 5053, dbPort: 5435, status: 'active', userCount: 4, assetCount: 21 },
-        'democlient': { name: 'democlient', appPort: 5001, dbPort: 5436, status: 'active', userCount: 1, assetCount: 6 }
-      });
-      setUsers([
-        { id: '1', email: 'sridhargs@gmail.com', role: 'admin', email_verified: true, cmdb_enabled: true, row_locked: false, company: 'Spinovation Corp', last_login: new Date().toISOString(), created_at: new Date(Date.now() - 86400000 * 30).toISOString() },
-        { id: '2', email: 'ops@apexcybermsp.com', role: 'admin', email_verified: true, cmdb_enabled: true, row_locked: false, company: 'Apex Cyber Defense MSP', last_login: new Date().toISOString(), created_at: new Date(Date.now() - 86400000 * 20).toISOString() },
-        { id: '3', email: 'security@vanguard-logistics.com', role: 'admin', email_verified: true, cmdb_enabled: true, row_locked: false, company: 'Vanguard Global Logistics', last_login: new Date().toISOString(), created_at: new Date(Date.now() - 86400000 * 15).toISOString() },
-        { id: '4', email: 'soc@cybershield-sec.com', role: 'admin', email_verified: true, cmdb_enabled: true, row_locked: false, company: 'CyberShield Managed Security', last_login: new Date().toISOString(), created_at: new Date(Date.now() - 86400000 * 10).toISOString() },
-        { id: '5', email: 'democlient@example.com', role: 'user', email_verified: true, cmdb_enabled: true, row_locked: false, company: 'Demo Client Corp', last_login: new Date(Date.now() - 600000).toISOString(), created_at: new Date(Date.now() - 3600000).toISOString() },
-        { id: '6', email: 'pending_client@example.com', role: 'user', email_verified: true, cmdb_enabled: false, row_locked: false, company: 'Pending Client Inc', last_login: null, created_at: new Date(Date.now() - 1800000).toISOString() },
-        { id: '7', email: 'locked_client@example.com', role: 'user', email_verified: true, cmdb_enabled: false, row_locked: true, company: 'Locked Client LLC', last_login: new Date(Date.now() - 1200000).toISOString(), created_at: new Date(Date.now() - 600000).toISOString() }
-      ]);
+      // Never render fabricated tenants/users when the API fails: an operator would
+      // act on fake data. Show the real error and empty tables instead.
+      console.warn('Backend admin endpoints unavailable:', err);
+      setClients([]);
+      setClientStats({});
+      setUsers([]);
+      setErrorMessage(err?.message ? `Could not load platform data: ${err.message}` : 'Could not load platform data from the server.');
       if (err.message && err.message.includes('Access Denied')) {
         setErrorMessage(err.message);
       }
@@ -2172,7 +1646,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const partnerClients = clients.filter(c => c.accountType === 'partner' || c.subscriptionTier?.toLowerCase().includes('partner'));
 
   const pendingProvisioningCount = pendingLicensingClients.length > 0 ? pendingLicensingClients.length : users.filter(u => {
-    if (u.role === 'admin' || u.role === 'superadmin' || u.email === 'sridhargs@gmail.com' || u.email.endsWith('@quarkshield.ai')) return false;
+    if (u.role === 'admin' || u.role === 'superadmin' || u.role === 'root_admin') return false;
     const sanitizedPrefix = getSanitizedPrefix(u.email);
     return !clients.some(c => c.name === sanitizedPrefix);
   }).length;
