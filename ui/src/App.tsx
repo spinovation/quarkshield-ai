@@ -360,6 +360,12 @@ export default function App() {
           keys.forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
           setCurrentAccountType('user');
           setCurrentUserRole('Security Operator');
+          // No session: the central console must not render for an anonymous visitor
+          // (every data call would 401 anyway). Send them to the landing page.
+          if (viewMode === 'console') {
+            try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+            setViewMode('landing');
+          }
           return;
         }
         if (!res.ok) return;
@@ -490,123 +496,9 @@ export default function App() {
       const data = await res.json();
       setMachines(data);
     } catch (err: any) {
-      console.warn('Could not fetch machines from server, using sample fleet data:', err);
-      setMachines([
-        {
-          id: 'mach-01',
-          hostname: 'secops-macbook-pro.local',
-          os: 'darwin',
-          arch: 'arm64',
-          ip: '192.168.1.104',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'high',
-          quantumRiskScore: 78,
-          assetCount: 14,
-          vulnerableCount: 11,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 4).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Engineering Workstations',
-          tenantName: 'Apex Defense Labs (MSP)',
-          licenseKey: 'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E',
-          licenseTier: 'Enterprise Pro (500 Seats)'
-        },
-        {
-          id: 'mach-02',
-          hostname: 'prod-k8s-worker-03.internal',
-          os: 'linux',
-          arch: 'amd64',
-          ip: '10.240.0.18',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'critical',
-          quantumRiskScore: 92,
-          assetCount: 28,
-          vulnerableCount: 22,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 12).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Production Clusters',
-          tenantName: 'Apex Defense Labs (MSP)',
-          licenseKey: 'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E',
-          licenseTier: 'Enterprise Pro (500 Seats)'
-        },
-        {
-          id: 'mach-03',
-          hostname: 'partner-audit-node-01.lan',
-          os: 'linux',
-          arch: 'amd64',
-          ip: '172.16.20.12',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'medium',
-          quantumRiskScore: 45,
-          assetCount: 8,
-          vulnerableCount: 3,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 20).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Audit Network',
-          tenantName: 'PARTNERTEST (MSP Partner)',
-          licenseKey: 'QS-PARTNER-PARTNERTEST-6AF00609-C7486296',
-          licenseTier: 'MSP Partner (50 Seats)'
-        },
-        {
-          id: 'mach-04',
-          hostname: 'partner-jumpbox-win.ad',
-          os: 'windows',
-          arch: 'amd64',
-          ip: '172.16.20.15',
-          agentVersion: '2.0.0',
-          status: 'offline',
-          riskLevel: 'high',
-          quantumRiskScore: 68,
-          assetCount: 12,
-          vulnerableCount: 8,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Management Jumpbox',
-          tenantName: 'PARTNERTEST (MSP Partner)',
-          licenseKey: 'QS-PARTNER-PARTNERTEST-6AF00609-C7486296',
-          licenseTier: 'MSP Partner (50 Seats)'
-        },
-        {
-          id: 'mach-05',
-          hostname: 'Ganapatis-MBP',
-          os: 'darwin',
-          arch: 'arm64',
-          ip: '192.168.1.151',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'high',
-          quantumRiskScore: 80,
-          assetCount: 16,
-          vulnerableCount: 12,
-          lastSeen: new Date().toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Executive Fleet',
-          tenantName: 'Executive Engineering Fleet',
-          licenseKey: 'QS-CORP-DEMOCLIENT-6AF00609-C7486296',
-          licenseTier: 'Growth Tier (12/250)'
-        },
-        {
-          id: 'mach-06',
-          hostname: 'finance-win11-corp.ad',
-          os: 'windows',
-          arch: 'amd64',
-          ip: '10.0.12.45',
-          agentVersion: '2.0.0',
-          status: 'online',
-          riskLevel: 'medium',
-          quantumRiskScore: 42,
-          assetCount: 9,
-          vulnerableCount: 4,
-          lastSeen: new Date(Date.now() - 1000 * 60 * 15).toISOString(),
-          createdAt: new Date().toISOString(),
-          groupName: 'Corporate Laptops',
-          tenantName: 'Executive Engineering Fleet',
-          licenseKey: 'QS-CORP-DEMOCLIENT-6AF00609-C7486296',
-          licenseTier: 'Growth Tier (12/250)'
-        }
-      ]);
+      // No sample fleet: an empty list and the real error, never invented machines.
+      console.warn('Could not fetch machines from server:', err);
+      setMachines([]);
     } finally {
       setLoading(false);
     }
@@ -640,94 +532,9 @@ export default function App() {
       const data = await res.json();
       setCbomData(data);
     } catch (err: any) {
-      console.warn('Could not fetch CBOM from server, using sample CBOM data:', err);
-      setCbomData({
-        bomFormat: "CycloneDX",
-        specVersion: "1.6",
-        serialNumber: "urn:uuid:7c8b9d0e-1f2a-4b3c-9d8e-5a6b7c8d9e0f",
-        version: 1,
-        metadata: {
-          timestamp: new Date().toISOString(),
-          component: {
-            type: "platform",
-            name: "Desktop & Host PQC Fleet CBOM"
-          }
-        },
-        components: [
-          {
-            type: "cryptographic-asset",
-            bomRef: "cbom-item-01",
-            name: "id_ed25519",
-            cryptoProperties: {
-              assetType: "key",
-              algorithmProperties: {
-                name: "Ed25519",
-                keyLength: 256,
-                quantumSecurityLevel: 0
-              },
-              detectionContext: {
-                filePath: "/Users/developer/.ssh/id_ed25519",
-                machineHostname: "secops-macbook-pro.local",
-                operatingSystem: "darwin"
-              }
-            },
-            properties: [
-              { name: "quarkshield:quantumStatus", value: "Quantum Vulnerable" },
-              { name: "quarkshield:riskLevel", value: "high" },
-              { name: "quarkshield:recommendation", value: "Upgrade to OpenSSH 9.8+ with hybrid mlkem768x25519-sha256 key exchange." },
-              { name: "quarkshield:explainer", value: "Classical elliptic curve signatures (Ed25519) are susceptible to Shor's algorithm on a quantum computer." }
-            ]
-          },
-          {
-            type: "cryptographic-asset",
-            bomRef: "cbom-item-02",
-            name: "server.crt",
-            cryptoProperties: {
-              assetType: "certificate",
-              algorithmProperties: {
-                name: "RSA",
-                keyLength: 2048,
-                quantumSecurityLevel: 0
-              },
-              detectionContext: {
-                filePath: "/etc/ssl/certs/server.crt",
-                machineHostname: "prod-k8s-worker-03.internal",
-                operatingSystem: "linux"
-              }
-            },
-            properties: [
-              { name: "quarkshield:quantumStatus", value: "Quantum Vulnerable" },
-              { name: "quarkshield:riskLevel", value: "high" },
-              { name: "quarkshield:recommendation", value: "Deploy composite X.509 certificates with ML-DSA-65 (NIST FIPS 204)." },
-              { name: "quarkshield:explainer", value: "RSA-2048 integer factorization can be resolved in polynomial time via quantum phase estimation." }
-            ]
-          },
-          {
-            type: "cryptographic-asset",
-            bomRef: "cbom-item-03",
-            name: "id_mldsa65",
-            cryptoProperties: {
-              assetType: "key",
-              algorithmProperties: {
-                name: "ML-DSA-65",
-                keyLength: 1952,
-                quantumSecurityLevel: 3
-              },
-              detectionContext: {
-                filePath: "/Users/developer/.ssh/id_mldsa65",
-                machineHostname: "secops-macbook-pro.local",
-                operatingSystem: "darwin"
-              }
-            },
-            properties: [
-              { name: "quarkshield:quantumStatus", value: "Post-Quantum Secure" },
-              { name: "quarkshield:riskLevel", value: "secure" },
-              { name: "quarkshield:recommendation", value: "Maintain deployment. Fully compliant with NIST FIPS 204 post-quantum standards." },
-              { name: "quarkshield:explainer", value: "Lattice-based Module-LWE signature scheme resilient against both classical and quantum cryptanalysis." }
-            ]
-          }
-        ]
-      });
+      // No sample CBOM: show nothing rather than fabricated cryptographic findings.
+      console.warn('Could not fetch CBOM from server:', err);
+      setCbomData(null);
     }
   };
 
@@ -1500,7 +1307,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
   // Server-confirmed account type only (see the /api/auth/me sync above).
   const isSuperAdmin = currentAccountType === 'superadmin';
 
-  const displayCustomerId = isSuperAdmin ? 'QS-ADMIN-001' : (currentCustomerId || 'PART-4421');
+  const displayCustomerId = isSuperAdmin ? 'QS-ADMIN-001' : (currentCustomerId || '');
   const displayCustomerName = isSuperAdmin ? 'INTERNAL USER' : (currentCustomerName || (currentAccountType === 'partner' ? 'MSP PARTNER PRO' : 'CORPORATE CLIENT'));
   const displayRole = isSuperAdmin ? 'Super Admin' : (currentUserRole || 'Security Operator');
 

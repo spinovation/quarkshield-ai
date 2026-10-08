@@ -22,7 +22,7 @@ process.on('uncaughtException', (err) => {
 });
 import { bootstrapAdmin } from './config/bootstrap';
 import routes from './routes/routes';
-import { attachUser } from './middleware/auth';
+import { attachUser, isWeakSecret } from './middleware/auth';
 import { logDownload } from './lib/downloadTracker';
 import { startPullScheduler } from './lib/pullScheduler';
 
@@ -256,6 +256,18 @@ const startServers = () => {
     console.log('ℹ️ No SSL certificates detected; running HTTP-only mode (Cloudflare Flexible mode).');
   }
 };
+
+// Fail closed at BOOT (not lazily on the first request) when a production server is
+// configured with a missing/weak/placeholder secret.
+if (process.env.NODE_ENV === 'production') {
+  const bad: string[] = [];
+  if (isWeakSecret(process.env.JWT_SECRET)) bad.push('JWT_SECRET');
+  if (isWeakSecret(process.env.LICENSE_SIGNING_SECRET)) bad.push('LICENSE_SIGNING_SECRET');
+  if (bad.length) {
+    console.error(`Refusing to start: ${bad.join(', ')} missing, shorter than 32 chars, or a placeholder. Generate with: openssl rand -hex 32`);
+    process.exit(1);
+  }
+}
 
 // Warn loudly when secondary encryption keys fall back to JWT_SECRET: rotating the
 // JWT secret would then make every stored 2FA secret and connector credential

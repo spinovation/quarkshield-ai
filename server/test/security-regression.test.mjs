@@ -313,3 +313,15 @@ test('W3: report emailing is admin-only; spreadsheet cells are formula-safe; raw
   assert.ok(has(schema, 'uq_tenant_users_ci'), 'case-insensitive tenant_users uniqueness removed');
   assert.ok(!has(schema, "'snap-spinovation-'"), 'owner-specific boot-time snapshot reintroduced');
 });
+
+test('W3: no fabricated fleet/CBOM/license data is rendered when the API fails', () => {
+  const app = read('ui/src/App.tsx');
+  assert.ok(!has(app, 'using sample fleet data'), 'App.tsx injects sample machines again');
+  assert.ok(!has(app, 'using sample CBOM data'), 'App.tsx injects a sample CBOM again');
+  assert.ok(!has(app, "currentCustomerId || 'PART-4421'"), 'App.tsx shows a hardcoded customer id again');
+  const ap = read('ui/src/components/AdminPanel.tsx');
+  assert.ok(!has(ap, 'loading simulated licenses'), 'AdminPanel injects simulated licenses again');
+  assert.ok(!has(ap, 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'), 'AdminPanel ships the revoked public license key again');
+  const idx = read('server/src/index.ts');
+  assert.ok(has(idx, 'Refusing to start:'), 'server no longer refuses to boot on weak production secrets');
+});

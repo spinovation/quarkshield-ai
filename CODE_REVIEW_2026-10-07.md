@@ -1,6 +1,20 @@
 # QuarkShield code review — 2026-10-07
 
-> **FINAL STATUS — branch `security-hardening` (uncommitted, 50 files).**
+> **LIVE VERIFICATION (2026-10-08).** Beyond static checks, the hardened build was run for real:
+> Postgres 15 in Docker + the compiled server, the production UI bundle, and a release-style
+> agent binary. A 60-step end-to-end script passed (admin/tenant/operator logins, forced password
+> change, session revocation on change/lock/logout, role sanitising, cross-tenant 403s, token
+> minting pinned to the caller's tenant, agent ingest/re-ingest/oversize 413, command polling,
+> 2FA enrol/challenge, fix-script sanitising, installer-token sanitising, rate limiting, anonymous
+> CI gate). The real agent scanned, enrolled over loopback, refused plaintext to a non-loopback
+> host, and its local API was correctly gated. Browser: landing page loads with no redirect, sign-in
+> opens the console with the server-confirmed role, logout works, and an anonymous visit to the
+> console URL now lands on the landing page. Boot checks: production refuses placeholder JWT /
+> missing DB password; schema converges on the second boot (0 skipped statements).
+> Live testing found and fixed: sample fleet/CBOM/license data still rendered on API failure in the
+> console, a hardcoded customer id, and the lazy (first-request) secret check, now enforced at boot.
+
+> **FINAL STATUS — branch `security-hardening`.**
 > Two passes were done after the upstream hotfix landed: (1) fixes for every open finding below,
 > (2) a fresh three-agent re-review of the diff, with every flag re-verified by hand and the
 > confirmed ones fixed. Verification: server `tsc` clean, UI `tsc` clean, agent `go build`/`go vet`/
