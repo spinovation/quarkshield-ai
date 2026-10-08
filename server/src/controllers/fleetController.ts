@@ -5,10 +5,74 @@ import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
 import { canAccessTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
+import fs from 'fs';
+import path from 'path';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
 // Requires the query to alias fleet_machines as m and LEFT JOIN fleet_tokens as t.
 const EFFECTIVE_GROUP = "COALESCE(NULLIF(m.group_name, ''), NULLIF(t.name, ''), 'Default')";
+
+// ==========================================
+// PUSH-UPGRADE: latest version + signed-binary manifest
+// ==========================================
+
+// Fallback "latest" version used only if agent-manifest.json can't be read. The
+// authoritative value is the manifest emitted by build_all_and_sign.sh (which hashes
+// each signed binary). Keep this in sync with AGENT_VERSION in that script.
+const LATEST_AGENT_VERSION = '2.3.0';
+
+interface AgentManifestEntry { url: string; sha256: string; }
+interface AgentManifest { version: string; generatedAt?: string; binaries: Record<string, AgentManifestEntry>; }
+
+// Candidate locations for agent-manifest.json — the same directories index.ts serves
+// /downloads from. Mirrors that resolution so the server reads the manifest that sits
+// next to the binaries it actually serves.
+const manifestCandidateDirs = (): string[] => [
+  process.env.DOWNLOADS_DIR,
+  path.join(__dirname, '../../agent/binaries'),
+  path.join(__dirname, '../binaries'),
+  path.join(__dirname, '../../downloads'),
+  path.join(process.cwd(), 'agent/binaries'),
+  path.join(process.cwd(), 'downloads'),
+].filter(Boolean) as string[];
+
+// Load + cache the manifest. Re-reads when the file's mtime changes so a fresh release
+// is picked up without a server restart.
+let _manifestCache: { mtimeMs: number; data: AgentManifest } | null = null;
+const loadAgentManifest = (): AgentManifest | null => {
+  for (const dir of manifestCandidateDirs()) {
+    const p = path.join(dir, 'agent-manifest.json');
+    try {
+      const st = fs.statSync(p);
+      if (_manifestCache && _manifestCache.mtimeMs === st.mtimeMs) return _manifestCache.data;
+      const data = JSON.parse(fs.readFileSync(p, 'utf8')) as AgentManifest;
+      if (data && data.version && data.binaries) {
+        _manifestCache = { mtimeMs: st.mtimeMs, data };
+        return data;
+      }
+    } catch { /* try next candidate */ }
+  }
+  return null;
+};
+
+// The version the console considers current (manifest wins, constant is the fallback).
+const getLatestAgentVersion = (): string => loadAgentManifest()?.version || LATEST_AGENT_VERSION;
+
+// Compare dotted numeric versions: -1 / 0 / 1 (a<b / a== / a>b). Pre-release suffix ignored.
+const cmpAgentVersion = (a: string, b: string): number => {
+  const norm = (v: string) => (v || '').trim().replace(/^v/, '').split(/[-+]/)[0].split('.').map(n => parseInt(n, 10) || 0);
+  const pa = norm(a), pb = norm(b);
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return 0;
+};
+
+// Is this agent_version older than the current release? Unknown/blank versions are
+// treated as out-of-date so freshly-enrolled endpoints surface for an upgrade.
+const isOutOfDate = (agentVersion: string | null | undefined, latest: string): boolean =>
+  cmpAgentVersion((agentVersion || '').toString(), latest) < 0;
 
 // ==========================================
 // 1. FLEET TOKENS
@@ -184,7 +248,15 @@ export const getFleetMachines = async (req: Request, res: Response) => {
     }
     query += ` ORDER BY m.last_seen DESC;`;
     const result = await pool.query(query, params);
-    res.json(result.rows);
+    // Annotate each machine with push-upgrade drift so the console can badge
+    // out-of-date endpoints and enable "Push update" only where it applies.
+    const latestVersion = getLatestAgentVersion();
+    const rows = result.rows.map(r => ({
+      ...r,
+      latestVersion,
+      outOfDate: isOutOfDate(r.agentVersion, latestVersion),
+    }));
+    res.json(rows);
   } catch (err: any) {
     console.error('Error fetching fleet machines:', err);
     res.status(500).json({ error: 'Failed to retrieve fleet machines.' });
@@ -1181,6 +1253,125 @@ export const enqueuePullCommand = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error queuing pull command:', err);
     res.status(500).json({ error: 'Failed to queue command.' });
+  }
+};
+
+// Build the 'upgrade' command details for a machine's os/arch from the signed-binary
+// manifest. Returns null (with a reason) if the machine is already current or no
+// matching binary exists. force=true allows re-install of the same/older version.
+const buildUpgradeDetails = (
+  os: string,
+  arch: string,
+  currentVersion: string,
+  force: boolean,
+): { details: any } | { error: string; code: number } => {
+  const manifest = loadAgentManifest();
+  if (!manifest) return { error: 'No agent release manifest is available on the server.', code: 503 };
+  const key = `${(os || '').toLowerCase()}/${(arch || '').toLowerCase()}`;
+  const entry = manifest.binaries[key];
+  if (!entry || !entry.sha256 || !entry.url) {
+    return { error: `No signed binary in the release manifest for platform ${key}.`, code: 422 };
+  }
+  if (!force && cmpAgentVersion(manifest.version, currentVersion || '') <= 0) {
+    return { error: `Endpoint is already running ${currentVersion || 'current'} (latest is ${manifest.version}).`, code: 409 };
+  }
+  return { details: { version: manifest.version, sha256: entry.sha256, url: entry.url, force: !!force } };
+};
+
+// Enqueue a verified push-upgrade for a single workstation. The agent downloads the
+// binary ONLY from its enrolled server, verifies SHA-256 + signature, then swaps.
+export const enqueueUpgradeCommand = async (req: Request, res: Response) => {
+  try {
+    const { machineId } = req.params;
+    const force = req.body?.force === true;
+    const m = await pool.query(
+      `SELECT m.os, m.arch, m.agent_version AS "agentVersion",
+              COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name) AS tenant
+         FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE m.id = $1`,
+      [machineId]
+    );
+    if (m.rowCount === 0 || !canAccessTenant(req, m.rows[0].tenant)) {
+      return res.status(404).json({ error: 'Fleet machine not found.' });
+    }
+    const row = m.rows[0];
+    const built = buildUpgradeDetails(row.os, row.arch, row.agentVersion, force);
+    if ('error' in built) return res.status(built.code).json({ error: built.error });
+
+    // De-dupe: don't stack multiple pending upgrades on one machine.
+    const commandId = 'cmd-' + crypto.randomBytes(8).toString('hex');
+    const ins = await pool.query(`
+      INSERT INTO fleet_commands (id, machine_id, command, details, status)
+      SELECT $1, $2, 'upgrade', $3, 'pending'
+       WHERE NOT EXISTS (
+         SELECT 1 FROM fleet_commands fc
+          WHERE fc.machine_id = $2 AND fc.command = 'upgrade' AND fc.status = 'pending'
+       )
+      RETURNING id
+    `, [commandId, machineId, JSON.stringify(built.details)]);
+
+    if (ins.rowCount === 0) {
+      return res.json({ success: true, machineId, alreadyQueued: true, message: 'An upgrade is already pending for this endpoint.' });
+    }
+    res.json({ success: true, commandId, machineId, version: built.details.version, message: `Upgrade to ${built.details.version} queued for workstation.` });
+  } catch (err: any) {
+    console.error('Error queuing upgrade command:', err);
+    res.status(500).json({ error: 'Failed to queue upgrade.' });
+  }
+};
+
+// Enqueue a push-upgrade for every out-of-date endpoint in the tenant (optionally a
+// single group). Skips machines already current or already having a pending upgrade.
+export const enqueueBulkUpgradeCommand = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved for bulk upgrade.' });
+    }
+    const force = req.body?.force === true;
+    const group = (req.body?.group || '').toString().trim() || null;
+    const manifest = loadAgentManifest();
+    if (!manifest) return res.status(503).json({ error: 'No agent release manifest is available on the server.' });
+
+    const params: any[] = [tenant];
+    let groupClause = '';
+    if (group) { params.push(group); groupClause = ` AND LOWER(${EFFECTIVE_GROUP}) = LOWER($${params.length})`; }
+    const machines = await pool.query(
+      `SELECT m.id, m.os, m.arch, m.agent_version AS "agentVersion"
+         FROM fleet_machines m
+         LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE (LOWER(m.tenant_name) = LOWER($1)
+            OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+            OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+          ${groupClause}`,
+      params
+    );
+
+    let queued = 0, skipped = 0;
+    for (const row of machines.rows) {
+      const built = buildUpgradeDetails(row.os, row.arch, row.agentVersion, force);
+      if ('error' in built) { skipped++; continue; }
+      const commandId = 'cmd-' + crypto.randomBytes(8).toString('hex');
+      const ins = await pool.query(`
+        INSERT INTO fleet_commands (id, machine_id, command, details, status)
+        SELECT $1, $2, 'upgrade', $3, 'pending'
+         WHERE NOT EXISTS (
+           SELECT 1 FROM fleet_commands fc
+            WHERE fc.machine_id = $2 AND fc.command = 'upgrade' AND fc.status = 'pending'
+         )
+        RETURNING id
+      `, [commandId, row.id, JSON.stringify(built.details)]);
+      if (ins.rowCount && ins.rowCount > 0) queued++; else skipped++;
+    }
+    res.json({
+      success: true, queued, skipped, version: manifest.version, group,
+      message: queued === 0
+        ? 'No out-of-date endpoints to upgrade.'
+        : `Upgrade to ${manifest.version} queued for ${queued} endpoint(s)${group ? ' in group ' + group : ''}.`
+    });
+  } catch (err: any) {
+    console.error('Error queuing bulk upgrade command:', err);
+    res.status(500).json({ error: 'Failed to queue bulk upgrade.' });
   }
 };
 

@@ -15,6 +15,8 @@ import {
   ingestTelemetry,
   enqueuePullCommand,
   enqueueBulkPullCommand,
+  enqueueUpgradeCommand,
+  enqueueBulkUpgradeCommand,
   setMachineGroup,
   listFleetGroups,
   createFleetGroup,
@@ -180,6 +182,9 @@ router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines
 router.delete('/fleet/machines/:id', requireAuth, requireTenantAccess, deleteFleetMachine);
 router.post('/fleet/machines/:machineId/pull', requireAuth, requireTenantAccess, enqueuePullCommand);
 router.post('/fleet/pull-bulk', requireAuth, requireTenantAccess, enqueueBulkPullCommand);
+// Push-upgrade: verified remote agent upgrade (download→verify→atomic swap→restart).
+router.post('/fleet/machines/:machineId/upgrade', requireAuth, requireTenantAccess, enqueueUpgradeCommand);
+router.post('/fleet/upgrade-bulk', requireAuth, requireTenantAccess, enqueueBulkUpgradeCommand);
 router.post('/fleet/machines/:machineId/group', requireAuth, requireTenantAccess, setMachineGroup);
 router.get('/fleet/groups', requireAuth, requireTenantAccess, listFleetGroups);
 router.post('/fleet/groups', requireAuth, requireTenantAccess, createFleetGroup);
