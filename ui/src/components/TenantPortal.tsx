@@ -1264,10 +1264,14 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   };
 
   useEffect(() => {
+    // Load only once signed in: an anonymous fetch 401s and would latch "session expired",
+    // which then showed right after a successful login.
+    if (!isAuthenticated && !isSupportMirror) return;
+    setSessionExpired(false);
     fetchTenantData();
     fetchPullSchedules();
     fetchFleetGroups();
-  }, [cleanSlug]);
+  }, [cleanSlug, isAuthenticated, isSupportMirror]);
 
   const completeTenantLogin = (data?: any) => {
     setIsAuthenticated(true);
