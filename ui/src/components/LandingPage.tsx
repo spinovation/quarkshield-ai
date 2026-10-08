@@ -369,6 +369,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   const [supportSubmitted, setSupportSubmitted] = useState(false);
   const [isSubmittingSupport, setIsSubmittingSupport] = useState(false);
 
+  // Deep-link: open the Contact Support modal when the URL hash is #support (or #contact).
+  // The desktop agent dashboard's "Help & Support" opens quarkshield.ai/#support so it
+  // lands on the same support form instead of a generic page.
+  useEffect(() => {
+    const openIfSupportHash = () => {
+      const h = window.location.hash.toLowerCase();
+      if (h === '#support' || h === '#contact') setShowSupportModalState(true);
+    };
+    openIfSupportHash();
+    window.addEventListener('hashchange', openIfSupportHash);
+    return () => window.removeEventListener('hashchange', openIfSupportHash);
+  }, []);
+
   const validateSupport = () => {
     const errs: Record<string, string> = {};
     if (!supportForm.name.trim()) errs.name = 'Please enter your name.';
