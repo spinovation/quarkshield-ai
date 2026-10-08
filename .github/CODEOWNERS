@@ -1,0 +1,13 @@
+# Security-critical files from the 2026-10-07 hotfix. Changes here reopen multi-tenant
+# auth / isolation holes if done carelessly — require owner review, and keep the
+# security-regression canaries (server/test/security-regression.test.mjs) green.
+/server/src/middleware/auth.ts              @sridhargs
+/server/src/controllers/adminController.ts  @sridhargs
+/server/src/controllers/fleetController.ts  @sridhargs
+/server/src/controllers/billingController.ts @sridhargs
+/server/src/controllers/reportController.ts @sridhargs
+/server/src/controllers/aiController.ts     @sridhargs
+/server/src/config/bootstrap.ts             @sridhargs
+/server/test/security-regression.test.mjs   @sridhargs
+/.github/workflows/security-regression.yml  @sridhargs
+/deploy.sh                                  @sridhargs

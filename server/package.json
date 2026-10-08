@@ -6,7 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "nodemon src/index.ts"
+    "dev": "nodemon src/index.ts",
+    "test:security": "node --test test/security-regression.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-kms": "^3.1140.0",
