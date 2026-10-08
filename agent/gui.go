@@ -144,6 +144,7 @@ func unregisterWindowsUninstall() {
 //   - Sec-Fetch-Site (sent by modern browsers) must be same-origin/none; any
 //     cross-site or same-site request (fetch, form, img, navigation) is refused.
 //   - If an Origin header is present it must be this exact local origin.
+//
 // No permissive CORS headers are ever sent, so cross-origin reads are blocked.
 func localGuard(next http.Handler, port int, apiToken string) http.Handler {
 	allowedHosts := map[string]bool{
@@ -300,6 +301,7 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 			"hostname":        hostname,
 			"computerName":    compName,
 			"hardwareUuid":    hwUUID,
+			"version":         AgentVersion,
 			"os":              osName,
 			"arch":            archName,
 			"ip":              localIP,

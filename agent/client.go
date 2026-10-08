@@ -32,6 +32,11 @@ type EnrollmentConfig struct {
 
 var (
 	enrollmentMu sync.RWMutex
+
+	// AgentVersion is the running agent's version. Exposed via /api/status (for the
+	// dashboard version chip / About) and sent in telemetry. Declared as a var (not a
+	// const) so a release build can override it with -ldflags "-X main.AgentVersion=…".
+	AgentVersion = "2.2.1"
 )
 
 func getEnrollmentConfigPath() string {
@@ -148,7 +153,7 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 		OS:           osName,
 		Arch:         archName,
 		IP:           ip,
-		AgentVersion: "2.2.1",
+		AgentVersion: AgentVersion,
 		Token:        token,
 		LicenseKey:   licenseKey,
 		TenantName:   tenantName,

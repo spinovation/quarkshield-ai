@@ -638,6 +638,18 @@
       align-items: center;
       background: rgba(7, 9, 14, 0.6);
     }
+    /* Help dropdown menu items */
+    .help-item {
+      display: flex; align-items: center; gap: 0.55rem; width: 100%;
+      background: transparent; border: none; color: #e2e8f0;
+      padding: 0.5rem 0.65rem; border-radius: 6px; font-size: 0.82rem;
+      cursor: pointer; text-align: left; font-family: inherit;
+    }
+    .help-item:hover { background: rgba(56, 189, 248, 0.12); }
+    .ver-chip {
+      font-size: 0.72rem; color: var(--text-muted, #94a3b8);
+      font-family: monospace; letter-spacing: 0.3px; white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -649,6 +661,7 @@
         <img src="/quarkshield-logo.png" alt="QuarkShield" style="height: 28px; width: auto; object-fit: contain; display: block; filter: drop-shadow(0 0 10px rgba(0, 242, 254, 0.35));">
       </a>
       <div style="height: 22px; width: 1px; background: rgba(255, 255, 255, 0.16); margin: 0 0.1rem;"></div>
+      <span class="ver-chip" title="Installed agent version">Post-Quantum Guard · <span id="app-version">…</span></span>
     </div>
 
     <div style="display: flex; align-items: center; gap: 0.65rem;">
@@ -662,14 +675,38 @@
       <button class="btn btn-secondary" onclick="openSyncModal()" style="padding: 0.4rem 0.9rem; font-size: 0.8rem;">
         🌐 Connect to Fleet
       </button>
-      <button class="btn btn-secondary" onclick="openGuideModal()" style="padding: 0.4rem 0.9rem; font-size: 0.8rem; color: var(--accent-cyan); border-color: rgba(56, 189, 248, 0.4);">
-        📖 User Guide
-      </button>
-      <button class="btn btn-secondary" onclick="uninstallApp()" style="padding: 0.4rem 0.9rem; font-size: 0.8rem; color: #f87171; border-color: rgba(248, 113, 113, 0.3);">
-        🗑️ Uninstall
-      </button>
+      <!-- Help dropdown: consolidates User Guide, Support, Updates, About, Uninstall -->
+      <div style="position: relative;" id="help-menu-wrap">
+        <button class="btn btn-secondary" onclick="toggleHelpMenu(event)" style="padding: 0.4rem 0.9rem; font-size: 0.8rem; color: var(--accent-cyan); border-color: rgba(56, 189, 248, 0.4); display: inline-flex; align-items: center; gap: 0.4rem;">
+          ❔ Help
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="help-menu" style="display: none; position: absolute; right: 0; top: calc(100% + 6px); min-width: 212px; background: #0f172a; border: 1px solid rgba(255,255,255,0.12); border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.55); z-index: 200; padding: 0.3rem;">
+          <button class="help-item" onclick="closeHelpMenu(); openGuideModal();">📖 User Guide</button>
+          <button class="help-item" onclick="closeHelpMenu(); openSupport();">💬 Help &amp; Support</button>
+          <button class="help-item" onclick="closeHelpMenu(); checkForUpdates();">🔄 Check for Updates</button>
+          <button class="help-item" onclick="closeHelpMenu(); openAboutModal();">ℹ️ About</button>
+          <div style="height:1px; background: rgba(255,255,255,0.08); margin: 0.3rem 0.1rem;"></div>
+          <button class="help-item" onclick="closeHelpMenu(); uninstallApp();" style="color: #f87171;">🗑️ Uninstall</button>
+        </div>
+      </div>
     </div>
   </header>
+
+  <!-- About modal -->
+  <div id="about-modal" style="display:none; position:fixed; inset:0; background:rgba(2,6,15,0.72); z-index:500; align-items:center; justify-content:center;" onclick="if(event.target===this)closeAboutModal()">
+    <div style="background:#0f172a; border:1px solid rgba(56,189,248,0.25); border-radius:12px; width:min(460px,92vw); padding:1.4rem 1.5rem; box-shadow:0 20px 60px rgba(0,0,0,0.6);">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:0.9rem;">
+        <h3 style="margin:0; font-size:1.05rem; color:#fff;">🛡️ About QuarkShield Post-Quantum Guard</h3>
+        <button onclick="closeAboutModal()" style="background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:1.1rem;">✕</button>
+      </div>
+      <div id="about-body" style="font-size:0.86rem; color:#cbd5e1; line-height:1.9;">Loading…</div>
+      <div style="margin-top:1.1rem; display:flex; gap:0.5rem; flex-wrap:wrap;">
+        <a class="btn btn-secondary" href="https://quarkshield.ai/downloads" target="_blank" style="padding:0.4rem 0.9rem; font-size:0.8rem; text-decoration:none; color:var(--accent-cyan); border-color:rgba(56,189,248,0.4);">⬇️ Latest downloads</a>
+        <a class="btn btn-secondary" href="mailto:Support@quarkshield.ai" style="padding:0.4rem 0.9rem; font-size:0.8rem; text-decoration:none;">💬 Support@quarkshield.ai</a>
+      </div>
+    </div>
+  </div>
 
   <!-- Main Post-Quantum Guard Dashboard -->
   <main>
@@ -3266,6 +3303,66 @@
       renderQuickTargets(prelimOS, '');
     } catch(e) {}
     fetchHostStatus();
+  </script>
+
+  <!-- Header: version chip, Help dropdown, About modal -->
+  <script>
+    (function(){
+      var AGENT_STATUS = {};
+      function loadAgentMeta(){
+        fetch('/api/status').then(function(r){return r.json();}).then(function(d){
+          AGENT_STATUS = d || {};
+          var el = document.getElementById('app-version');
+          if (el) el.textContent = 'v' + (d && d.version ? d.version : '—');
+        }).catch(function(){
+          var el = document.getElementById('app-version');
+          if (el) el.textContent = '—';
+        });
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', loadAgentMeta);
+      else loadAgentMeta();
+
+      window.toggleHelpMenu = function(e){
+        if (e) e.stopPropagation();
+        var m = document.getElementById('help-menu');
+        if (m) m.style.display = (m.style.display === 'block') ? 'none' : 'block';
+      };
+      window.closeHelpMenu = function(){
+        var m = document.getElementById('help-menu');
+        if (m) m.style.display = 'none';
+      };
+      document.addEventListener('click', function(e){
+        var wrap = document.getElementById('help-menu-wrap');
+        if (wrap && !wrap.contains(e.target)) window.closeHelpMenu();
+      });
+
+      window.openAboutModal = function(){
+        var d = AGENT_STATUS || {}, lic = d.license || {};
+        var tier = lic.tier || lic.licenseTier || lic.plan || lic.company || (d.isEnrolled ? 'Licensed' : 'Standalone (local-only)');
+        var rows = [
+          ['Version', 'v' + (d.version || '—')],
+          ['Platform', (d.os || '—') + '/' + (d.arch || '—')],
+          ['Host', d.computerName || d.hostname || '—'],
+          ['License', tier],
+          ['Fleet', d.isEnrolled ? ('Enrolled → ' + (d.serverUrl || 'fleet')) : 'Not enrolled (local-only)']
+        ];
+        var html = '<table style="width:100%; border-collapse:collapse;">';
+        rows.forEach(function(r){
+          html += '<tr><td style="color:#94a3b8; padding:0.15rem 0.9rem 0.15rem 0; white-space:nowrap; vertical-align:top;">'+r[0]+'</td><td style="color:#e2e8f0; font-family:monospace; word-break:break-all;">'+r[1]+'</td></tr>';
+        });
+        html += '</table>';
+        html += '<div style="margin-top:0.9rem; font-size:0.78rem; color:#94a3b8; line-height:1.6;">Updates are installed manually today; your fleet admin can also push upgrades from the QuarkShield console. Grab the latest signed build from the downloads page below.</div>';
+        var body = document.getElementById('about-body'); if (body) body.innerHTML = html;
+        var modal = document.getElementById('about-modal'); if (modal) modal.style.display = 'flex';
+      };
+      window.closeAboutModal = function(){
+        var modal = document.getElementById('about-modal'); if (modal) modal.style.display = 'none';
+      };
+      window.openSupport = function(){ window.open('https://quarkshield.ai', '_blank'); };
+      // Interim "Check for Updates": shows current version + the download path. One-click
+      // in-place upgrade arrives with the fleet push-upgrade feature.
+      window.checkForUpdates = function(){ window.openAboutModal(); };
+    })();
   </script>
 </body>
 </html>
