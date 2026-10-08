@@ -61,7 +61,8 @@ import {
   Package,
   Network,
   CreditCard,
-  MapPin
+  MapPin,
+  ArrowUpCircle
 } from 'lucide-react';
 import { TenantUserManagement } from './TenantUserManagement';
 import { EnterprisePkiVaults } from './EnterprisePkiVaults';
@@ -161,6 +162,8 @@ interface FleetMachine {
   geoCountry?: string;
   group?: string;
   agentVersion: string;
+  latestVersion?: string;
+  outOfDate?: boolean;
   status: string;
   riskLevel: string;
   quantumRiskScore: number;
@@ -1118,6 +1121,59 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       alert(`Pull error: ${e}`);
     } finally {
       setPullingMachineId(null);
+    }
+  };
+
+  // Push-upgrade: dispatch a verified remote agent upgrade to a single endpoint.
+  const [upgradingMachineId, setUpgradingMachineId] = useState<string | null>(null);
+  const handlePushUpgrade = async (machineId: string, hostname: string, toVersion?: string) => {
+    if (!window.confirm(`Push the latest agent${toVersion ? ' (v' + toVersion + ')' : ''} to ${hostname}? The endpoint will download the signed binary, verify it, and restart automatically.`)) return;
+    setUpgradingMachineId(machineId);
+    try {
+      const res = await fetch(`/api/fleet/machines/${machineId}/upgrade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(`${d.message || `Upgrade queued for ${hostname}.`} The agent applies it on its next check-in and reports the new version once it restarts.`);
+        fetchTenantData();
+      } else {
+        alert(`Could not queue upgrade for ${hostname}: ${d.error || res.status}`);
+      }
+    } catch (e) {
+      console.error('Error dispatching upgrade:', e);
+      alert(`Upgrade error: ${e}`);
+    } finally {
+      setUpgradingMachineId(null);
+    }
+  };
+
+  // Push-upgrade: dispatch to every out-of-date endpoint (optionally one group).
+  const [bulkUpgrading, setBulkUpgrading] = useState<string | null>(null); // null | 'ALL' | group name
+  const handleUpgradeBulk = async (opts?: { group?: string }) => {
+    const key = opts?.group || 'ALL';
+    const scopeLabel = opts?.group ? `group "${opts.group}"` : 'all out-of-date endpoints';
+    if (!window.confirm(`Push the latest agent to ${scopeLabel}? Each endpoint verifies the signed binary before restarting. Up-to-date endpoints are skipped.`)) return;
+    setBulkUpgrading(key);
+    try {
+      const res = await fetch(`/api/fleet/upgrade-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(opts?.group ? { group: opts.group } : {})
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(`${d.message || `Upgrade queued for ${scopeLabel}.`}${d.skipped ? ` (${d.skipped} skipped)` : ''} Endpoints update as they check in.`);
+        fetchTenantData();
+      } else {
+        alert(`Failed to queue bulk upgrade: ${d.error || res.status}`);
+      }
+    } catch (e) {
+      alert(`Bulk upgrade error: ${e}`);
+    } finally {
+      setBulkUpgrading(null);
     }
   };
 
@@ -3485,6 +3541,33 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       >
                         <RefreshCw size={14} className={bulkPulling === 'ALL' ? 'animate-spin' : ''} /> Pull All
                       </button>
+                      {(() => {
+                        const outOfDateCount = machines.filter(m => m.outOfDate).length;
+                        return (
+                          <button
+                            onClick={() => handleUpgradeBulk()}
+                            disabled={bulkUpgrading !== null || outOfDateCount === 0}
+                            title={outOfDateCount === 0 ? 'All endpoints are running the latest agent' : `Push the latest agent to ${outOfDateCount} out-of-date endpoint(s)`}
+                            style={{
+                              background: 'rgba(74, 222, 128, 0.12)',
+                              border: '1px solid rgba(74, 222, 128, 0.3)',
+                              color: '#4ade80',
+                              padding: '0.4rem 0.85rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              cursor: bulkUpgrading !== null ? 'wait' : (outOfDateCount === 0 ? 'not-allowed' : 'pointer'),
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.4rem',
+                              opacity: outOfDateCount === 0 ? 0.5 : 1
+                            }}
+                          >
+                            <ArrowUpCircle size={14} className={bulkUpgrading === 'ALL' ? 'animate-spin' : ''} />
+                            {outOfDateCount > 0 ? `Update all (${outOfDateCount})` : 'All up to date'}
+                          </button>
+                        );
+                      })()}
                       <button
                         onClick={() => setScheduleModalOpen(true)}
                         style={{
@@ -3608,6 +3691,27 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                         {m.hostname}
                                       </div>
                                     )}
+                                    <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.1rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                                      <span>Agent v{m.agentVersion || '—'}</span>
+                                      {m.outOfDate && (
+                                        <span
+                                          title={`A newer agent${m.latestVersion ? ' (v' + m.latestVersion + ')' : ''} is available`}
+                                          style={{
+                                            color: '#4ade80',
+                                            background: 'rgba(74, 222, 128, 0.12)',
+                                            border: '1px solid rgba(74, 222, 128, 0.3)',
+                                            borderRadius: '4px',
+                                            padding: '0 0.35rem',
+                                            fontWeight: 700,
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: '0.2rem'
+                                          }}
+                                        >
+                                          <ArrowUpCircle size={10} /> update available
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               </td>
@@ -3716,6 +3820,31 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                   <RefreshCw size={12} className={pullingMachineId === m.id ? 'animate-spin' : ''} />
                                   {pullingMachineId === m.id ? 'Pulling...' : 'Pull Telemetry'}
                                 </button>
+                                {m.outOfDate && (
+                                  <button
+                                    disabled={upgradingMachineId === m.id}
+                                    onClick={() => handlePushUpgrade(m.id, displayName, m.latestVersion)}
+                                    title={`Push the latest agent${m.latestVersion ? ' (v' + m.latestVersion + ')' : ''} to this endpoint — verified download, atomic swap, auto-restart`}
+                                    style={{
+                                      marginLeft: '0.4rem',
+                                      background: 'rgba(74, 222, 128, 0.1)',
+                                      border: '1px solid rgba(74, 222, 128, 0.3)',
+                                      color: '#4ade80',
+                                      padding: '0.3rem 0.6rem',
+                                      borderRadius: '5px',
+                                      fontSize: '0.74rem',
+                                      fontWeight: 600,
+                                      cursor: upgradingMachineId === m.id ? 'not-allowed' : 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.35rem',
+                                      opacity: upgradingMachineId === m.id ? 0.6 : 1
+                                    }}
+                                  >
+                                    <ArrowUpCircle size={12} className={upgradingMachineId === m.id ? 'animate-spin' : ''} />
+                                    {upgradingMachineId === m.id ? 'Pushing...' : 'Push update'}
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           );
