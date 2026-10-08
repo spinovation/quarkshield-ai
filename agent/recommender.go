@@ -252,3 +252,20 @@ func buildCertRemediation(algorithm string, keySize int, name, path, lowerName, 
 func GenerateRemediation(assetType string, algorithm string, keySize int, name string, description string, path string) RemediationPlan {
 	return GenerateRemediationWithUsage(assetType, algorithm, keySize, name, description, path, false, false)
 }
+
+// TrustAnchorRemediation returns INVENTORY / AWARENESS steps for a PUBLIC trust anchor
+// (a root/intermediate CA in a system trust store). The operator does NOT own the key and
+// cannot re-key it, so the generic migration steps ("migrate to ML-DSA / deploy matching
+// certificates") would CONTRADICT the "you cannot re-key this" recommendation. Callers
+// (windows/macos/linux store scanners) use this to override plan.Steps / plan.CodeSnippet
+// for trust-anchor findings. `inspectCmd` is a platform-appropriate command to view the cert.
+func TrustAnchorRemediation(inspectCmd string) ([]string, string) {
+	steps := []string{
+		"Record this trust anchor in your CBOM inventory as a classical (RSA/ECDSA) CA root — tracking/awareness only; it is NOT an operator action item (you do not own this key and cannot re-key it).",
+		"Track the issuing CA operator's post-quantum migration roadmap. The CA — not your organization — re-issues this root with a PQC/hybrid key when ready; there is nothing to 'migrate' on your side.",
+		"Keep your OWN TLS endpoints hardened independently (TLS 1.3 + hybrid X25519MLKEM768 key exchange); that protects data in transit regardless of when the public CA migrates its root.",
+		"Remove trust ONLY if your organization no longer needs this CA (an unused or legacy root). Do NOT revoke, re-key, or re-issue a public CA root you do not operate.",
+	}
+	snippet := "# Inspect this trust anchor (awareness only — a public CA root cannot be operator-re-keyed):\n" + inspectCmd
+	return steps, snippet
+}

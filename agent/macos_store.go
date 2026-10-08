@@ -188,6 +188,8 @@ func AuditMacOSKeychains() []AuditResult {
 			isExpired := cert.NotAfter.Before(time.Now())
 			status := certStatus(vulnerable)
 			recommendation := plan.Recommendation
+			steps := plan.Steps
+			snippet := plan.CodeSnippet
 			expl := explainer
 			if isTrustAnchor {
 				if riskLevel == "high" || riskLevel == "critical" {
@@ -196,6 +198,9 @@ func AuditMacOSKeychains() []AuditResult {
 				status = "Trust Anchor (informational)"
 				recommendation = "Inventory/awareness only — this is a public trust-anchor (root/intermediate CA) in the system trust store. You do not own this key and cannot re-key it; the CA operator is responsible for its post-quantum migration. Remove it only if your organization no longer needs to trust this CA."
 				expl = "Root/intermediate CA certificates use classical algorithms a future quantum computer could forge, but they are public trust anchors managed by the CA — not operator-owned keys requiring re-key."
+				// Inventory/awareness steps — NOT operator migration steps. Locate this root
+				// among the system trust anchors by the SHA-256 fingerprint shown in Path.
+				steps, snippet = TrustAnchorRemediation("security find-certificate -a -Z /System/Library/Keychains/SystemRootCertificates.keychain   # locate by SHA-256: " + fp)
 			}
 			if isExpired {
 				if riskLevel == "high" || riskLevel == "critical" {
@@ -217,8 +222,8 @@ func AuditMacOSKeychains() []AuditResult {
 				Status:               status,
 				Description:          desc,
 				Recommendation:       recommendation,
-				RemediationSteps:     plan.Steps,
-				CodeSnippet:          plan.CodeSnippet,
+				RemediationSteps:     steps,
+				CodeSnippet:          snippet,
 				Explainer:            expl,
 				ComplianceViolations: complianceViolations,
 			})

@@ -117,6 +117,8 @@ func AuditWindowsCertStore() []AuditResult {
 
 		status := certStatus(vulnerable)
 		recommendation := plan.Recommendation
+		steps := plan.Steps
+		snippet := plan.CodeSnippet
 		explainer := "Classical asymmetric keys can be forged using Shor's Algorithm once a cryptographically-relevant quantum computer exists; sub-2048-bit RSA is additionally weak against classical attacks."
 		if isTrustAnchor {
 			if riskLevel == "high" || riskLevel == "critical" {
@@ -125,6 +127,9 @@ func AuditWindowsCertStore() []AuditResult {
 			status = "Trust Anchor (informational)"
 			recommendation = "Inventory/awareness only — this is a public trust-anchor (root/intermediate CA) in the system trust store. You do not own this key and cannot re-key it; the CA operator is responsible for its post-quantum migration. Remove it only if your organization no longer needs to trust this CA."
 			explainer = "Root/intermediate CA certificates use classical algorithms that a future quantum computer could forge, but they are public trust anchors managed by the CA — not operator-owned keys requiring re-key."
+			// Inventory/awareness steps — NOT the generic migration steps (which would
+			// contradict "you cannot re-key this" for a root you do not own).
+			steps, snippet = TrustAnchorRemediation("Get-ChildItem Cert: -Recurse | Where-Object { $_.Thumbprint -eq '" + thumbprint + "' } | Format-List Subject, Issuer, Thumbprint, NotAfter, SignatureAlgorithm")
 		}
 		if isExpired {
 			if riskLevel == "high" || riskLevel == "critical" {
@@ -146,8 +151,8 @@ func AuditWindowsCertStore() []AuditResult {
 			Status:               status,
 			Description:          desc,
 			Recommendation:       recommendation,
-			RemediationSteps:     plan.Steps,
-			CodeSnippet:          plan.CodeSnippet,
+			RemediationSteps:     steps,
+			CodeSnippet:          snippet,
 			Explainer:            explainer,
 			ComplianceViolations: []string{"CNSA 2.0", "NIST FIPS 204", "EO 14028"},
 		})
