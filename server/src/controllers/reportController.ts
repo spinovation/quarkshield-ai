@@ -264,7 +264,7 @@ export const exportExecutiveReport = async (req: Request, res: Response) => {
     if (!collective && !tenant) return res.status(400).json({ error: 'A tenant is required.' });
 
     const report = await buildRoadmapReport(collective ? { collective: true } : { collective: false, tenant });
-    report.summary = await generateNarrative(report);
+    report.summary = await generateNarrative(report, collective ? undefined : tenant);
 
     const safeName = (collective ? 'fleet' : tenant).toLowerCase().replace(/[^a-z0-9]/g, '-');
 
@@ -363,7 +363,7 @@ export const sendRoadmapReport = async (req: Request, res: Response) => {
     if (!toList.length) return res.status(400).json({ error: 'No valid recipients. Add stakeholders under Profile first.' });
 
     const report = await buildRoadmapReport(collective ? { collective: true } : { collective: false, tenant });
-    report.summary = await generateNarrative(report);
+    report.summary = await generateNarrative(report, collective ? undefined : tenant);
     const html = buildHtml(report);
     const subject = `QuarkShield PQC Roadmap — ${report.scopeLabel} (Risk ${report.riskGrade})`;
     const text = `QuarkShield Executive PQC Roadmap Report for ${report.scopeLabel}. Risk grade ${report.riskGrade}. ${report.totals.vulnerable} of ${report.totals.assets} assets are quantum-vulnerable. This email contains the full report (priorities, remediation, migration roadmap).`;
