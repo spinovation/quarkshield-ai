@@ -741,7 +741,6 @@ CREATE INDEX IF NOT EXISTS idx_tenant_settings_key   ON tenant_settings (LOWER(t
 -- One account per (tenant, email) regardless of case. Lookups already use LOWER();
 -- without this a second row with different casing could shadow the first.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_users_ci ON tenant_users (LOWER(tenant_name), LOWER(email));
-=======
 
 -- =========================================================================
 -- THREAT & RISK GRAPH (Risk Assurance plan, Phase 1)
