@@ -561,14 +561,15 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
     token, 
     username, 
     branch = 'main',
-    tenant = 'SPINOVATIONCORP',
+    tenant = '',
     tenantName
   } = req.body;
 
   // Pin the scan (and its persisted assets) to the session's tenant; a body/header
   // tenant cannot inject findings into another tenant's inventory (super roles may
-  // target the requested tenant).
-  const cleanTenant = (resolveWriteTenant(req, tenantName || tenant) || 'SPINOVATIONCORP').trim().toUpperCase();
+  // target the requested tenant). M4: reject an empty tenant rather than defaulting to SPINOVATIONCORP.
+  const cleanTenant = (resolveWriteTenant(req, tenantName || tenant) || '').trim().toUpperCase();
+  if (!cleanTenant) return res.status(400).json({ error: 'Unable to resolve a tenant for this request.' });
 
   if (!repoUrl || typeof repoUrl !== 'string') {
     return res.status(400).json({ error: 'Valid Git repository URL is required (e.g. https://github.com/org/repo).' });

@@ -176,7 +176,9 @@ export const createProxy = async (req: Request, res: Response) => {
 
     const id = 'prx-' + crypto.randomUUID().substring(0, 8);
     // Pin to the session's tenant; a body tenantName cannot target another tenant.
-    const cleanTenant = (resolveWriteTenant(req, tenantName) || 'SPINOVATIONCORP').toUpperCase().trim();
+    // M4: reject empty-tenant writes rather than silently defaulting to SPINOVATIONCORP.
+    const cleanTenant = (resolveWriteTenant(req, tenantName) || '').toUpperCase().trim();
+    if (!cleanTenant) return res.status(400).json({ error: 'Unable to resolve a tenant for this request.' });
 
     await pool.query(`
       INSERT INTO pqc_proxies (

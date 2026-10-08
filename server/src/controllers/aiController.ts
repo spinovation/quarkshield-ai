@@ -1272,7 +1272,10 @@ func main() {
       query.includes('vulnerable') || query.includes('list') || query.includes('assets') || query.includes('dashboard') || query.includes('inventory') || query.includes('cmdb')
     ) {
       try {
-        const assetsRes = await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets');
+        // SECURITY: tenant-scope this inventory lookup too (local-fallback reply path).
+        const assetsRes = scopeTenant
+          ? await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets WHERE LOWER(tenant_name) = LOWER($1)', [scopeTenant])
+          : await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets');
         const total = assetsRes.rows.length;
         const vulnerable = assetsRes.rows.filter(r => r.is_vulnerable);
         

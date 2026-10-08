@@ -169,10 +169,14 @@ export const getRegistrationStatus = async (req: Request, res: Response) => {
     }
 
     const reg = result.rows[0];
+    // SECURITY (H8): do NOT return the license key from this UNAUTHENTICATED endpoint —
+    // it is a bearer credential (usable to enroll machines). It is delivered to the buyer
+    // by email via the SuperAdmin license portal after onboarding. Expose only whether it
+    // has been issued so the success page can prompt the user to check their email.
     res.json({
       status: reg.status,
       clientId: reg.result_client_id,
-      licenseKey: reg.result_license_key,
+      licenseIssued: !!reg.result_license_key,
       subdomain: reg.subdomain,
       failureReason: reg.failure_reason,
       createdAt: reg.created_at
@@ -498,6 +502,18 @@ async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
     }
   }
 
+  // M2 idempotency: a Stripe webhook can be delivered/replayed more than once. If this
+  // session was already fulfilled, do NOT re-provision — otherwise each replay mints a
+  // fresh license + fleet token (duplicate credentials).
+  const dup = await pool.query(
+    "SELECT 1 FROM pending_registrations WHERE stripe_session_id = $1 AND status = 'completed' LIMIT 1",
+    [session.id]
+  );
+  if (dup.rowCount) {
+    console.log(`Stripe fulfillment skipped: session ${session.id} already completed (idempotency).`);
+    return;
+  }
+
   const companyName = meta.companyName || session.customer_details?.name || 'Enterprise Client';
   const email = (meta.email || session.customer_details?.email || '').toLowerCase().trim();
   const contactName = meta.contactName || session.customer_details?.name || 'Client Administrator';
@@ -613,9 +629,11 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
 
   let event: Stripe.Event;
 
-  // Fail closed: in production or when a webhook secret is configured, a verified signature is mandatory.
-  // Otherwise a forged webhook could fulfill a checkout (create a tenant / mark it paid).
-  if ((process.env.NODE_ENV === 'production' || webhookSecret) && (!webhookSecret || typeof signature !== 'string')) {
+  // Fail closed by DEFAULT: a verified signature is mandatory unless NODE_ENV is
+  // EXPLICITLY development/test. (The old "not production" check failed open when
+  // NODE_ENV was simply unset — a forged webhook could then create a paid tenant.)
+  const isDevLike = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+  if (!isDevLike && (!webhookSecret || typeof signature !== 'string')) {
     console.error('Stripe webhook rejected: STRIPE_WEBHOOK_SECRET/signature required.');
     return res.status(400).send('Webhook signature verification required.');
   }
@@ -625,7 +643,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
     if (webhookSecret && typeof signature === 'string') {
       event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
     } else {
-      // Non-production only (no secret configured): parse the raw body directly.
+      // Explicit dev/test only (no secret configured): parse the raw body directly.
       const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8')
         : (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
       event = JSON.parse(raw) as Stripe.Event;

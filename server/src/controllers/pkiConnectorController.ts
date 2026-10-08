@@ -152,7 +152,9 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     const id = 'conn-' + crypto.randomUUID().substring(0, 10);
     // Pin the connector to the session's tenant (super roles may target the
     // requested tenant); a body-supplied tenantName cannot write into another.
-    const cleanTenant = (resolveWriteTenant(req, tenantName) || 'SPINOVATIONCORP').toUpperCase().trim();
+    // M4: reject empty-tenant writes rather than silently defaulting to SPINOVATIONCORP.
+    const cleanTenant = (resolveWriteTenant(req, tenantName) || '').toUpperCase().trim();
+    if (!cleanTenant) return res.status(400).json({ error: 'Unable to resolve a tenant for this request.' });
 
     // Credentials that real discovery needs (Vault token / AppRole secret_id,
     // Azure client secret) are encrypted at rest; other secret-ish fields are

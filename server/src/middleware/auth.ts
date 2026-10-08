@@ -314,9 +314,12 @@ export const localTenantEntitlement = async (tenant?: string | null): Promise<En
     const seats = Math.max(Number(row.lic_seats || 0), Number(row.cli_seats || 0)) || 0;
     return { integrations, tier, seats };
   } catch (e) {
-    // Fail-open: never block a paying tenant on a transient DB hiccup.
-    console.warn('localTenantEntitlement failed, assuming entitled:', (e as Error).message);
-    return { integrations: true, tier: 'unknown', seats: 0 };
+    // Fail CLOSED: a DB error must not silently grant paid entitlements to an
+    // unentitled tenant (the old fail-open handed every tenant the integrations
+    // surface on any transient hiccup). Briefly withholding a paid feature is the
+    // safer failure mode than leaking it.
+    console.warn('localTenantEntitlement failed; denying entitlement (fail-closed):', (e as Error).message);
+    return { integrations: false, tier: 'unknown', seats: 0 };
   }
 };
 
