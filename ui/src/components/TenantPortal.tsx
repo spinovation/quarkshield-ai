@@ -1283,6 +1283,12 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     // which then showed right after a successful login.
     if (!isAuthenticated && !isSupportMirror) return;
     setSessionExpired(false);
+    // Strip a stale "?session=expired" left in the URL by a transient 401 bounce: the
+    // httpOnly cookie re-authenticated us, so the authenticated portal shouldn't keep
+    // advertising an expired session in the address bar.
+    if (isAuthenticated && typeof window !== 'undefined' && window.location.search.includes('session=expired')) {
+      try { window.history.replaceState(null, '', window.location.pathname + window.location.hash); } catch { /* no-op */ }
+    }
     fetchTenantData();
     fetchPullSchedules();
     fetchFleetGroups();
