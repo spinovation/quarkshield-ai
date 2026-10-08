@@ -77,8 +77,11 @@ zip -9 quarkshield-scanner-windows.zip \
 echo "📥 Building Windows installer (QuarkShield-Setup.exe)..."
 rm -f QuarkShield-Setup.exe installer/Output/QuarkShield-Setup.exe
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  # Version is sourced from installer/quarkshield.iss (#define MyAppVersion). Only pass an
+  # override when APP_VERSION is explicitly set — the old `${APP_VERSION:-1.0.0}` default
+  # beat the .iss #define and mislabeled every installer as "1.0.0".
   if docker run --rm --platform linux/amd64 -v "$AGENT_DIR:/work" amake/innosetup \
-       /DMyAppVersion="${APP_VERSION:-1.0.0}" installer/quarkshield.iss; then
+       ${APP_VERSION:+/DMyAppVersion="$APP_VERSION"} installer/quarkshield.iss; then
     if [ -f installer/Output/QuarkShield-Setup.exe ]; then
       cp -f installer/Output/QuarkShield-Setup.exe QuarkShield-Setup.exe
       # Sign the installer itself so it shows "Fedmitigate LLC" (not "Unknown Publisher").
