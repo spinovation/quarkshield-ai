@@ -3079,18 +3079,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   }}>
                     {client.customerId || 'CORP-9812'}
                   </span>
-                  <span style={{
-                    fontSize: '0.68rem',
-                    color: '#4ade80',
-                    background: 'rgba(34, 197, 94, 0.12)',
-                    border: '1px solid rgba(34, 197, 94, 0.3)',
-                    padding: '0.15rem 0.45rem',
-                    borderRadius: '4px',
-                    fontWeight: 600,
-                    textTransform: 'uppercase'
-                  }}>
-                    Active Corporate Tenant
-                  </span>
                   <span
                     title={`Corporate Tier license — ${machines.length} of ${totalCapacity} seats monitored · continuous asset tracking active`}
                     style={{
