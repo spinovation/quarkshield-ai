@@ -1541,29 +1541,6 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               style={{ height: '28px', width: 'auto', objectFit: 'contain', display: 'block', filter: 'drop-shadow(0 0 10px rgba(0, 242, 254, 0.35))' }} 
             />
           </div>
-          <button
-            onClick={() => {
-              if (window.history.pushState) {
-                const cleanUrl = window.location.protocol + '//' + window.location.host + window.location.pathname;
-                window.history.pushState({ path: cleanUrl }, '', cleanUrl);
-              }
-              localStorage.setItem('quarkshield_view_mode', 'landing');
-              sessionStorage.setItem('quarkshield_view_mode', 'landing');
-              setViewMode('landing');
-            }}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted)',
-              cursor: 'pointer',
-              padding: '0.2rem',
-              display: 'flex',
-              alignItems: 'center'
-            }}
-            title="Close / Exit to Landing Page"
-          >
-            <X size={16} />
-          </button>
         </div>
 
         {/* Primary Navigation Tabs */}

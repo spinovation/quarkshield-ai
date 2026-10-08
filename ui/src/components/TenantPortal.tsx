@@ -2743,55 +2743,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               }} 
             />
           </div>
-          <button
-            onClick={() => {
-              if (onNavigateHome) onNavigateHome();
-              else window.location.href = 'https://quarkshield.ai';
-            }}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted, #64748b)',
-              cursor: 'pointer',
-              padding: '0.2rem',
-              display: 'flex',
-              alignItems: 'center'
-            }}
-            title="Exit to QuarkShield.ai Landing Page"
-          >
-            <Globe size={16} />
-          </button>
-        </div>
-
-        {/* Tenant Identification Badge */}
-        <div style={{
-          padding: '0.55rem 0.75rem',
-          borderRadius: '6px',
-          background: 'rgba(56, 189, 248, 0.06)',
-          border: '1px solid rgba(56, 189, 248, 0.2)',
-          marginBottom: '0.75rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.2rem'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={client.displayName || displayCustomerName}>
-              {client.displayName || displayCustomerName}
-            </span>
-            <span style={{
-              fontSize: '0.65rem',
-              padding: '0.1rem 0.35rem',
-              borderRadius: '3px',
-              background: 'rgba(34, 197, 94, 0.15)',
-              color: '#4ade80',
-              fontWeight: 700
-            }}>
-              ACTIVE
-            </span>
-          </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', fontFamily: 'monospace' }}>
-            {client.customerId || 'CORP-9812'} • Port: {client.appPort || 5002}
-          </div>
         </div>
 
         {/* Primary Vertical Navigation Tabs */}
