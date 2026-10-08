@@ -1,0 +1,17 @@
+name: Security Regression
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+jobs:
+  security-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run security regression canaries
+        run: node --test test/security-regression.test.mjs
+        working-directory: server
