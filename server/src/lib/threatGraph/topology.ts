@@ -60,18 +60,19 @@ export const isPrivateHost = (h: string): boolean => {
   return /\.(internal|lan|corp|home|localdomain|intranet)$/.test(host);
 };
 
-// Canonicalise a repository reference so the same repo matches regardless of how it
-// was recorded (scheme, SSH/SCP form, user info, a .git suffix or trailing slash).
-// e.g. https://github.com/org/repo.git, git@github.com:org/repo and github.com/org/repo
-// all collapse to "github.com/org/repo". Scheme-only normalisation: never merges
-// distinct host/org/repo paths, so it adds recall without risking false edges.
-const normRepo = (u: string): string =>
+/**
+ * Canonical repository key, so every spelling of the same repo matches:
+ * https://github.com/Org/Repo.git, github.com/org/repo, git@github.com:org/repo,
+ * ssh://git@github.com/org/repo → "github.com/org/repo". Recall-only: it never merges
+ * distinct host/org/repo paths.
+ */
+export const normRepo = (u: string): string =>
   (u || '').trim().toLowerCase()
-    .replace(/^git@([^:]+):/, '$1/')          // SCP form: git@host:org/repo → host/org/repo
-    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')   // strip scheme: https:// http:// ssh:// git://
-    .replace(/^[^/@]+@/, '')                   // strip any leftover user info: git@host/… → host/…
-    .replace(/\.git$/, '')                     // drop trailing .git
-    .replace(/\/+$/, '');                      // drop trailing slashes
+    .replace(/^git@([^:]+):/, '$1/')            // SCP form: git@host:org/repo → host/org/repo
+    .replace(/^[a-z][a-z0-9+.-]*:\/\//, '')     // strip scheme:// (https, http, ssh, git)
+    .replace(/^[^/@]+@/, '')                     // strip leftover user info (git@host/…)
+    .replace(/\.git$/, '')
+    .replace(/\/+$/, '');
 
 const inferEnvironment = (...hints: (string | null | undefined)[]): string | null => {
   const s = hints.filter(Boolean).join(' ').toLowerCase();

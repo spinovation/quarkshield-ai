@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildThreatGraph } from '../src/lib/threatGraph/engine';
 import { classifyPurpose, isHndlRelevant } from '../src/lib/threatGraph/cryptoPurpose';
-import { parseHostPort, isPrivateHost } from '../src/lib/threatGraph/topology';
+import { parseHostPort, isPrivateHost, normRepo } from '../src/lib/threatGraph/topology';
 import { riskLevel } from '../src/lib/threatGraph/scoring';
 import { SourceData } from '../src/lib/threatGraph/types';
 
@@ -141,4 +141,24 @@ test('context overrides adjust impact but never create links', () => {
   assert.equal(ws.context_origin, 'override');
   assert.equal(ws.data_classification, 'cui');
   assert.equal(g.relationships.length, before);
+});
+
+test('repository URLs in any spelling collapse to one key (SBOM ↔ repo matching)', () => {
+  const forms = [
+    'https://github.com/Acme/API.git', 'github.com/acme/api', 'git@github.com:acme/api.git',
+    'ssh://git@github.com/acme/api', 'HTTPS://GitHub.com/acme/api/',
+  ];
+  for (const f of forms) assert.equal(normRepo(f), 'github.com/acme/api', f);
+  assert.notEqual(normRepo('github.com/acme/api'), normRepo('github.com/acme/api-gateway'), 'distinct repos stay distinct');
+  assert.notEqual(normRepo('github.com/acme/api'), normRepo('gitlab.com/acme/api'), 'distinct hosts stay distinct');
+});
+
+test('an SBOM referencing a repo by a different URL spelling links to that repo (no orphan Service box)', () => {
+  const g = buildThreatGraph({
+    tenant: 'T', machines: [], cryptoFindings: [], pkiConnectors: [], pkiAssets: [], proxies: [], overrides: [],
+    gitScans: [{ id: 'g1', repo_url: 'https://github.com/acme/api.git', repo_name: 'acme/api', findings: [] }],
+    components: [{ id: 'c1', source: 'git_repo', source_ref: 'github.com/acme/api', name: 'lodash', version: '4.17.20', ecosystem: 'npm', vulnerabilities: [] }],
+  });
+  assert.equal(g.assets.filter(a => a.type === 'service').length, 0);
+  assert.ok(g.components[0].asset_id.startsWith('repo:'));
 });
