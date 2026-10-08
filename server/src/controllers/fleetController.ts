@@ -3,7 +3,7 @@ import pool from '../config/db';
 import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
-import { canAccessTenant } from '../middleware/auth';
+import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
@@ -47,8 +47,11 @@ export const getFleetTokens = async (req: Request, res: Response) => {
     `;
     const params: any[] = [];
     if (tenant) {
-      params.push(`%${tenant}%`);
-      query += ` WHERE (LOWER(COALESCE(t.tenant_name, '')) LIKE LOWER($1) OR LOWER(t.name) LIKE LOWER($1))`;
+      // SECURITY: EXACT tenant match only. A `%tenant%` substring (plus the old
+      // `OR t.name LIKE`) leaked other tenants' secret enrollment tokens to any tenant
+      // whose slug was a substring of theirs.
+      params.push(tenant);
+      query += ` WHERE LOWER(COALESCE(t.tenant_name, '')) = LOWER($1)`;
     }
     query += `
       GROUP BY t.id, t.name, t.token, t.status, t.last_sync, t.created_at
@@ -72,19 +75,23 @@ export const createFleetToken = async (req: Request, res: Response) => {
     const id = crypto.randomUUID();
     const token = `pqc_agent_${crypto.randomBytes(20).toString('hex')}`;
 
-    let assignedTenant = (tenantName || '').trim();
+    // SECURITY: never trust body `tenantName` for a non-super session — resolveWriteTenant
+    // pins it to the session's own tenant, so a tenant cannot mint an active enrollment
+    // token scoped to another tenant (which would poison that tenant's fleet/seat count).
+    let assignedTenant = resolveWriteTenant(req, tenantName).trim();
     let assignedLicense = (licenseKey || '').trim();
 
     if (!assignedTenant) {
       const effective = getEffectiveTenant(req);
       if (effective) {
-        assignedTenant = effective.toUpperCase();
+        assignedTenant = effective;
       } else if (name.toLowerCase().includes('spinovation') || name.toLowerCase() === 'engg') {
         assignedTenant = 'SPINOVATIONCORP';
       } else {
-        assignedTenant = name.trim().toUpperCase();
+        assignedTenant = name.trim();
       }
     }
+    assignedTenant = assignedTenant.toUpperCase();
 
     if (!assignedLicense) {
       try {
@@ -179,8 +186,10 @@ export const getFleetMachines = async (req: Request, res: Response) => {
     `;
     const params: any[] = [];
     if (tenant) {
-      params.push(`%${tenant}%`);
-      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) LIKE LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) LIKE LOWER($1) OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))`;
+      // SECURITY: EXACT tenant match (was `%tenant%` substring → cross-tenant machine leak).
+      // The spinovation/engg branch is the operator's own org alias, gated to that session only.
+      params.push(tenant);
+      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) = LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) = LOWER($1) OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))`;
     }
     query += ` ORDER BY m.last_seen DESC;`;
     const result = await pool.query(query, params);
@@ -247,8 +256,10 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
     }
 
     if (effectiveTenant) {
-      values.push(`%${effectiveTenant}%`);
-      conditions.push(`(COALESCE(a.tenant_name, m.tenant_name, '') ILIKE $${values.length} OR t.name ILIKE $${values.length})`);
+      // SECURITY: EXACT tenant match (was `%tenant%` ILIKE → cross-tenant CBOM/asset leak);
+      // dropped the `t.name ILIKE` arm. spinovation/engg alias stays gated to that session.
+      values.push(effectiveTenant);
+      conditions.push(`(LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($${values.length}) OR (LOWER($${values.length}) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) LIKE '%spinovation%'))`);
     }
 
     if (source && source !== 'all') {
@@ -1199,7 +1210,8 @@ export const getFleetDrift = async (req: Request, res: Response) => {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const params: any[] = [];
     let where = '';
-    if (tenant) { params.push(`%${tenant}%`); where += `${params.length === 1 ? ' WHERE' : ' AND'} LOWER(COALESCE(tenant_name,'')) LIKE LOWER($${params.length})`; }
+    // SECURITY: EXACT tenant match (was `%tenant%` → cross-tenant drift-history leak).
+    if (tenant) { params.push(tenant); where += `${params.length === 1 ? ' WHERE' : ' AND'} (LOWER(COALESCE(tenant_name,'')) = LOWER($${params.length}) OR (LOWER($${params.length}) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(tenant_name,'')) LIKE '%spinovation%'))`; }
     if (machineId) { params.push(machineId); where += `${params.length === 1 ? ' WHERE' : ' AND'} machine_id = $${params.length}`; }
     params.push(limit);
     const result = await pool.query(

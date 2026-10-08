@@ -511,6 +511,28 @@ async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
   const stripeCustId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
   const stripeSubId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
 
+  // SECURITY (H3): the tenant key `cleanSlug` is derived from attacker-controllable
+  // companyName. Refuse to fulfill a checkout that targets an EXISTING tenant owned by a
+  // different customer/email — otherwise a public checkout could overwrite that tenant's
+  // tier/seats, repoint its Stripe customer, and mint victim-scoped license/fleet tokens.
+  const existingClient = await pool.query(
+    'SELECT stripe_customer_id, admin_email FROM admin_clients WHERE name = $1',
+    [cleanSlug]
+  );
+  if (existingClient.rowCount && existingClient.rows[0]) {
+    const row = existingClient.rows[0];
+    const sameCustomer = !!stripeCustId && !!row.stripe_customer_id && row.stripe_customer_id === stripeCustId;
+    const sameEmail = !!row.admin_email && !!email && String(row.admin_email).toLowerCase() === String(email).toLowerCase();
+    if (!sameCustomer && !sameEmail) {
+      console.error(`SECURITY: blocked checkout-hijack of existing tenant '${cleanSlug}' by ${email} (stripe cust ${stripeCustId}). No provisioning performed.`);
+      await pool.query(
+        `UPDATE pending_registrations SET status = 'conflict', updated_at = CURRENT_TIMESTAMP WHERE stripe_session_id = $1 OR id = $2`,
+        [session.id, meta.registrationId || '']
+      ).catch(() => {});
+      return;
+    }
+  }
+
   // 1. Provision or update admin_clients
   await pool.query(
     `INSERT INTO admin_clients 
