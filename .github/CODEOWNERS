@@ -7,6 +7,7 @@
 /server/src/controllers/billingController.ts @sridhargs
 /server/src/controllers/reportController.ts @sridhargs
 /server/src/controllers/aiController.ts     @sridhargs
+/server/src/lib/roadmapReport.ts            @sridhargs
 /server/src/config/bootstrap.ts             @sridhargs
 /server/test/security-regression.test.mjs   @sridhargs
 /.github/workflows/security-regression.yml  @sridhargs

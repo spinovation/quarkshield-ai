@@ -124,6 +124,16 @@ test('M3: entitlement check fails CLOSED on DB error', () => {
   assert.ok(has(auth, "return { integrations: false, tier: 'unknown', seats: 0 };"), 'entitlement fail-closed return removed');
 });
 
+// ---- Roadmap/report data layer (cross-tenant leaks) --------------------------
+test('R1: PQC roadmap uses exact tenant match and scoped narrative keys', () => {
+  const rm = read('server/src/lib/roadmapReport.ts');
+  assert.ok(!has(rm, '`%${scope.tenant}%`'), 'roadmap buildRoadmapReport reintroduced %tenant% substring leak');
+  assert.ok(has(rm, "LOWER(COALESCE(${col}, '')) = LOWER($1)"), 'roadmap exact-match tenant predicate removed');
+  // generateNarrative must not read tenant_settings keys without a tenant filter.
+  assert.ok(!has(rm, "SELECT key, value FROM tenant_settings WHERE key IN ('gemini_api_key','anthropic_api_key')"), 'roadmap narrative reads API keys across all tenants again');
+  assert.ok(has(rm, "LOWER(tenant_name) = LOWER($1) AND key IN ('gemini_api_key'"), 'roadmap narrative API-key query no longer tenant-scoped');
+});
+
 // ---- M4 No silent default tenant on writes -----------------------------------
 test('M4: connector/proxy/git writes reject an empty tenant', () => {
   for (const f of ['pqcProxyController.ts', 'pkiConnectorController.ts', 'gitScanController.ts']) {

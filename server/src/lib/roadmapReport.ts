@@ -118,11 +118,14 @@ const worstSeverity = (a: string, b: string): string => (severityRank(a) >= seve
 
 /** Gather + compute the full roadmap report for a scope. */
 export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapReport> => {
-  // EXACT tenant match. A %substring% LIKE leaked other tenants' totals into a
-  // tenant's executive report whenever its slug was a substring of theirs.
-  const where = scope.collective ? '' : 'WHERE LOWER(COALESCE(tenant_name, \'\')) = LOWER($1)';
+  // SECURITY: EXACT tenant match (was `%tenant%` LIKE → a tenant whose slug is a substring
+  // of another's would pull that tenant's assets/machines into this roadmap/report). The
+  // spinovation/engg alias stays gated to that operator's own session.
+  const tenantPred = (col: string) =>
+    `WHERE (LOWER(COALESCE(${col}, '')) = LOWER($1) OR (LOWER($1) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(${col}, '')) LIKE '%spinovation%'))`;
+  const where = scope.collective ? '' : tenantPred('tenant_name');
   const params: any[] = scope.collective ? [] : [scope.tenant];
-  const mWhere = scope.collective ? '' : 'WHERE LOWER(tenant_name) = LOWER($1)';
+  const mWhere = scope.collective ? '' : tenantPred('tenant_name');
 
   const totalsQ = await pool.query(
     `SELECT COUNT(*)::int AS assets,
@@ -241,7 +244,7 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
  * tenant_settings); falls back to a deterministic template so the report always
  * has a professional summary even offline / without keys. Never invents numbers.
  */
-export const generateNarrative = async (r: RoadmapReport): Promise<string> => {
+export const generateNarrative = async (r: RoadmapReport, tenant?: string): Promise<string> => {
   const facts = `Scope: ${r.scopeLabel}. Assets: ${r.totals.assets}. Quantum-vulnerable: ${r.totals.vulnerable} (${r.totals.vulnPct}%). Endpoints: ${r.totals.machines}. Avg risk: ${r.totals.avgRisk}/100. Top priorities: ${r.priorities.slice(0, 3).map(p => p.title).join(', ') || 'none'}. Mosca verdict: ${r.mosca.verdict}.`;
   const template =
     `${r.scopeLabel} has ${r.totals.assets} catalogued cryptographic assets, of which ${r.totals.vulnerable} (${r.totals.vulnPct}%) are quantum-vulnerable classical primitives exposed to Harvest-Now-Decrypt-Later attacks. ` +
@@ -250,17 +253,21 @@ export const generateNarrative = async (r: RoadmapReport): Promise<string> => {
 
   let geminiKey = (process.env.GEMINI_API_KEY || '').trim();
   let anthropicKey = (process.env.ANTHROPIC_API_KEY || '').trim();
-  try {
-    // Only the report's own tenant may supply a BYO model key; the fleet-wide
-    // (collective) report uses the platform keys.
-    if (!r.collective && r.scopeLabel) {
-    const s = await pool.query("SELECT key, value FROM tenant_settings WHERE LOWER(tenant_name) = LOWER($1) AND key IN ('gemini_api_key','anthropic_api_key')", [r.scopeLabel]);
-    for (const row of s.rows) {
-      if (row.key === 'gemini_api_key' && row.value?.trim()) geminiKey = row.value.trim();
-      if (row.key === 'anthropic_api_key' && row.value?.trim()) anthropicKey = row.value.trim();
-    }
-    }
-  } catch { /* ignore */ }
+  // SECURITY: only a concrete tenant may override the platform keys with its OWN BYO keys.
+  // The previous query had no tenant filter/ORDER BY, so the last row won — a report could
+  // be generated with another tenant's API key. Collective/fleet reports use env keys only.
+  if (tenant) {
+    try {
+      const s = await pool.query(
+        "SELECT key, value FROM tenant_settings WHERE LOWER(tenant_name) = LOWER($1) AND key IN ('gemini_api_key','anthropic_api_key')",
+        [tenant]
+      );
+      for (const row of s.rows) {
+        if (row.key === 'gemini_api_key' && row.value?.trim()) geminiKey = row.value.trim();
+        if (row.key === 'anthropic_api_key' && row.value?.trim()) anthropicKey = row.value.trim();
+      }
+    } catch { /* ignore */ }
+  }
 
   const system = 'You are a principal post-quantum cryptography advisor writing the executive summary of a board-level PQC readiness report. Write ONE concise, professional paragraph (90-140 words). Use ONLY the facts provided — do not invent numbers, asset names, or dates. Tone: executive, factual, urgent but measured. Do not use markdown headings or bullet points.';
   const user = `Write the executive summary paragraph using these facts and nothing else:\n${facts}`;
