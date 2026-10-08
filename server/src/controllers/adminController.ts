@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
-import { signSession, setSessionCookie, clearSessionCookie, isSuperRole } from '../middleware/auth';
+import { signSession, setSessionCookie, clearSessionCookie, isSuperRole, sanitizeTenantRole } from '../middleware/auth';
 import { assertPublicHost } from '../utils/ssrf';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
@@ -1869,7 +1869,10 @@ export const getTenantUsers = async (req: Request, res: Response) => {
 export const createTenantUser = async (req: Request, res: Response) => {
   try {
     const { tenant } = req.params;
-    const { email, firstName, lastName, role = 'secops' } = req.body;
+    const { email, firstName, lastName } = req.body;
+    // Never trust a client-supplied role verbatim: a tenant login signs the stored
+    // role straight into the JWT, so an unvalidated 'superadmin' here = platform takeover.
+    const role = sanitizeTenantRole(req.body.role);
     if (!email || !email.includes('@')) {
       return res.status(400).json({ error: 'Valid email address is required.' });
     }
@@ -1949,11 +1952,16 @@ export const createTenantUser = async (req: Request, res: Response) => {
 export const updateTenantUser = async (req: Request, res: Response) => {
   try {
     const { tenant, id } = req.params;
-    const { role, status } = req.body;
+    const { status } = req.body;
     const cleanTenant = tenant.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Constrain any role change to a safe tenant role; a platform/super role here
+    // would be signed into the user's JWT at next login (privilege escalation).
+    const role = req.body.role === undefined || req.body.role === null
+      ? null
+      : sanitizeTenantRole(req.body.role);
 
     await pool.query(`
-      UPDATE tenant_users 
+      UPDATE tenant_users
       SET role = COALESCE($1, role), status = COALESCE($2, status)
       WHERE id = $3 AND tenant_name = $4
     `, [role, status, id, cleanTenant]);
@@ -2016,14 +2024,9 @@ export const resetTenantUserPassword = async (req: Request, res: Response) => {
       [passwordHash, salt, id, cleanTenant]
     );
 
-    try {
-      await pool.query(
-        'UPDATE admin_users SET password_hash = $1, salt = $2, must_change_password = true WHERE LOWER(email) = LOWER($3)',
-        [passwordHash, salt, user.email]
-      );
-    } catch (e) {
-      // ignore
-    }
+    // SECURITY: do NOT mirror this reset into admin_users. A tenant password reset
+    // must never touch the platform admin table — matching on email let any tenant
+    // user reset (and, via the response below, read back) a platform admin's password.
 
     const loginUrl = `https://${cleanTenant}.quarkshield.ai`;
     const emailSubject = 'Your QuarkShield Temporary Password & Password Reset Instructions';

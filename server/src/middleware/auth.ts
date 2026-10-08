@@ -18,12 +18,20 @@ export const SESSION_COOKIE = 'qs_session';
 const DEFAULT_TTL = '7d';
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+// A value is a placeholder/weak secret if it is short OR matches a known template
+// string. Length alone is insufficient: the committed .env.example placeholders are
+// 40-60 chars long and would otherwise pass, letting a server boot on a PUBLIC secret.
+const PLACEHOLDER_SECRET_RE = /replace-with|change[-_ ]?me|changeme|example|dev-insecure|your[-_]|placeholder|xxxx|secret-here|<.*>/i;
+export const isWeakSecret = (s?: string): boolean =>
+  !s || s.length < 32 || PLACEHOLDER_SECRET_RE.test(s);
+
 const getSecret = (): string => {
   const s = process.env.JWT_SECRET;
-  if (s && s.length >= 16) return s;
-  // Fail closed in production; only fall back in non-production for local runs.
+  if (!isWeakSecret(s)) return s as string;
+  // Fail closed in production: never sign/verify sessions with a weak or
+  // placeholder JWT secret (that lets anyone forge a superadmin session).
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('JWT_SECRET is not set (required in production)');
+    throw new Error('JWT_SECRET is missing, too short (<32), or a placeholder — refusing to start. Set a strong random JWT_SECRET.');
   }
   return 'dev-insecure-secret-change-me';
 };
@@ -60,6 +68,40 @@ declare global {
 const SUPER_ROLES = ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor'];
 
 export const isSuperRole = (role?: string): boolean => !!role && SUPER_ROLES.includes(role);
+
+// Roles a TENANT user may legitimately hold. Critically this list contains NO
+// platform/super role, so a tenant-scoped write can never mint a role that
+// isSuperRole() would honour (tenant login signs this role straight into the JWT).
+const TENANT_ROLES = ['admin', 'secops', 'analyst', 'auditor', 'viewer', 'user'];
+
+/**
+ * Coerce a client-supplied role for a tenant user into a safe tenant role.
+ * Any platform/super role (or unknown value) collapses to the fallback — this is
+ * the hard stop against tenant→superadmin privilege escalation.
+ */
+export const sanitizeTenantRole = (role?: string, fallback = 'secops'): string => {
+  const r = (role || '').toLowerCase().trim();
+  if (!r) return fallback;
+  if (isSuperRole(r)) return fallback;          // never allow a platform role
+  return TENANT_ROLES.includes(r) ? r : fallback;
+};
+
+/**
+ * Require that the session is a tenant ADMINISTRATOR (or a platform super role).
+ * Gate tenant user-management writes with this so an ordinary tenant member
+ * cannot create/alter users, reset passwords, or reset 2FA.
+ */
+export const requireTenantAdmin = (req: Request, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (isSuperRole(req.user.role) || req.user.role === 'admin' || req.user.role === 'owner') {
+    next();
+    return;
+  }
+  res.status(403).json({ error: 'Tenant administrator access required' });
+};
 
 export const signSession = (user: SessionUser): string =>
   jwt.sign(user, getSecret(), { expiresIn: DEFAULT_TTL });

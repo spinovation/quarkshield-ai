@@ -296,6 +296,13 @@ const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const scopeKey = (collective: boolean, tenant: string) => (collective ? '__fleet__' : (tenant || '').toUpperCase());
 
 const resolveScope = (req: Request, tenantIn?: string, scopeIn?: string) => {
+  // SECURITY: requireTenantAccess only inspects :tenant / ?tenant / headers — NOT the
+  // request BODY. A tenant session must therefore be pinned to its OWN tenant here, or
+  // a body-supplied `tenant`/`scope=collective` would exfiltrate another tenant's (or the
+  // whole fleet's) report. Only a platform super role may target another tenant / collective.
+  if (!isSuperRole(req.user?.role)) {
+    return { collective: false, tenant: (req.user?.tenant || '').toString() };
+  }
   const collective = String(scopeIn || '').toLowerCase() === 'collective' || String(tenantIn || '').toLowerCase() === 'all';
   const tenant = collective ? '' : (tenantIn || req.user?.tenant || '');
   return { collective, tenant };

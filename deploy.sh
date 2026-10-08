@@ -22,10 +22,34 @@ if ! docker compose version >/dev/null 2>&1; then
   exit 1
 fi
 
-# Prepare environment file if missing
+# Prepare environment file if missing. SECURITY: never boot on the committed
+# .env.example placeholders — they contain a PUBLIC JWT secret and a known bootstrap
+# password. Generate strong random secrets, then refuse to start if any remain a
+# placeholder so the server never runs on a forgeable session secret.
 if [ ! -f .env ]; then
-  echo "ℹ️ Creating default .env from .env.example..."
+  echo "ℹ️ No .env found — creating one from .env.example with freshly generated secrets..."
   cp .env.example .env
+  GEN_JWT="$(openssl rand -hex 32)"
+  GEN_LIC="$(openssl rand -hex 32)"
+  GEN_CBOM="$(openssl rand -hex 32)"
+  # Replace the template secret lines with generated random values (portable sed).
+  sed -i.bak \
+    -e "s|^JWT_SECRET=.*|JWT_SECRET=${GEN_JWT}|" \
+    -e "s|^LICENSE_SIGNING_SECRET=.*|LICENSE_SIGNING_SECRET=${GEN_LIC}|" \
+    -e "s|^CBOM_SIGNING_SECRET=.*|CBOM_SIGNING_SECRET=${GEN_CBOM}|" \
+    .env && rm -f .env.bak
+  echo "   ✓ Generated JWT_SECRET / LICENSE_SIGNING_SECRET / CBOM_SIGNING_SECRET."
+  echo "   ⚠️  Set a strong BOOTSTRAP_ADMIN_PASSWORD in .env before first login (still a placeholder)."
+fi
+
+# Fail closed: refuse to deploy if any critical secret is still a placeholder/too short.
+if grep -qiE '^(JWT_SECRET|LICENSE_SIGNING_SECRET)=.*(replace-with|change[-_]?me|changeme|example|placeholder|your[-_])' .env; then
+  echo "❌ Refusing to deploy: .env still contains placeholder secrets. Set strong random JWT_SECRET / LICENSE_SIGNING_SECRET." >&2
+  exit 1
+fi
+if grep -qiE '^BOOTSTRAP_ADMIN_PASSWORD=.*(replace-with|change[-_]?me|changeme|example|placeholder|your[-_])' .env; then
+  echo "❌ Refusing to deploy: BOOTSTRAP_ADMIN_PASSWORD is still a placeholder. Set a strong unique password (or remove the line)." >&2
+  exit 1
 fi
 
 echo "📦 Step 1: Building production containers..."

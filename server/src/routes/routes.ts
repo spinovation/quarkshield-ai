@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth, requireSuperAdmin, requireTenantAccess, requireIntegrationsEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole } from '../middleware/auth';
+import { requireAuth, requireSuperAdmin, requireTenantAccess, requireTenantAdmin, requireIntegrationsEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole } from '../middleware/auth';
 import { exportExecutiveReport, getReportStakeholders, saveReportStakeholders, sendRoadmapReport } from '../controllers/reportController';
 import { twoFactorStatus, twoFactorSetup, twoFactorVerify, twoFactorDisable } from '../controllers/twoFactorController';
 import {
@@ -236,11 +236,11 @@ router.post('/admin/onboard-user', requireSuperAdmin, onboardUser);
 // IN-TENANT USER MGMT & 2FA POLICY (authenticated, tenant-scoped)
 // ==========================================
 router.get('/tenants/:tenant/users', requireAuth, requireTenantAccess, getTenantUsers);
-router.post('/tenants/:tenant/users', requireAuth, requireTenantAccess, createTenantUser);
-router.patch('/tenants/:tenant/users/:id', requireAuth, requireTenantAccess, updateTenantUser);
-router.delete('/tenants/:tenant/users/:id', requireAuth, requireTenantAccess, deleteTenantUser);
-router.post('/tenants/:tenant/users/:id/reset-2fa', requireAuth, requireTenantAccess, resetTenantUser2FA);
-router.post('/tenants/:tenant/users/:id/reset-password', requireAuth, requireTenantAccess, resetTenantUserPassword);
+router.post('/tenants/:tenant/users', requireAuth, requireTenantAccess, requireTenantAdmin, createTenantUser);
+router.patch('/tenants/:tenant/users/:id', requireAuth, requireTenantAccess, requireTenantAdmin, updateTenantUser);
+router.delete('/tenants/:tenant/users/:id', requireAuth, requireTenantAccess, requireTenantAdmin, deleteTenantUser);
+router.post('/tenants/:tenant/users/:id/reset-2fa', requireAuth, requireTenantAccess, requireTenantAdmin, resetTenantUser2FA);
+router.post('/tenants/:tenant/users/:id/reset-password', requireAuth, requireTenantAccess, requireTenantAdmin, resetTenantUserPassword);
 router.get('/tenants/:tenant/2fa-policy', requireAuth, requireTenantAccess, getTenant2FAPolicy);
 router.put('/tenants/:tenant/2fa-policy', requireAuth, requireTenantAccess, updateTenant2FAPolicy);
 router.get('/tenant/:tenant/portal-data', requireAuth, requireTenantAccess, getTenantPortalData);

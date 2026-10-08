@@ -437,7 +437,11 @@ export const getInstallerScript = async (req: Request, res: Response) => {
   const host = req.get('host') || 'localhost:5050';
   const proto = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const serverUrl = `${proto}://${host}`;
-  const queryToken = (req.query.token as string || req.query.t as string || req.query.license as string || req.query.l as string || req.query.key as string || '').trim();
+  // SECURITY: this value is interpolated into a shell script served to `curl | sudo bash`.
+  // Strip to the token charset so no shell metacharacter (;, $, `, ", space, newline…) can
+  // survive — otherwise ?token=... is a root remote-code-execution vector.
+  const queryToken = (req.query.token as string || req.query.t as string || req.query.license as string || req.query.l as string || req.query.key as string || '')
+    .trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 128);
 
   const script = `#!/bin/sh
 # QuarkShield.ai Post-Quantum Cryptography Fleet Scanner - Automated Installer
@@ -551,7 +555,10 @@ export const getPowerShellInstallerScript = async (req: Request, res: Response) 
   const host = req.get('host') || 'localhost:5050';
   const proto = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const serverUrl = `${proto}://${host}`;
-  const queryToken = (req.query.token as string || req.query.t as string || '').trim();
+  // SECURITY: interpolated into a PowerShell script — strip to the token charset so no
+  // PowerShell metacharacter ($, `, ", $( … ), newline) can survive (RCE prevention).
+  const queryToken = (req.query.token as string || req.query.t as string || '')
+    .trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 128);
 
   const script = `# QuarkShield.ai Windows PowerShell 1-Click Installer
 param(

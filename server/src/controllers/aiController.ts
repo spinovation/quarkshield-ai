@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
+import { isSuperRole } from '../middleware/auth';
 
 // =============================================================================
 // PQC Copilot scope guardrail
@@ -74,10 +75,18 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
       return res.json({ text: SCOPE_REFUSAL, code: undefined, language: 'text' });
     }
 
-    // Fetch active assets context to feed into Gemini prompt
+    // SECURITY: scope all context to the caller's tenant. A non-super session is pinned
+    // to its own tenant; a super (fleet) session may target ?tenant, else sees all.
+    const isSuper = isSuperRole(req.user?.role);
+    const sessionTenant = (req.user?.tenant || '').toString();
+    const scopeTenant = isSuper ? ((req.query.tenant as string) || sessionTenant || '') : sessionTenant;
+
+    // Fetch active assets context to feed into the model prompt (tenant-scoped).
     let assetsContext = '';
     try {
-      const assetsRes = await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status, description, compliance_violations FROM assets');
+      const assetsRes = scopeTenant
+        ? await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status, description, compliance_violations FROM assets WHERE LOWER(tenant_name) = LOWER($1)', [scopeTenant])
+        : await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status, description, compliance_violations FROM assets');
       if (assetsRes.rows.length > 0) {
         assetsContext = "Here is the list of active Cryptographic Assets currently registered in the user's QuarkShield dashboard/CMDB:\n" +
           JSON.stringify(assetsRes.rows.map(r => ({
@@ -100,18 +109,26 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
     let geminiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : '';
     let anthropicKey = process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.trim() : '';
 
-    // Fetch tenant-specific API keys from tenant_settings if not provided via process.env
-    try {
-      const settingsRes = await pool.query("SELECT key, value FROM tenant_settings WHERE key IN ('gemini_api_key', 'anthropic_api_key')");
-      for (const row of settingsRes.rows) {
-        if (row.key === 'gemini_api_key' && row.value && row.value.trim() !== '') {
-          geminiKey = row.value.trim();
-        } else if (row.key === 'anthropic_api_key' && row.value && row.value.trim() !== '') {
-          anthropicKey = row.value.trim();
+    // Fetch tenant-specific API keys from tenant_settings, scoped to THIS tenant only.
+    // SECURITY: the previous query had no tenant filter and no ORDER BY, so the last
+    // row won — any tenant's Copilot could borrow another tenant's BYO API key. Only a
+    // tenant with a concrete scope may override the platform env keys.
+    if (scopeTenant) {
+      try {
+        const settingsRes = await pool.query(
+          "SELECT key, value FROM tenant_settings WHERE LOWER(tenant_name) = LOWER($1) AND key IN ('gemini_api_key', 'anthropic_api_key')",
+          [scopeTenant]
+        );
+        for (const row of settingsRes.rows) {
+          if (row.key === 'gemini_api_key' && row.value && row.value.trim() !== '') {
+            geminiKey = row.value.trim();
+          } else if (row.key === 'anthropic_api_key' && row.value && row.value.trim() !== '') {
+            anthropicKey = row.value.trim();
+          }
         }
+      } catch (settingsErr) {
+        console.warn('Failed to query tenant_settings for AI keys in chat:', settingsErr);
       }
-    } catch (settingsErr) {
-      console.warn('Failed to query tenant_settings for AI keys in chat:', settingsErr);
     }
 
     const systemInstruction = 
