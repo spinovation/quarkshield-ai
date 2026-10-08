@@ -15,6 +15,15 @@ import (
 	"time"
 )
 
+// AgentVersion is the running agent's version. It is overridden at build time via
+//
+//	go build -ldflags "-X main.AgentVersion=2.3.0"
+//
+// (wired into build_all_and_sign.sh). The default below is the fallback for
+// `go run`/dev builds and must track the latest release so push-upgrade version
+// sanity (updater.go) and the server's drift detection agree on what's current.
+var AgentVersion = "2.3.0"
+
 func getLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err != nil {
@@ -377,6 +386,7 @@ func main() {
 	adcsFlag := flag.Bool("adcs", false, "Discover Active Directory Certificate Services (Windows) and report the CA inventory to the server")
 	pollFlag := flag.Bool("poll", false, "Check the server for pending on-demand commands (e.g. scan-now) and act on them")
 	daemonFlag := flag.Bool("daemon", false, "Run as a persistent background service: continuously poll for on-demand commands and perform scheduled syncs (works with no GUI open)")
+	watchdogFlag := flag.Bool("upgrade-watchdog", false, "Internal: roll back a push-upgrade if the new binary fails to confirm a successful sync in time")
 
 	flag.StringVar(pathFlag, "p", ".", "Target directory path (shorthand)")
 	flag.StringVar(serverFlag, "s", "https://quarkshield.ai", "Server URL (shorthand)")
@@ -403,6 +413,14 @@ func main() {
 	}
 
 	flag.Parse()
+
+	// Internal push-upgrade rollback watchdog. Launched (detached) by the old binary
+	// during a swap; it waits out the rollback window and restores the previous binary
+	// if the new one never confirms a successful telemetry sync. Handle it first and exit.
+	if *watchdogFlag {
+		runUpgradeWatchdog()
+		return
+	}
 
 	tokenVal := strings.TrimSpace(*tokenFlag)
 	licVal := strings.TrimSpace(*licenseFlag)
@@ -459,6 +477,8 @@ func main() {
 				return
 			}
 			fmt.Printf("✅ Synced %d assets.\n", len(findings))
+			// If we just started up from a push-upgrade, this successful sync confirms it.
+			ConfirmUpgradeIfPending()
 		}
 
 		lastSync := time.Time{}
@@ -470,12 +490,20 @@ func main() {
 
 		ticker := time.NewTicker(2 * time.Minute)
 		for {
-			// 1. On-demand commands queued by an admin (Pull Telemetry / bulk pull).
+			// 1. On-demand commands queued by an admin (Pull Telemetry / bulk pull / push-upgrade).
 			if cmds, err := FetchAgentCommands(server, token); err == nil {
 				for _, c := range cmds {
-					if c == "scan_and_sync" {
+					switch c.Command {
+					case "scan_and_sync":
 						runSync("On-demand pull requested by server")
 						lastSync = time.Now()
+					case "upgrade":
+						// Verified download-swap-restart (updater.go). On a successful swap
+						// the process re-execs/exits into the new binary and never returns
+						// here; a verification failure is logged and the old binary keeps running.
+						if err := PerformUpgrade(c.Details); err != nil {
+							fmt.Printf("❌ Push-upgrade rejected: %v\n", err)
+						}
 					}
 				}
 			}
@@ -511,8 +539,15 @@ func main() {
 		}
 		wantScan := false
 		for _, c := range cmds {
-			if c == "scan_and_sync" {
+			switch c.Command {
+			case "scan_and_sync":
 				wantScan = true
+			case "upgrade":
+				// One-shot poll mode (Intune/Jamf/cron). Apply the verified upgrade;
+				// a successful swap re-execs/exits into the new binary.
+				if err := PerformUpgrade(c.Details); err != nil {
+					fmt.Printf("❌ Push-upgrade rejected: %v\n", err)
+				}
 			}
 		}
 		if !wantScan {
@@ -531,6 +566,7 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("✅ On-demand scan complete; %d assets synced.\n", len(findings))
+		ConfirmUpgradeIfPending()
 		os.Exit(0)
 	}
 

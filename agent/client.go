@@ -148,7 +148,7 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 		OS:           osName,
 		Arch:         archName,
 		IP:           ip,
-		AgentVersion: "2.2.1",
+		AgentVersion: AgentVersion,
 		Token:        token,
 		LicenseKey:   licenseKey,
 		TenantName:   tenantName,
@@ -261,10 +261,22 @@ func ReportADCS(serverURL string, token string, caName string, assets []ADCSAsse
 	return nil
 }
 
+// AgentCommand is a single pending command returned by the server's command
+// poll. Details carries the command-specific JSON payload (e.g. the upgrade
+// manifest {version, sha256, url}); it is empty for commands like scan_and_sync.
+type AgentCommand struct {
+	Command string
+	Details string
+}
+
 // FetchAgentCommands polls the server for pending on-demand commands for this
 // machine (DEF-38). The fleet token authenticates and resolves the tenant; the
 // server returns the machine's pending commands and marks them dispatched.
-func FetchAgentCommands(serverURL string, token string) ([]string, error) {
+//
+// It returns the full command objects (command + details). The server's
+// `details` column is TEXT and may be JSON or NULL; we surface it verbatim so
+// handlers (e.g. the upgrade handler) can parse their own payload.
+func FetchAgentCommands(serverURL string, token string) ([]AgentCommand, error) {
 	cleanServer := strings.TrimRight(serverURL, "/")
 	hostname, _ := os.Hostname()
 	body := map[string]string{
@@ -291,14 +303,18 @@ func FetchAgentCommands(serverURL string, token string) ([]string, error) {
 	var parsed struct {
 		Commands []struct {
 			Command string `json:"command"`
+			// details is a TEXT column: a JSON string for commands that carry a
+			// payload (upgrade), or null/absent otherwise. Decoding null into a
+			// Go string leaves it "", which is exactly what we want.
+			Details string `json:"details"`
 		} `json:"commands"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		return nil, err
 	}
-	out := []string{}
+	out := []AgentCommand{}
 	for _, c := range parsed.Commands {
-		out = append(out, c.Command)
+		out = append(out, AgentCommand{Command: c.Command, Details: c.Details})
 	}
 	return out, nil
 }

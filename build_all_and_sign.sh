@@ -8,6 +8,13 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$SCRIPT_DIR/agent"
 
+# Agent version baked into every binary via -ldflags -X main.AgentVersion=... .
+# The push-upgrade feature (updater.go) and the server's drift/out-of-date detection
+# (LATEST_AGENT_VERSION in fleetController.ts) must agree with this value.
+AGENT_VERSION="${AGENT_VERSION:-2.3.0}"
+LDFLAGS="-s -w -X main.AgentVersion=${AGENT_VERSION}"
+echo "   Agent version: ${AGENT_VERSION}"
+
 echo "======================================================================"
 echo " 🛡️ Starting QuarkShield Master Cross-Platform Build & Sign Pipeline"
 echo "======================================================================"
@@ -18,7 +25,7 @@ cd "$AGENT_DIR"
 # 1. WINDOWS BUILD & AZURE TRUSTED SIGNING
 # ------------------------------------------------------------------------------
 echo "⚙️ [1/4] Building and Signing Windows Agent (x86_64)..."
-GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-windows-amd64.exe .
+GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o quarkshield-scanner-windows-amd64.exe .
 
 SIGNED_WIN=false
 if [ -f ".env.signing" ] || [ -n "$AZURE_CLIENT_ID" ]; then
@@ -101,8 +108,8 @@ fi
 # 2. MACOS BUILD, CODE SIGNING & DMG / ZIP PACKAGING
 # ------------------------------------------------------------------------------
 echo "🍏 [2/4] Building macOS Universal Agent (.app, .dmg, .zip)..."
-GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o quarkshield-scanner-darwin-arm64 .
-GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-darwin-amd64 .
+GOOS=darwin GOARCH=arm64 go build -ldflags="$LDFLAGS" -o quarkshield-scanner-darwin-arm64 .
+GOOS=darwin GOARCH=amd64 go build -ldflags="$LDFLAGS" -o quarkshield-scanner-darwin-amd64 .
 lipo -create -output quarkshield-scanner-darwin-universal quarkshield-scanner-darwin-amd64 quarkshield-scanner-darwin-arm64
 
 APP_STAGE="/tmp/quarkshield_app_stage_$$"
@@ -219,8 +226,8 @@ fi
 # 3. LINUX BUILDS
 # ------------------------------------------------------------------------------
 echo "🐧 [3/4] Building Linux Agents (amd64, arm64)..."
-GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-linux-amd64 .
-GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o quarkshield-scanner-linux-arm64 .
+GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o quarkshield-scanner-linux-amd64 .
+GOOS=linux GOARCH=arm64 go build -ldflags="$LDFLAGS" -o quarkshield-scanner-linux-arm64 .
 
 # Package Linux Release Tarball & Zip with 1-Click Installer
 echo "📦 Packaging quarkshield-scanner-linux.tar.gz and .zip..."
@@ -279,8 +286,37 @@ cp -f quarkshield-scanner-linux.tar.gz binaries/pqc-scanner-linux.tar.gz
 cp -f quarkshield-scanner-linux.zip binaries/pqc-scanner-linux.zip
 cp -f quarkshield-scanner-linux-amd64 binaries/pqc-scanner
 
+# ------------------------------------------------------------------------------
+# 4b. PUSH-UPGRADE MANIFEST — per-binary SHA-256 the server pins into upgrade commands.
+# Hashes are taken AFTER code-signing (signing rewrites the binary), so they match
+# exactly what an enrolled endpoint downloads. The server reads this from the served
+# /downloads directory and selects the entry matching each machine's os/arch.
+# macOS uses the universal binary for both arches (runs on amd64 + arm64).
+# ------------------------------------------------------------------------------
+echo "🔏 Generating push-upgrade manifest (agent-manifest.json)..."
+sha256_of() { shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'; }
+WIN_SHA=$(sha256_of binaries/quarkshield-scanner-windows-amd64.exe)
+MAC_SHA=$(sha256_of binaries/quarkshield-scanner-darwin-universal)
+LX_AMD_SHA=$(sha256_of binaries/quarkshield-scanner-linux-amd64)
+LX_ARM_SHA=$(sha256_of binaries/quarkshield-scanner-linux-arm64)
+cat > binaries/agent-manifest.json <<EOF
+{
+  "version": "${AGENT_VERSION}",
+  "generatedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "binaries": {
+    "windows/amd64": { "url": "/downloads/quarkshield-scanner-windows-amd64.exe", "sha256": "${WIN_SHA}" },
+    "darwin/amd64":  { "url": "/downloads/quarkshield-scanner-darwin-universal",  "sha256": "${MAC_SHA}" },
+    "darwin/arm64":  { "url": "/downloads/quarkshield-scanner-darwin-universal",  "sha256": "${MAC_SHA}" },
+    "linux/amd64":   { "url": "/downloads/quarkshield-scanner-linux-amd64",       "sha256": "${LX_AMD_SHA}" },
+    "linux/arm64":   { "url": "/downloads/quarkshield-scanner-linux-arm64",       "sha256": "${LX_ARM_SHA}" }
+  }
+}
+EOF
+echo "   ✓ Manifest written: version ${AGENT_VERSION} (win=${WIN_SHA:0:12}… mac=${MAC_SHA:0:12}… linux-amd64=${LX_AMD_SHA:0:12}…)"
+
 for DL_DIR in "$SCRIPT_DIR/ui/public/downloads" "$SCRIPT_DIR/ui/dist/downloads" "$SCRIPT_DIR/public/downloads"; do
   if [ -d "$DL_DIR" ]; then
+    cp -f binaries/agent-manifest.json "$DL_DIR/"
     cp -f quarkshield-scanner-darwin-arm64 "$DL_DIR/"
     cp -f quarkshield-scanner-darwin-amd64 "$DL_DIR/"
     cp -f quarkshield-scanner-darwin-universal "$DL_DIR/"

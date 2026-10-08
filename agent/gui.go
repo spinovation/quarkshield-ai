@@ -144,6 +144,7 @@ func unregisterWindowsUninstall() {
 //   - Sec-Fetch-Site (sent by modern browsers) must be same-origin/none; any
 //     cross-site or same-site request (fetch, form, img, navigation) is refused.
 //   - If an Origin header is present it must be this exact local origin.
+//
 // No permissive CORS headers are ever sent, so cross-origin reads are blocked.
 func localGuard(next http.Handler, port int, apiToken string) http.Handler {
 	allowedHosts := map[string]bool{
@@ -974,8 +975,16 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 			forceSync := false
 			if cmds, err := FetchAgentCommands(cfg.ServerURL, cfg.Token); err == nil {
 				for _, c := range cmds {
-					if c == "scan_and_sync" {
+					switch c.Command {
+					case "scan_and_sync":
 						forceSync = true
+					case "upgrade":
+						// Verified download-swap-restart (updater.go). On success the new
+						// binary is launched and this process exits; on a verify failure
+						// the running app is untouched and the error is logged.
+						if err := PerformUpgrade(c.Details); err != nil {
+							fmt.Printf("❌ Push-upgrade rejected: %v\n", err)
+						}
 					}
 				}
 			}
@@ -1007,7 +1016,10 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 
 				findings, _, errScan := RunScan(true, "")
 				if errScan == nil && len(findings) > 0 {
-					_ = SendFleetTelemetry(cfg.ServerURL, cfg.Token, hostname, osName, archName, localIP, findings, lic.LicenseKey, lic.TenantName)
+					if err := SendFleetTelemetry(cfg.ServerURL, cfg.Token, hostname, osName, archName, localIP, findings, lic.LicenseKey, lic.TenantName); err == nil {
+						// A successful sync confirms a just-applied push-upgrade.
+						ConfirmUpgradeIfPending()
+					}
 				}
 			}
 		}
