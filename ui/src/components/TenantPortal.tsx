@@ -1267,6 +1267,17 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     } catch { /* non-fatal */ }
   };
 
+  // Risk Assurance add-on: the Threat & Risk Graph tab is shown only to tenants that have it.
+  const [hasRiskAssurance, setHasRiskAssurance] = useState(false);
+  useEffect(() => {
+    if (!isAuthenticated && !isSupportMirror) return;
+    const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token') || '';
+    fetch('/api/entitlements', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => (r.ok ? r.json() : null))
+      .then(ent => setHasRiskAssurance(!!ent?.riskAssurance))
+      .catch(() => setHasRiskAssurance(false));
+  }, [isAuthenticated, isSupportMirror]);
+
   useEffect(() => {
     // Load only once signed in: an anonymous fetch 401s and would latch "session expired",
     // which then showed right after a successful login.
@@ -2811,7 +2822,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             { id: 'overview', label: 'Fleet Overview', icon: Laptop },
             { id: 'cbom', label: 'Cryptographic BOM (CBOM)', icon: FileCode },
             { id: 'compliance', label: 'Compliance (OSCAL)', icon: ShieldCheck },
-            { id: 'threat', label: 'Threat & Risk Graph', icon: Radar },
+            ...(hasRiskAssurance ? [{ id: 'threat', label: 'Threat & Risk Graph', icon: Radar }] : []),
             { id: 'integrations_gw', label: 'Integrations & Gateways', icon: Network },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
             { id: 'settings', label: 'Settings', icon: Settings }
@@ -5003,7 +5014,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             )}
 
             {/* Threat & Risk Graph (Risk Assurance plan) — tenant is pinned server-side */}
-            {activeTab === 'threat' && (
+            {activeTab === 'threat' && hasRiskAssurance && (
               <React.Suspense fallback={<div style={{ padding: '1rem', color: 'var(--text-muted)' }}>Loading Threat &amp; Risk Graph…</div>}>
                 <ThreatRiskGraph />
               </React.Suspense>
