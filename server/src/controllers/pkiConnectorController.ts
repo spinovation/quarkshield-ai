@@ -1,12 +1,24 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
-import { discoverKmsKeys, pingKms, DiscoveredAsset, KmsConfig } from '../lib/awsKms';
-import { discoverVaultKeys, pingVault, VaultConfig } from '../lib/hashiVault';
-import { discoverAzureKeys, pingAzure, AzureConfig } from '../lib/azureKeyVault';
-import { seal, open as unseal } from '../utils/secretbox';
+import { discoverKmsKeys, pingKms, DiscoveredAsset } from '../lib/awsKms';
+import { discoverVaultKeys, pingVault } from '../lib/hashiVault';
+import { discoverAzureKeys, pingAzure } from '../lib/azureKeyVault';
 import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 import { assertPublicHost } from '../utils/ssrf';
+import {
+  rawConfig,
+  sealConnectorSecrets,
+  parseKmsConfig,
+  parseVaultConfig,
+  parseAzureConfig,
+  publicConnector,
+} from './pkiConnectorConfig';
+
+// Re-export the pure config helpers so existing importers (and tests) can reach
+// them from the controller; their implementations live in pkiConnectorConfig.ts
+// (dependency-light: no DB / cloud SDK load).
+export { sealConnectorSecrets, parseKmsConfig, parseVaultConfig, parseAzureConfig, publicConnector };
 
 /**
  * Reject a connector endpoint URL that targets a non-public host (SSRF): a
@@ -41,52 +53,6 @@ const inferVulnerable = (algo: string): boolean => {
   return !(PQC_SAFE_RE.test(a) || SYMMETRIC_SAFE_RE.test(a));
 };
 
-const rawConfig = (row: any): any => {
-  try { return typeof row.config_summary === 'string' ? JSON.parse(row.config_summary) : (row.config_summary || {}); }
-  catch { return {}; }
-};
-
-const parseKmsConfig = (row: any): KmsConfig => {
-  const cfg = rawConfig(row);
-  return {
-    roleArn: cfg.roleArn || cfg.role_arn,
-    externalId: cfg.externalId || cfg.external_id,
-    regions: cfg.regions || (cfg.region ? [cfg.region] : undefined),
-    region: cfg.region,
-    endpointUrl: row.endpoint_url || cfg.endpointUrl || undefined,
-    // Sealed at rest by createPkiConnector; fall back to a raw value for any
-    // legacy row written before sealing was added.
-    accessKeyId: unseal(cfg.accessKeyId) || cfg.accessKeyId,
-    secretAccessKey: unseal(cfg.secretAccessKey) || cfg.secretAccessKey,
-  };
-};
-
-// Config keys safe to return to the client. Everything else (tokens, client/
-// AWS secrets, access keys) is withheld from API responses.
-const PUBLIC_CONFIG_KEYS = ['region', 'regions', 'roleArn', 'externalId', 'namespace', 'transitMount', 'pkiMount', 'roleId', 'clientId', 'tenantId', 'vaultUrl', 'authorityHost', 'endpointUrl'];
-
-/** Strip config_summary (which holds secrets) and expose only non-secret hints. */
-const publicConnector = (row: any): any => {
-  const cfg = rawConfig(row);
-  const safeCfg: any = {};
-  for (const k of PUBLIC_CONFIG_KEYS) if (cfg[k] !== undefined) safeCfg[k] = cfg[k];
-  const { config_summary, ...rest } = row;
-  return { ...rest, config: safeCfg };
-};
-
-const parseVaultConfig = (row: any): VaultConfig => {
-  const cfg = rawConfig(row);
-  return {
-    address: row.endpoint_url || cfg.address,
-    token: unseal(cfg.token) || undefined,
-    roleId: cfg.roleId,
-    secretId: unseal(cfg.secretId) || undefined,
-    namespace: cfg.namespace,
-    transitMount: cfg.transitMount,
-    pkiMount: cfg.pkiMount,
-  };
-};
-
 /**
  * SSRF guard for the endpoints a connector will actually contact. `endpoint_url`
  * alone is not enough: Vault/Azure/AWS endpoints (and the Azure authority host) can
@@ -98,17 +64,6 @@ const assertConnectorTargetsPublic = async (row: any): Promise<void> => {
     .map((v) => (typeof v === 'string' ? v.trim() : ''))
     .filter(Boolean);
   for (const t of targets) await assertConnectorHostPublic(t);
-};
-
-const parseAzureConfig = (row: any): AzureConfig => {
-  const cfg = rawConfig(row);
-  return {
-    vaultUrl: row.endpoint_url || cfg.vaultUrl,
-    tenantId: cfg.tenantId,
-    clientId: cfg.clientId,
-    clientSecret: unseal(cfg.clientSecret) || undefined,
-    authorityHost: cfg.authorityHost,
-  };
 };
 
 export const getPkiConnectors = async (req: Request, res: Response) => {
@@ -156,6 +111,17 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     if (!name || !provider) {
       return res.status(400).json({ error: 'Connector name and provider type are required.' });
     }
+
+    // Microsoft AD CS is AGENT-BASED, not an agentless pull connector. Its CA
+    // inventory is pushed by a domain-joined host agent (POST /api/scan/adcs/report,
+    // which find-or-creates the ad_cs connector itself). Creating one from the
+    // console would produce a connector that "syncs" to zero keys and looks
+    // successful but is really just empty — reject it with guidance instead.
+    if (provider === 'ad_cs') {
+      return res.status(400).json({
+        error: 'Microsoft AD CS is agent-based, not agentless. Its CA inventory is reported by a domain-joined host agent (run the QuarkShield agent with --adcs on the CA host); it cannot be enrolled as a pull connector from the console.'
+      });
+    }
     try {
       await assertConnectorTargetsPublic({ endpoint_url: endpointUrl, config_summary: config });
     } catch (e: any) {
@@ -169,19 +135,11 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     const cleanTenant = (resolveWriteTenant(req, tenantName) || '').toUpperCase().trim();
     if (!cleanTenant) return res.status(400).json({ error: 'Unable to resolve a tenant for this request.' });
 
-    // Credentials that real discovery needs (Vault token / AppRole secret_id,
-    // Azure client secret) are encrypted at rest; other secret-ish fields are
-    // masked. Prefer keyless auth (AWS role, Azure managed identity) and omit
-    // secrets entirely where possible.
-    const sanitizedConfig = { ...config };
-    if (sanitizedConfig.token) sanitizedConfig.token = seal(String(sanitizedConfig.token));
-    if (sanitizedConfig.secretId) sanitizedConfig.secretId = seal(String(sanitizedConfig.secretId));
-    if (sanitizedConfig.clientSecret) sanitizedConfig.clientSecret = seal(String(sanitizedConfig.clientSecret));
-    // AWS keys must be recoverable for discovery, so seal (encrypt) rather than
-    // mask. accessKeyId is sealed alongside its secret so neither sits plaintext.
-    if (sanitizedConfig.accessKeyId) sanitizedConfig.accessKeyId = seal(String(sanitizedConfig.accessKeyId));
-    if (sanitizedConfig.secretAccessKey) sanitizedConfig.secretAccessKey = seal(String(sanitizedConfig.secretAccessKey));
-    if (sanitizedConfig.secretKey) sanitizedConfig.secretKey = seal(String(sanitizedConfig.secretKey));
+    // Credentials that real discovery needs (AWS access key/secret, Vault token /
+    // AppRole secret_id, Azure client secret) are AES-256-GCM encrypted at rest.
+    // parse*Config() unseals them when discovery runs; they are never returned by
+    // the API (see PUBLIC_CONFIG_KEYS / publicConnector).
+    const sanitizedConfig = sealConnectorSecrets(config);
 
     await pool.query(`
       INSERT INTO pki_connectors (

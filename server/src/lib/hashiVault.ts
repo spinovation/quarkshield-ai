@@ -51,7 +51,7 @@ const resolveToken = async (cfg: VaultConfig): Promise<string> => {
   throw new Error('No Vault token or AppRole credentials provided');
 };
 
-const mapTransitType = (type: string): { type: string; algo: string; size: number; vuln: boolean; risk: string; threat: string } => {
+export const mapTransitType = (type: string): { type: string; algo: string; size: number; vuln: boolean; risk: string; threat: string } => {
   const t = (type || '').toLowerCase();
   if (t.startsWith('rsa-')) { const size = parseInt(t.replace('rsa-', ''), 10) || 2048; return { type: 'asymmetric_key', algo: `RSA-${size}`, size, vuln: true, risk: size <= 2048 ? 'critical' : 'high', threat: "Shor's algorithm factors the RSA modulus on a CRQC." }; }
   if (t.startsWith('ecdsa-')) { const size = t.includes('p384') ? 384 : t.includes('p521') ? 521 : 256; return { type: 'asymmetric_key', algo: `ECDSA-P${size}`, size, vuln: true, risk: 'critical', threat: "Elliptic-curve discrete log solved by Shor's algorithm." }; }
