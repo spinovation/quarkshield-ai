@@ -335,3 +335,57 @@ test('W3: no fabricated fleet/CBOM/license data is rendered when the API fails',
   const idx = read('server/src/index.ts');
   assert.ok(has(idx, 'Refusing to start:'), 'server no longer refuses to boot on weak production secrets');
 });
+
+// ---- Fleet Probe: admin-only, SSRF-constrained, re-validated, actually uploads ----
+// Locks in agent/FLEET-PROBE-PLAN.md §5. The probe drives outbound connections
+// across the fleet, so these guards must not silently regress.
+test('FP1: probe routes require tenant admin on top of tenant access', () => {
+  const routes = read('server/src/routes/routes.ts');
+  assert.ok(
+    has(routes, "router.post('/fleet/machines/:machineId/probe', requireAuth, requireTenantAccess, requireTenantAdmin, enqueueProbeCommand);"),
+    'per-machine probe route lost requireTenantAdmin'
+  );
+  assert.ok(
+    has(routes, "router.post('/fleet/probe-bulk', requireAuth, requireTenantAccess, requireTenantAdmin, enqueueBulkProbeCommand);"),
+    'bulk probe route lost requireTenantAdmin'
+  );
+  assert.ok(
+    has(routes, "router.put('/fleet/probe-policy', requireAuth, requireTenantAccess, requireTenantAdmin, setProbePolicy);"),
+    'probe kill-switch write lost requireTenantAdmin'
+  );
+});
+
+test('FP2: probe target validator blocks loopback/link-local/metadata but allows private infra', () => {
+  const v = read('server/src/utils/probeTargets.ts');
+  // Always-block set must still contain the metadata/loopback/reserved ranges.
+  assert.ok(has(v, "'169.254.0.0/16'"), 'link-local + cloud metadata no longer blocked');
+  assert.ok(has(v, "'127.0.0.0/8'"), 'loopback no longer blocked');
+  assert.ok(has(v, "'224.0.0.0/4'"), 'multicast no longer blocked');
+  // Private ranges must NOT be in the always-block set (internal topology is the point).
+  assert.ok(!/ALWAYS_BLOCKED_V4[\s\S]*'10\.0\.0\.0\/8'/.test(v), '10/8 wrongly added to always-block (breaks internal probing)');
+  assert.ok(!/ALWAYS_BLOCKED_V4[\s\S]*'192\.168\.0\.0\/16'/.test(v), '192.168/16 wrongly added to always-block');
+  // URL/credential/path smuggling rejected.
+  assert.ok(has(v, "t.includes('@')"), 'credential-bearing targets no longer rejected');
+});
+
+test('FP3: server enforces per-command cap, per-machine rate limit, and tenant kill switch', () => {
+  const ctrl = read('server/src/controllers/fleetController.ts');
+  assert.ok(has(ctrl, 'validateProbeTargets'), 'probe enqueue no longer validates targets');
+  assert.ok(has(ctrl, 'PROBE_RATE_MAX_PER_WINDOW'), 'per-machine probe rate limit removed');
+  assert.ok(has(ctrl, 'recentProbeCount'), 'probe rate-limit counter removed');
+  assert.ok(has(ctrl, 'probeEnabledForTenant'), 'tenant probe kill switch removed');
+  assert.ok(has(ctrl, "'fleet_probe_enqueue'"), 'probe audit-trail write removed');
+});
+
+test('FP4: agent re-validates targets, honors local opt-out, and UPLOADS probe findings', () => {
+  const pt = read('agent/probe_targets.go');
+  assert.ok(has(pt, 'func ValidateProbeTargets'), 'agent-side target re-validation removed');
+  assert.ok(has(pt, 'func ProbeDisabledLocally'), 'agent per-host probe opt-out removed');
+  assert.ok(has(pt, '"169.254.0.0/16"'), 'agent no longer blocks link-local/metadata');
+  const main = read('agent/main.go');
+  // The probe dispatch must call SendFleetTelemetry — not just print like the --probe CLI.
+  assert.ok(has(main, 'runProbe'), 'daemon probe dispatch removed');
+  const start = main.indexOf('runProbe := func');
+  const body = main.slice(start, start + 1200);
+  assert.ok(/SendFleetTelemetry/.test(body), 'daemon probe no longer uploads findings (regressed to print-only)');
+});

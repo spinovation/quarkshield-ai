@@ -1154,6 +1154,71 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     }
   };
 
+  // ---- Fleet Probe (on-demand TLS endpoint probing for the Threat & Risk Graph) ----
+  // Admin triggers the agent's TLS prober against a target list; findings sync back
+  // and populate host<->host connects_to / cert serves arrows. Server enforces
+  // tenant-admin + validates/rate-limits; this dialog collects the targets.
+  const [probeDialog, setProbeDialog] = useState<
+    { scope: 'machine' | 'group' | 'all'; machineId?: string; hostname?: string; group?: string } | null
+  >(null);
+  const [probeTargetsText, setProbeTargetsText] = useState('');
+  const [probeSubmitting, setProbeSubmitting] = useState(false);
+
+  // Parse the textarea into host:port lines (one per line / comma separated), trimmed.
+  const parseProbeTargets = (text: string): string[] =>
+    text
+      .split(/[\n,]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+  const openProbeDialog = (d: { scope: 'machine' | 'group' | 'all'; machineId?: string; hostname?: string; group?: string }) => {
+    setProbeTargetsText('');
+    setProbeDialog(d);
+  };
+
+  const submitProbe = async () => {
+    if (!probeDialog) return;
+    const targets = parseProbeTargets(probeTargetsText);
+    if (targets.length === 0) {
+      alert('Enter at least one target as host:port (one per line), e.g. api.internal:443');
+      return;
+    }
+    setProbeSubmitting(true);
+    try {
+      let url = '';
+      let body: any = { targets };
+      if (probeDialog.scope === 'machine' && probeDialog.machineId) {
+        url = `/api/fleet/machines/${probeDialog.machineId}/probe`;
+      } else {
+        url = `/api/fleet/probe-bulk`;
+        if (probeDialog.scope === 'group' && probeDialog.group) body.group = probeDialog.group;
+      }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(
+          `${data.message || 'Probe queued.'} Each agent runs the probe on its next check-in; the Threat & Risk Graph populates connectivity arrows once findings sync back.`
+        );
+        setProbeDialog(null);
+        fetchTenantData();
+      } else if (res.status === 403) {
+        alert(data.error || 'Probe not permitted: tenant-administrator access is required (or probing is disabled for this tenant).');
+      } else if (res.status === 429) {
+        alert(data.error || 'Probe rate limit reached; try again shortly.');
+      } else {
+        alert(`Failed to queue probe: ${data.error || res.status}`);
+      }
+    } catch (e) {
+      alert(`Probe error: ${e}`);
+    } finally {
+      setProbeSubmitting(false);
+    }
+  };
+
   // Workstation Groups (DEF-42)
   const [fleetGroups, setFleetGroups] = useState<{ name: string; count: number }[]>([]);
   const [groupFilter, setGroupFilter] = useState<string>('');  // '' = all
@@ -3420,6 +3485,27 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         <RefreshCw size={14} className={bulkPulling === 'ALL' ? 'animate-spin' : ''} /> Pull All
                       </button>
                       <button
+                        onClick={() => openProbeDialog(groupFilter ? { scope: 'group', group: groupFilter } : { scope: 'all' })}
+                        disabled={machines.length === 0}
+                        title="Probe TLS endpoints from the fleet to populate the Threat & Risk Graph's connectivity arrows (admin only)"
+                        style={{
+                          background: 'rgba(52, 211, 153, 0.12)',
+                          border: '1px solid rgba(52, 211, 153, 0.3)',
+                          color: '#34d399',
+                          padding: '0.4rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: machines.length === 0 ? 'not-allowed' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          opacity: machines.length === 0 ? 0.5 : 1
+                        }}
+                      >
+                        <Globe size={14} /> Probe {groupFilter ? 'Group' : 'Endpoints'}
+                      </button>
+                      <button
                         onClick={() => setScheduleModalOpen(true)}
                         style={{
                           background: 'rgba(168, 85, 247, 0.12)',
@@ -3649,6 +3735,26 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 >
                                   <RefreshCw size={12} className={pullingMachineId === m.id ? 'animate-spin' : ''} />
                                   {pullingMachineId === m.id ? 'Pulling...' : 'Pull Telemetry'}
+                                </button>
+                                <button
+                                  onClick={() => openProbeDialog({ scope: 'machine', machineId: m.id, hostname: displayName })}
+                                  style={{
+                                    marginLeft: '0.4rem',
+                                    background: 'rgba(52, 211, 153, 0.08)',
+                                    border: '1px solid rgba(52, 211, 153, 0.25)',
+                                    color: '#34d399',
+                                    padding: '0.3rem 0.6rem',
+                                    borderRadius: '5px',
+                                    fontSize: '0.74rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem'
+                                  }}
+                                  title="Probe TLS endpoints from this host to map its connectivity (admin only)"
+                                >
+                                  <Globe size={12} /> Probe
                                 </button>
                               </td>
                             </tr>
@@ -7022,6 +7128,26 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                       <RefreshCw size={11} className={pullingMachineId === m.id ? 'animate-spin' : ''} />
                                       {pullingMachineId === m.id ? 'Pulling...' : 'Pull'}
                                     </button>
+                                    <button
+                                      onClick={() => openProbeDialog({ scope: 'machine', machineId: m.id, hostname: displayName })}
+                                      style={{
+                                        marginLeft: '0.35rem',
+                                        background: 'rgba(52, 211, 153, 0.08)',
+                                        border: '1px solid rgba(52, 211, 153, 0.25)',
+                                        color: '#34d399',
+                                        padding: '0.25rem 0.5rem',
+                                        borderRadius: '4px',
+                                        fontSize: '0.72rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem'
+                                      }}
+                                      title="Probe TLS endpoints from this host (admin only)"
+                                    >
+                                      <Globe size={11} /> Probe
+                                    </button>
                                   </td>
                                 </tr>
                               );
@@ -7444,6 +7570,91 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 </div>
               </div>
             )}
+
+            {/* Fleet Probe target dialog */}
+            {probeDialog && (() => {
+              const parsed = parseProbeTargets(probeTargetsText);
+              const scopeLabel = probeDialog.scope === 'machine'
+                ? (probeDialog.hostname || 'this endpoint')
+                : probeDialog.scope === 'group'
+                  ? `group "${probeDialog.group}"`
+                  : 'all enrolled endpoints';
+              const hostCount = probeDialog.scope === 'machine' ? 1 : machines.length;
+              return (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(6px)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  zIndex: 9999, padding: '1rem'
+                }}>
+                  <div style={{
+                    background: '#0d1527', border: '1px solid rgba(52, 211, 153, 0.3)',
+                    borderRadius: '12px', width: '100%', maxWidth: '560px', padding: '1.75rem',
+                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <Globe size={20} color="#34d399" />
+                        <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ffffff' }}>
+                          Probe TLS Endpoints
+                        </h3>
+                      </div>
+                      <button onClick={() => setProbeDialog(null)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                        <X size={18} />
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)', margin: '0 0 1rem 0', lineHeight: 1.5 }}>
+                      Each selected agent will open an outbound TLS handshake to every target and report its
+                      post-quantum posture. Findings populate the Threat &amp; Risk Graph's connectivity arrows.
+                      Enter one <code style={{ color: '#34d399' }}>host:port</code> per line
+                      (e.g. <code>api.internal:443</code>). TLS endpoints only; loopback, link-local and
+                      cloud-metadata addresses are rejected. Max 25 targets per command.
+                    </p>
+                    <textarea
+                      value={probeTargetsText}
+                      onChange={e => setProbeTargetsText(e.target.value)}
+                      placeholder={'api.internal:443\ndb.internal:5432\ngateway.example.com:443'}
+                      rows={6}
+                      style={{
+                        width: '100%', boxSizing: 'border-box', background: '#080e1c',
+                        border: '1px solid rgba(148, 163, 184, 0.25)', borderRadius: '8px',
+                        color: '#e2e8f0', fontFamily: 'monospace', fontSize: '0.82rem',
+                        padding: '0.7rem', resize: 'vertical'
+                      }}
+                    />
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', margin: '0.6rem 0 1.1rem 0' }}>
+                      Will queue <strong style={{ color: '#34d399' }}>{parsed.length}</strong> target(s) ×{' '}
+                      <strong style={{ color: '#34d399' }}>{hostCount}</strong> host(s) &nbsp;→&nbsp; {scopeLabel}
+                      <div style={{ marginTop: '0.4rem', color: '#64748b', fontStyle: 'italic' }}>
+                        You assert you are authorized to probe these targets from your own hosts.
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
+                      <button
+                        onClick={() => setProbeDialog(null)}
+                        style={{ background: 'transparent', border: '1px solid rgba(148,163,184,0.3)', color: '#94a3b8', padding: '0.5rem 1rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={submitProbe}
+                        disabled={probeSubmitting || parsed.length === 0}
+                        style={{
+                          background: parsed.length === 0 ? 'rgba(52,211,153,0.15)' : 'rgba(52,211,153,0.2)',
+                          border: '1px solid rgba(52, 211, 153, 0.4)', color: '#34d399',
+                          padding: '0.5rem 1.1rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 700,
+                          cursor: probeSubmitting || parsed.length === 0 ? 'not-allowed' : 'pointer',
+                          opacity: probeSubmitting || parsed.length === 0 ? 0.6 : 1,
+                          display: 'inline-flex', alignItems: 'center', gap: '0.4rem'
+                        }}
+                      >
+                        <Globe size={14} /> {probeSubmitting ? 'Queuing...' : 'Queue Probe'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Automated Workstation Sync Schedule Modal */}
             {scheduleModalOpen && (

@@ -56,6 +56,26 @@ ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS last_sync TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
+-- Parameterized fleet commands (Fleet Probe + push-upgrade shared channel).
+-- `command` stays the type discriminator ('scan_and_sync', 'probe', later 'upgrade');
+-- `args` carries typed parameters (e.g. probe targets). Existing rows keep working
+-- with an empty args object. `issued_by` records the admin who queued the command for
+-- the audit trail; `scope` labels how it was triggered (machine | group | all).
+ALTER TABLE fleet_commands ADD COLUMN IF NOT EXISTS args JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE fleet_commands ADD COLUMN IF NOT EXISTS issued_by VARCHAR(255);
+ALTER TABLE fleet_commands ADD COLUMN IF NOT EXISTS scope VARCHAR(50);
+
+-- Per-tenant kill switch for remote endpoint probing (Fleet Probe agent opt-out).
+-- When a row exists with probe_enabled = false, the server refuses to enqueue probe
+-- commands for that tenant. Absent row = enabled (default on). Separate from the
+-- per-host local agent flag, which the agent enforces itself.
+CREATE TABLE IF NOT EXISTS tenant_probe_policy (
+  tenant_name VARCHAR(255) PRIMARY KEY,
+  probe_enabled BOOLEAN NOT NULL DEFAULT true,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Projects (BILL-4 / OSCAL): a Project is an authorization boundary (a Program of
 -- Record, a location/region, or a business unit). Every tenant can create them;
 -- each Project produces its own OSCAL SSP + POA&M from a scoped set of assets.
@@ -136,6 +156,9 @@ CREATE TABLE IF NOT EXISTS fleet_commands (
   command VARCHAR(50) NOT NULL,
   status VARCHAR(50) DEFAULT 'pending',
   details TEXT,
+  args JSONB DEFAULT '{}'::jsonb,       -- typed command parameters (e.g. probe targets)
+  issued_by VARCHAR(255),               -- admin who queued the command (audit trail)
+  scope VARCHAR(50),                    -- how it was triggered: machine | group | all
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   completed_at TIMESTAMP WITH TIME ZONE
 );

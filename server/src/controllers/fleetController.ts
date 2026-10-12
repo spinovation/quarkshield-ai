@@ -5,6 +5,7 @@ import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
 import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
+import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTargets';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
 // Requires the query to alias fleet_machines as m and LEFT JOIN fleet_tokens as t.
@@ -1328,6 +1329,242 @@ export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
   }
 };
 
+// ==========================================
+// FLEET PROBE (on-demand TLS endpoint probing for the Threat & Risk Graph)
+// ==========================================
+// An admin triggers the agent's TLS endpoint prober against a tenant-scoped list
+// of host:port targets. The agent runs ProbeEndpoint per target and uploads the
+// resulting `network_probe` findings in its next telemetry sync; topology R3/R2
+// then draw connects_to / serves arrows. See agent/FLEET-PROBE-PLAN.md.
+
+// Max probe commands a single machine may have queued/dispatched within the window
+// (per-machine rate limit — stops a compromised console turning the fleet into a
+// distributed scanner by spamming probe commands).
+const PROBE_RATE_WINDOW_MIN = 10;
+const PROBE_RATE_MAX_PER_WINDOW = 5;
+
+// Tenant kill switch: refuse to enqueue if the tenant has remote probing disabled.
+// Absent policy row = enabled (default on). Separate from the per-host agent flag.
+const probeEnabledForTenant = async (tenant: string): Promise<boolean> => {
+  const r = await pool.query(
+    'SELECT probe_enabled FROM tenant_probe_policy WHERE LOWER(tenant_name) = LOWER($1)',
+    [tenant]
+  );
+  if (r.rowCount === 0) return true;
+  return r.rows[0].probe_enabled !== false;
+};
+
+// Count recent probe commands for a machine (rate-limit gate). Counts pending +
+// dispatched within the window; completed older commands don't count against it.
+const recentProbeCount = async (machineId: string): Promise<number> => {
+  const r = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM fleet_commands
+      WHERE machine_id = $1 AND command = 'probe'
+        AND created_at > NOW() - ($2 || ' minutes')::interval`,
+    [machineId, String(PROBE_RATE_WINDOW_MIN)]
+  );
+  return r.rows[0]?.n ?? 0;
+};
+
+const recordProbeAudit = async (
+  actor: string,
+  scope: string,
+  tenant: string,
+  targets: string[],
+  machineCount: number,
+  ip?: string
+): Promise<void> => {
+  try {
+    await pool.query(
+      `INSERT INTO audit_logs (id, action, actor, details, ip_address)
+       VALUES ($1, 'fleet_probe_enqueue', $2, $3, $4)`,
+      [
+        'aud-' + crypto.randomBytes(8).toString('hex'),
+        actor || 'unknown',
+        JSON.stringify({ scope, tenant, machineCount, targetCount: targets.length, targets }),
+        ip || null,
+      ]
+    );
+  } catch (e) {
+    console.warn('Could not record probe audit log:', e);
+  }
+};
+
+// Enqueue a single-machine probe command. Validates ownership + rate limit; the
+// caller has already validated targets. Returns the new command id.
+const enqueueProbeForMachine = async (
+  machineId: string,
+  targets: string[],
+  issuedBy: string,
+  scope: 'machine' | 'group' | 'all' = 'machine'
+): Promise<string> => {
+  const commandId = 'cmd-' + crypto.randomBytes(8).toString('hex');
+  await pool.query(
+    `INSERT INTO fleet_commands (id, machine_id, command, status, args, issued_by, scope)
+     VALUES ($1, $2, 'probe', 'pending', $3::jsonb, $4, $5)`,
+    [commandId, machineId, JSON.stringify({ targets }), issuedBy, scope]
+  );
+  return commandId;
+};
+
+// POST /api/fleet/machines/:machineId/probe  { targets: string[] }
+export const enqueueProbeCommand = async (req: Request, res: Response) => {
+  try {
+    const { machineId } = req.params;
+    const owner = await pool.query(
+      `SELECT COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name) AS tenant
+         FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE m.id = $1`,
+      [machineId]
+    );
+    // SECURITY: a 404 (not 403) for a machine the caller can't see avoids
+    // confirming the existence of another tenant's machine id.
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant)) {
+      return res.status(404).json({ error: 'Fleet machine not found.' });
+    }
+    const tenant = owner.rows[0].tenant;
+
+    if (!(await probeEnabledForTenant(tenant))) {
+      return res.status(403).json({ error: 'Remote endpoint probing is disabled for this tenant.' });
+    }
+
+    const v = validateProbeTargets(req.body?.targets);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+
+    if ((await recentProbeCount(machineId)) >= PROBE_RATE_MAX_PER_WINDOW) {
+      return res.status(429).json({
+        error: `Probe rate limit reached for this endpoint (max ${PROBE_RATE_MAX_PER_WINDOW} per ${PROBE_RATE_WINDOW_MIN} min). Try again shortly.`,
+      });
+    }
+
+    const commandId = await enqueueProbeForMachine(machineId, v.targets, req.user?.email || '');
+    await recordProbeAudit(req.user?.email || '', 'machine', tenant, v.targets, 1, req.ip);
+
+    res.json({
+      success: true,
+      commandId,
+      machineId,
+      targets: v.targets,
+      message: `Probe of ${v.targets.length} target(s) queued for this endpoint.`,
+    });
+  } catch (err: any) {
+    console.error('Error queuing probe command:', err);
+    res.status(500).json({ error: 'Failed to queue probe command.' });
+  }
+};
+
+// Reusable core: enqueue a probe for every tenant machine matching an optional
+// group scope, honoring the per-machine rate limit (machines over the limit are
+// skipped, not failed). Returns the count queued. Targets are pre-validated.
+export const enqueueProbesForScope = async (
+  tenant: string,
+  targets: string[],
+  issuedBy: string,
+  opts: { group?: string | null }
+): Promise<{ queued: number; skipped: number }> => {
+  const group = (opts.group || '').toString().trim() || null;
+  const params: any[] = [tenant];
+  let groupClause = '';
+  if (group) {
+    params.push(group);
+    groupClause = ` AND LOWER(${EFFECTIVE_GROUP}) = LOWER($${params.length})`;
+  }
+  const machines = await pool.query(
+    `SELECT m.id
+       FROM fleet_machines m
+       LEFT JOIN fleet_tokens t ON m.token_id = t.id
+      WHERE (LOWER(m.tenant_name) = LOWER($1)
+          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+          OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+        ${groupClause}`,
+    params
+  );
+  if (machines.rowCount === 0) return { queued: 0, skipped: 0 };
+
+  const scope = group ? 'group' : 'all';
+  let queued = 0;
+  let skipped = 0;
+  for (const row of machines.rows) {
+    if ((await recentProbeCount(row.id)) >= PROBE_RATE_MAX_PER_WINDOW) {
+      skipped++;
+      continue;
+    }
+    await enqueueProbeForMachine(row.id, targets, issuedBy, scope);
+    queued++;
+  }
+  return { queued, skipped };
+};
+
+// POST /api/fleet/probe-bulk  { group?: string, targets: string[] }
+export const enqueueBulkProbeCommand = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved for bulk probe.' });
+    }
+    if (!(await probeEnabledForTenant(tenant))) {
+      return res.status(403).json({ error: 'Remote endpoint probing is disabled for this tenant.' });
+    }
+    const v = validateProbeTargets(req.body?.targets);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+
+    const group = (req.body?.group || '').toString().trim() || null;
+    const { queued, skipped } = await enqueueProbesForScope(tenant, v.targets, req.user?.email || '', { group });
+    if (queued > 0) {
+      await recordProbeAudit(req.user?.email || '', group ? 'group' : 'all', tenant, v.targets, queued, req.ip);
+    }
+    res.json({
+      success: true,
+      queued,
+      skipped,
+      group,
+      targets: v.targets,
+      message: queued === 0
+        ? (skipped > 0 ? 'All matching endpoints are rate-limited; try again shortly.' : 'No matching endpoints to probe.')
+        : `Probe of ${v.targets.length} target(s) queued for ${queued} endpoint(s)${group ? ' in group ' + group : ''}${skipped > 0 ? ` (${skipped} rate-limited)` : ''}.`,
+    });
+  } catch (err: any) {
+    console.error('Error queuing bulk probe command:', err);
+    res.status(500).json({ error: 'Failed to queue bulk probe.' });
+  }
+};
+
+// GET /api/fleet/probe-policy — current tenant kill-switch state.
+export const getProbePolicy = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    res.json({ tenant, probeEnabled: await probeEnabledForTenant(tenant), maxTargetsPerCommand: MAX_TARGETS_PER_COMMAND });
+  } catch (err: any) {
+    console.error('Error reading probe policy:', err);
+    res.status(500).json({ error: 'Failed to read probe policy.' });
+  }
+};
+
+// PUT /api/fleet/probe-policy  { enabled: boolean } — tenant admin kill switch.
+export const setProbePolicy = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const enabled = req.body?.enabled !== false;
+    await pool.query(
+      `INSERT INTO tenant_probe_policy (tenant_name, probe_enabled, updated_by, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (tenant_name) DO UPDATE SET probe_enabled = EXCLUDED.probe_enabled,
+         updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [tenant, enabled, req.user?.email || '']
+    );
+    res.json({ success: true, tenant, probeEnabled: enabled });
+  } catch (err: any) {
+    console.error('Error updating probe policy:', err);
+    res.status(500).json({ error: 'Failed to update probe policy.' });
+  }
+};
+
 // ---- Recurring pull schedules (DEF-41) ----
 export const listPullSchedules = async (req: Request, res: Response) => {
   try {
@@ -1598,13 +1835,15 @@ export const agentFetchCommands = async (req: Request, res: Response) => {
     const machineId = m.rows[0].id;
 
     const cmds = await pool.query(
-      "SELECT id, command, details FROM fleet_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC",
+      "SELECT id, command, details, COALESCE(args, '{}'::jsonb) AS args FROM fleet_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC",
       [machineId]
     );
     if (cmds.rowCount && cmds.rowCount > 0) {
       const ids = cmds.rows.map(c => c.id);
       await pool.query("UPDATE fleet_commands SET status = 'dispatched' WHERE id = ANY($1)", [ids]);
     }
+    // Each command carries its type (`command`) plus typed `args` (e.g. probe
+    // targets). Older agents that read only `command` keep working unchanged.
     res.json({ machineId, commands: cmds.rows });
   } catch (err: any) {
     console.error('Error fetching agent commands:', err);
