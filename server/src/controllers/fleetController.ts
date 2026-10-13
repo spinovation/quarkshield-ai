@@ -6,6 +6,7 @@ import { maybeSendAlert } from '../lib/alerts';
 import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
 import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTargets';
+import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
 // Requires the query to alias fleet_machines as m and LEFT JOIN fleet_tokens as t.
@@ -1002,9 +1003,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         id, type, name, algorithm, key_size, hash_algorithm, 
         is_vulnerable, risk_level, status, description, 
         recommendation, explainer, compliance_violations, machine_id, path,
-        tenant_name, source, source_ref
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-      ON CONFLICT (id) DO UPDATE SET 
+        tenant_name, source, source_ref, purpose
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+      ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         algorithm = EXCLUDED.algorithm,
         key_size = EXCLUDED.key_size,
@@ -1020,15 +1021,23 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         path = EXCLUDED.path,
         tenant_name = EXCLUDED.tenant_name,
         source = EXCLUDED.source,
-        source_ref = EXCLUDED.source_ref;
+        source_ref = EXCLUDED.source_ref,
+        purpose = EXCLUDED.purpose;
     `;
 
     for (const a of processedAssets) {
+      // Persist the crypto PURPOSE (single source of truth: cryptoPurpose.ts) so the
+      // CBOM inventory is queryable by what the key/cert is FOR, not just its algorithm.
+      const purpose = classifyPurpose({
+        type: a.type, name: a.name, algorithm: a.algorithm,
+        key_size: a.key_size, hash_algorithm: a.hash_algorithm,
+        description: a.description, explainer: a.explainer,
+      });
       await txn.query(assetQuery, [
         a.id, a.type, a.name, a.algorithm, a.key_size, a.hash_algorithm,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.machine_id,
-        a.path, assignedTenant, 'endpoint_deploy', cleanHost
+        a.path, assignedTenant, 'endpoint_deploy', cleanHost, purpose
       ]);
     }
     await txn.query('COMMIT');

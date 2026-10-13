@@ -8,6 +8,7 @@ import { execFile } from 'child_process';
 import { assertPublicHost } from '../utils/ssrf';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { resolveWriteTenant } from '../middleware/auth';
+import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
 
 export interface GitFinding {
   id: string;
@@ -793,8 +794,8 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
           id, machine_id, type, name, algorithm, key_size, hash_algorithm,
           is_vulnerable, risk_level, status, description,
           recommendation, explainer, compliance_violations, path,
-          tenant_name, source, source_ref, created_at
-        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, NOW())
+          tenant_name, source, source_ref, purpose, created_at
+        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           algorithm = EXCLUDED.algorithm,
@@ -810,7 +811,8 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
           path = EXCLUDED.path,
           tenant_name = EXCLUDED.tenant_name,
           source = EXCLUDED.source,
-          source_ref = EXCLUDED.source_ref;
+          source_ref = EXCLUDED.source_ref,
+          purpose = EXCLUDED.purpose;
       `;
 
       for (let idx = 0; idx < findings.length; idx++) {
@@ -835,7 +837,14 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
           `${summary.repoName}/${f.filePath}${f.lineNumber ? `:${f.lineNumber}` : ''}`,
           cleanTenant,
           'git_repo',
-          summary.repoUrl
+          summary.repoUrl,
+          classifyPurpose({
+            type: f.category || 'source_code',
+            name: f.assetName || summary.repoName,
+            algorithm: f.algorithm || '',
+            key_size: f.keySize || null,
+            description: f.quantumThreat || null,
+          }),
         ]);
       }
       await client.query('COMMIT');

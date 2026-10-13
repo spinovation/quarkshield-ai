@@ -225,13 +225,25 @@ Ingest unchanged in shape: these ride the existing `POST /api/scan/agent/ingest`
 
 | Phase | Scope | Depends on | Effort | Ships as |
 | :--- | :--- | :--- | :--- | :--- |
-| **P0 — Persist purpose** | Add `purpose` column; write the `CryptoPurpose` we already compute (`cryptoPurpose.ts`) into `assets`. No new collection. | — | **S** | Internal; unlocks querying by purpose |
+| **P0 — Persist purpose** ✅ | Add `purpose` column; write the `CryptoPurpose` we already compute (`cryptoPurpose.ts`) into `assets`. No new collection. | — | **S** | Internal; unlocks querying by purpose |
 | **P1 — Usage edges (F1)** | R10/R13 (`secured_by`, `chains_to`) from existing cert data + R2/R4. New `RelKind`s, graph render, AssetDetail blast-radius panel. | P0, cert-parse (§7.1) | **M** | "What depends on this key" in Risk Graph |
 | **P2 — What-Breaks engine (F3)** | Size + constraint tables, verdict logic, `tr_impact_findings`, roadmap `impact` field + Mosca friction, UI blockers tile. | P1 | **M** | The headline differentiator |
 | **P3 — Lifecycle (F2)** | `key_fingerprint` correlation, keystore/trust-store agent scan (§7.2), `key_stored_in`/`key_generated_by`, lifecycle roles. | P1, agent work | **L** | generated/stored/trusted map |
 | **P4 — Portability** | CycloneDX `dependencies` + impact extension; CI gate can fail on new `blocker` impacts. | P2 | **S–M** | Standards-aligned export |
 
-**Recommended first slice:** P0 → P2 on the *signing/firmware* path only (the most visceral "it literally won't fit" story), then broaden. P2 can demo on `firmware_slot` + `cert_chain` constraints with measured chain sizes from P1 — a compelling PoC with modest agent work.
+### 8.1 P0 — implemented 2026-10-13
+
+The smallest slice is landed (branch `claude/recursing-chaplygin-b3bcc3`). It persists the `CryptoPurpose` classification — which the graph layer already computes in `cryptoPurpose.ts` — onto the `assets` row **at ingest time**, so the inventory is queryable by *what the key/cert is for*, not just its algorithm. Zero new collection and zero new classification logic: every write-site calls the one existing `classifyPurpose()` so there is a single source of truth.
+
+- **Schema:** `assets.purpose VARCHAR(40)` (nullable, additive ALTER) + `idx_assets_purpose` — `server/src/models/schema.sql`. Legacy rows stay `NULL` until re-scanned; nothing breaks.
+- **All four ingest sites populated** (no misleading half-NULL column):
+  - endpoint bulk ingest — `fleetController.ts` `ingestTelemetry` UPSERT (classifier per asset);
+  - git repo scan — `gitScanController.ts` findings insert (classifier per finding);
+  - KMS/PKI connector sync — `pkiConnectorController.ts` CBOM syndication (classifier per discovered key);
+  - hybrid-TLS proxy — `pqcProxyController.ts` both inserts written as `key_establishment` (definitionally key-exchange assets).
+- **Not yet wired into outputs.** `roadmapReport.ts` priority-by-purpose and the UI purpose facet are **P1** — P0 only makes the data exist and be indexed. Build/typecheck in this worktree requires `npm install` (no `node_modules` present); edits were verified by column/placeholder audit.
+
+**Recommended next slice:** P0 → P2 on the *signing/firmware* path only (the most visceral "it literally won't fit" story), then broaden. P2 can demo on `firmware_slot` + `cert_chain` constraints with measured chain sizes from P1 — a compelling PoC with modest agent work.
 
 ---
 

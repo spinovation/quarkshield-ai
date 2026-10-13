@@ -69,8 +69,8 @@ export const syndicateProxyToAssets = async (
     // 1. KEM / ingress key-exchange asset, derived from the configured curve.
     await pool.query(`
       INSERT INTO assets (
-        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name
-      ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, $7, 'planned', $8, $9, 'pqc_proxy', $10, $11)
+        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose
+      ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, $7, 'planned', $8, $9, 'pqc_proxy', $10, $11, 'key_establishment')
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         path = EXCLUDED.path,
@@ -81,6 +81,7 @@ export const syndicateProxyToAssets = async (
         description = EXCLUDED.description,
         recommendation = EXCLUDED.recommendation,
         tenant_name = EXCLUDED.tenant_name,
+        purpose = EXCLUDED.purpose,
         updated_at = NOW()
     `, [
       kemId,
@@ -104,8 +105,8 @@ export const syndicateProxyToAssets = async (
       const groupLabel = measured.group || 'key-exchange group not reported';
       await pool.query(`
         INSERT INTO assets (
-          id, type, name, path, algorithm, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name
-        ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, 'active', $7, $8, 'pqc_proxy', $9, $10)
+          id, type, name, path, algorithm, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose
+        ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, 'active', $7, $8, 'pqc_proxy', $9, $10, 'key_establishment')
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           path = EXCLUDED.path,
@@ -115,6 +116,7 @@ export const syndicateProxyToAssets = async (
           description = EXCLUDED.description,
           recommendation = EXCLUDED.recommendation,
           tenant_name = EXCLUDED.tenant_name,
+          purpose = EXCLUDED.purpose,
           updated_at = NOW()
       `, [
         upId,

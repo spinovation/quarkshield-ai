@@ -14,6 +14,7 @@ import {
   parseAzureConfig,
   publicConnector,
 } from './pkiConnectorConfig';
+import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
 
 // Re-export the pure config helpers so existing importers (and tests) can reach
 // them from the controller; their implementations live in pkiConnectorConfig.ts
@@ -529,13 +530,14 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
     // Syndicate into central assets inventory for unified CBOM & source filtering
     await pool.query(`
       INSERT INTO assets (
-        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13)
-      ON CONFLICT (id) DO UPDATE SET 
+        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14)
+      ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         path = EXCLUDED.path,
         algorithm = EXCLUDED.algorithm,
-        tenant_name = EXCLUDED.tenant_name
+        tenant_name = EXCLUDED.tenant_name,
+        purpose = EXCLUDED.purpose
     `, [
       cbomAssetId,
       a.type,
@@ -549,7 +551,8 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
       a.vuln ? "Rotate to Post-Quantum Kyber / Dilithium (FIPS 203/204) immediately." : "Quantum safe. Meets CNSA 2.0 / FIPS standards.",
       sourceType,
       connectorName,
-      tenantName
+      tenantName,
+      classifyPurpose({ type: a.type, name: a.name, algorithm: a.algo, key_size: a.size, description: a.threat }),
     ]).catch(err => {
       console.warn('Failed to syndicate PKI asset to CBOM:', err);
     });

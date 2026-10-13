@@ -51,6 +51,12 @@ ALTER TABLE assets ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS source VARCHAR(100) DEFAULT 'endpoint';
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_ref VARCHAR(500);
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+-- Crypto usage/dependency map P0: persist the CryptoPurpose classification (cryptoPurpose.ts)
+-- at ingest so the inventory is queryable by purpose (key_establishment / tls_certificate /
+-- code_or_data_signing / ca_trust_anchor / ssh_authentication / rsa_key_transport / symmetric /
+-- configuration / unknown). Nullable so existing rows + legacy ingest paths are unaffected.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS purpose VARCHAR(40);
+CREATE INDEX IF NOT EXISTS idx_assets_purpose ON assets(purpose);
 ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);
