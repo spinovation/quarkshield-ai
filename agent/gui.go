@@ -1022,10 +1022,32 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 			// within ~2 min while the app is running, independent of the daily timer and
 			// of AutoSyncEnabled (an operator-initiated pull should always be serviced).
 			forceSync := false
+			var probeTargets []string
 			if cmds, err := FetchAgentCommands(cfg.ServerURL, cfg.Token); err == nil {
 				for _, c := range cmds {
-					if c == "scan_and_sync" {
+					switch c.Command {
+					case "scan_and_sync":
 						forceSync = true
+					case "probe":
+						probeTargets = append(probeTargets, c.Args.Targets...)
+					}
+				}
+			}
+
+			// On-demand probe: run the TLS prober per target and upload the
+			// network_probe findings (feeds the Threat & Risk Graph). Honors the
+			// per-host local opt-out.
+			if len(probeTargets) > 0 && !ProbeDisabledLocally() {
+				if clean := ValidateProbeTargets(probeTargets); len(clean) > 0 {
+					lic := GetLicenseInfo()
+					var collected []AuditResult
+					for _, t := range clean {
+						if pf, perr := ProbeEndpoint(t); perr == nil {
+							collected = append(collected, pf...)
+						}
+					}
+					if len(collected) > 0 {
+						_ = SendFleetTelemetry(cfg.ServerURL, cfg.Token, hostname, osName, archName, localIP, collected, lic.LicenseKey, lic.TenantName)
 					}
 				}
 			}

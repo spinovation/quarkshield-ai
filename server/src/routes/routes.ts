@@ -30,7 +30,11 @@ import {
   togglePullSchedule,
   getTenantDailySnapshots,
   getFleetDrift,
-  agentFetchCommands
+  agentFetchCommands,
+  enqueueProbeCommand,
+  enqueueBulkProbeCommand,
+  getProbePolicy,
+  setProbePolicy
 } from '../controllers/fleetController';
 import {
   getClients,
@@ -204,6 +208,12 @@ router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines
 router.delete('/fleet/machines/:id', requireAuth, requireTenantAccess, deleteFleetMachine);
 router.post('/fleet/machines/:machineId/pull', requireAuth, requireTenantAccess, enqueuePullCommand);
 router.post('/fleet/pull-bulk', requireAuth, requireTenantAccess, enqueueBulkPullCommand);
+// Fleet Probe — active TLS endpoint probing. Admin-only (requireTenantAdmin) on top
+// of tenant scoping, since it drives outbound connections across the fleet (§5).
+router.post('/fleet/machines/:machineId/probe', requireAuth, requireTenantAccess, requireTenantAdmin, enqueueProbeCommand);
+router.post('/fleet/probe-bulk', requireAuth, requireTenantAccess, requireTenantAdmin, enqueueBulkProbeCommand);
+router.get('/fleet/probe-policy', requireAuth, requireTenantAccess, getProbePolicy);
+router.put('/fleet/probe-policy', requireAuth, requireTenantAccess, requireTenantAdmin, setProbePolicy);
 router.post('/fleet/machines/:machineId/group', requireAuth, requireTenantAccess, setMachineGroup);
 router.get('/fleet/groups', requireAuth, requireTenantAccess, listFleetGroups);
 router.post('/fleet/groups', requireAuth, requireTenantAccess, createFleetGroup);

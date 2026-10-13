@@ -485,6 +485,44 @@ func main() {
 			fmt.Printf("✅ Synced %d assets.\n", len(findings))
 		}
 
+		// runProbe handles an on-demand `probe` command: it runs the TLS prober
+		// against each validated target and UPLOADS the resulting network_probe
+		// findings via the telemetry sync (unlike the standalone --probe CLI,
+		// which only prints). This is what populates the Threat & Risk Graph's
+		// connects_to / serves arrows.
+		runProbe := func(targets []string) {
+			if ProbeDisabledLocally() {
+				fmt.Println("⏭️  Remote probing is disabled on this host (local opt-out); ignoring probe command.")
+				return
+			}
+			clean := ValidateProbeTargets(targets)
+			if len(clean) == 0 {
+				fmt.Println("⚠️  Probe command carried no valid targets.")
+				return
+			}
+			fmt.Printf("🌐 On-demand probe of %d target(s) requested by server...\n", len(clean))
+			var collected []AuditResult
+			for _, t := range clean {
+				findings, err := ProbeEndpoint(t)
+				if err != nil {
+					fmt.Printf("   ✗ %s: %v\n", t, err)
+					continue
+				}
+				fmt.Printf("   ✓ %s: %d finding(s)\n", t, len(findings))
+				collected = append(collected, findings...)
+			}
+			if len(collected) == 0 {
+				fmt.Println("⚠️  Probe produced no findings to upload.")
+				return
+			}
+			lic := GetLicenseInfo()
+			if err := SendFleetTelemetry(server, token, hn, runtime.GOOS, runtime.GOARCH, "", collected, lic.LicenseKey, lic.TenantName); err != nil {
+				fmt.Printf("❌ Probe telemetry failed: %v\n", err)
+				return
+			}
+			fmt.Printf("✅ Uploaded %d network_probe finding(s) from %d endpoint(s).\n", len(collected), len(clean))
+		}
+
 		lastSync := time.Time{}
 		if cfg := LoadEnrollmentConfig(); cfg.LastSyncTime != "" {
 			if t, err := time.Parse(time.RFC3339, cfg.LastSyncTime); err == nil {
@@ -494,12 +532,15 @@ func main() {
 
 		ticker := time.NewTicker(2 * time.Minute)
 		for {
-			// 1. On-demand commands queued by an admin (Pull Telemetry / bulk pull).
+			// 1. On-demand commands queued by an admin (Pull Telemetry / bulk pull / probe).
 			if cmds, err := FetchAgentCommands(server, token); err == nil {
 				for _, c := range cmds {
-					if c == "scan_and_sync" {
+					switch c.Command {
+					case "scan_and_sync":
 						runSync("On-demand pull requested by server")
 						lastSync = time.Now()
+					case "probe":
+						runProbe(c.Args.Targets)
 					}
 				}
 			}
@@ -534,27 +575,59 @@ func main() {
 			os.Exit(1)
 		}
 		wantScan := false
+		var probeTargets []string
 		for _, c := range cmds {
-			if c == "scan_and_sync" {
+			switch c.Command {
+			case "scan_and_sync":
 				wantScan = true
+			case "probe":
+				probeTargets = append(probeTargets, c.Args.Targets...)
 			}
 		}
-		if !wantScan {
+		if !wantScan && len(probeTargets) == 0 {
 			fmt.Println("✓ No pending commands.")
 			os.Exit(0)
 		}
-		fmt.Println("📡 On-demand scan requested by the server — scanning and syncing...")
-		findings, _, scanErr := headlessScan(true, "", *sbomFlag)
-		if scanErr != nil {
-			fmt.Printf("❌ Scan failed: %v\n", scanErr)
-			os.Exit(1)
-		}
 		hn, _ := os.Hostname()
-		if err := SendFleetTelemetry(*serverFlag, token, hn, runtime.GOOS, runtime.GOARCH, "", findings, "", ""); err != nil {
+		lic := GetLicenseInfo()
+
+		// Collect findings from a scan and/or probe, then upload them together.
+		var upload []AuditResult
+		if wantScan {
+			fmt.Println("📡 On-demand scan requested by the server — scanning...")
+			findings, _, scanErr := headlessScan(true, "", *sbomFlag)
+			if scanErr != nil {
+				fmt.Printf("❌ Scan failed: %v\n", scanErr)
+				os.Exit(1)
+			}
+			upload = append(upload, findings...)
+		}
+		if len(probeTargets) > 0 {
+			if ProbeDisabledLocally() {
+				fmt.Println("⏭️  Remote probing is disabled on this host (local opt-out); ignoring probe targets.")
+			} else {
+				clean := ValidateProbeTargets(probeTargets)
+				fmt.Printf("🌐 On-demand probe of %d target(s) requested by server...\n", len(clean))
+				for _, t := range clean {
+					findings, perr := ProbeEndpoint(t)
+					if perr != nil {
+						fmt.Printf("   ✗ %s: %v\n", t, perr)
+						continue
+					}
+					fmt.Printf("   ✓ %s: %d finding(s)\n", t, len(findings))
+					upload = append(upload, findings...)
+				}
+			}
+		}
+		if len(upload) == 0 {
+			fmt.Println("✓ Nothing to upload.")
+			os.Exit(0)
+		}
+		if err := SendFleetTelemetry(*serverFlag, token, hn, runtime.GOOS, runtime.GOARCH, "", upload, lic.LicenseKey, lic.TenantName); err != nil {
 			fmt.Printf("❌ Telemetry failed: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("✅ On-demand scan complete; %d assets synced.\n", len(findings))
+		fmt.Printf("✅ On-demand command complete; %d finding(s) synced.\n", len(upload))
 		os.Exit(0)
 	}
 

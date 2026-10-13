@@ -286,10 +286,27 @@ func ReportADCS(serverURL string, token string, caName string, assets []ADCSAsse
 	return nil
 }
 
+// AgentCommand is one pending command from the server: a type discriminator plus
+// typed args (e.g. probe targets). Backward compatible — an older server that
+// returns only `command` leaves Args empty, which every caller treats as today.
+type AgentCommand struct {
+	ID      string           `json:"id"`
+	Command string           `json:"command"`
+	Args    AgentCommandArgs `json:"args"`
+}
+
+// AgentCommandArgs carries the parameters for a parameterized command. Only the
+// fields a command type needs are populated; unknown fields are ignored.
+type AgentCommandArgs struct {
+	Targets []string `json:"targets,omitempty"` // probe: host:port list
+}
+
 // FetchAgentCommands polls the server for pending on-demand commands for this
 // machine (DEF-38). The fleet token authenticates and resolves the tenant; the
 // server returns the machine's pending commands and marks them dispatched.
-func FetchAgentCommands(serverURL string, token string) ([]string, error) {
+// Returns the full parameterized command list; callers that only care about the
+// command string can read c.Command.
+func FetchAgentCommands(serverURL string, token string) ([]AgentCommand, error) {
 	// The fleet token travels with this request: never send it to a plaintext or
 	// non-loopback http URL, even one persisted by an older (laxer) build.
 	if err := validateServerURL(serverURL); err != nil {
@@ -319,16 +336,10 @@ func FetchAgentCommands(serverURL string, token string) ([]string, error) {
 		return nil, fmt.Errorf("commands request failed (HTTP %d)", resp.StatusCode)
 	}
 	var parsed struct {
-		Commands []struct {
-			Command string `json:"command"`
-		} `json:"commands"`
+		Commands []AgentCommand `json:"commands"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&parsed); err != nil {
 		return nil, err
 	}
-	out := []string{}
-	for _, c := range parsed.Commands {
-		out = append(out, c.Command)
-	}
-	return out, nil
+	return parsed.Commands, nil
 }
