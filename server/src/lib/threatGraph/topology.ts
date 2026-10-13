@@ -84,7 +84,7 @@ const inferEnvironment = (...hints: (string | null | undefined)[]): string | nul
 
 /** R8: server packages that indicate a network service running on the host. */
 const SERVICE_SIGNATURES: { re: RegExp; svc: string; type: AssetType; label: string }[] = [
-  { re: /^(postgresql(\d+)?(-server)?|postgres)$/i, svc: 'postgresql', type: 'database', label: 'PostgreSQL' },
+  { re: /^(postgresql(-?\d+)?(-server)?|postgres)$/i, svc: 'postgresql', type: 'database', label: 'PostgreSQL' },
   { re: /^(mysql-server|mysql-community-server|mariadb-server|mariadb)$/i, svc: 'mysql', type: 'database', label: 'MySQL / MariaDB' },
   { re: /^(mongodb-org-server|mongodb-server|mongod|mongodb)$/i, svc: 'mongodb', type: 'database', label: 'MongoDB' },
   { re: /^(redis|redis-server)$/i, svc: 'redis', type: 'database', label: 'Redis' },

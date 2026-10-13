@@ -93,6 +93,23 @@ func RunScan(quick bool, customPath string) ([]AuditResult, int, error) {
 	return RunScanWithProgress(context.Background(), quick, customPath, nil)
 }
 
+// headlessScan runs the crypto-file audit (RunScan) and, when includeSbom is set,
+// merges in the OS-package/SBOM audit so headless (CLI/daemon) fleet telemetry
+// carries the "package" (os_pkg) components the server needs to classify servers
+// and build service nodes in the Threat & Risk Graph. The crypto scan's --quick
+// semantics are unchanged; SBOM is a separate, additive step. SBOM collection is
+// best-effort and never fails the scan.
+func headlessScan(quick bool, customPath string, includeSbom bool) ([]AuditResult, int, error) {
+	findings, scanned, err := RunScan(quick, customPath)
+	if err != nil {
+		return findings, scanned, err
+	}
+	if includeSbom {
+		findings = append(findings, collectSbomFindings()...)
+	}
+	return findings, scanned, nil
+}
+
 // RunScanWithProgress audits the workstation with real-time path updates and cancellation support
 func RunScanWithProgress(ctx context.Context, quick bool, customPath string, onProgress func(currentPath string, scannedCount int, foundCount int)) ([]AuditResult, int, error) {
 	osName := runtime.GOOS
@@ -376,6 +393,7 @@ func main() {
 	adcsFlag := flag.Bool("adcs", false, "Discover Active Directory Certificate Services (Windows) and report the CA inventory to the server")
 	pollFlag := flag.Bool("poll", false, "Check the server for pending on-demand commands (e.g. scan-now) and act on them")
 	daemonFlag := flag.Bool("daemon", false, "Run as a persistent background service: continuously poll for on-demand commands and perform scheduled syncs (works with no GUI open)")
+	sbomFlag := flag.Bool("sbom", true, "Collect the OS-package software bill of materials (openssh-server, nginx, postgresql, openssl, ...) during fleet sync. Enabled by default; the server uses these components to classify servers and map network services in the Threat Graph. Pass --sbom=false for a crypto-only scan.")
 
 	flag.StringVar(pathFlag, "p", ".", "Target directory path (shorthand)")
 	flag.StringVar(serverFlag, "s", "https://quarkshield.ai", "Server URL (shorthand)")
@@ -454,7 +472,7 @@ func main() {
 
 		runSync := func(reason string) {
 			fmt.Printf("📡 %s — scanning and syncing...\n", reason)
-			findings, _, scanErr := RunScan(true, "")
+			findings, _, scanErr := headlessScan(true, "", *sbomFlag)
 			if scanErr != nil {
 				fmt.Printf("❌ Scan failed: %v\n", scanErr)
 				return
@@ -526,7 +544,7 @@ func main() {
 			os.Exit(0)
 		}
 		fmt.Println("📡 On-demand scan requested by the server — scanning and syncing...")
-		findings, _, scanErr := RunScan(true, "")
+		findings, _, scanErr := headlessScan(true, "", *sbomFlag)
 		if scanErr != nil {
 			fmt.Printf("❌ Scan failed: %v\n", scanErr)
 			os.Exit(1)
@@ -655,7 +673,17 @@ func main() {
 		fmt.Printf("Scanning target: %s\n", *pathFlag)
 	}
 
-	allFindings, scannedFilesCount, err := RunScan(*quickFlag, *pathFlag)
+	// Include the OS-package SBOM audit whenever we are enrolling/syncing to the
+	// fleet (so the server can classify this host and draw service nodes), or for a
+	// full local scan. A pure --quick scan that is NOT syncing stays crypto-only so
+	// its stdout output is unchanged. --sbom=false opts out entirely.
+	sendingTelemetry := tokenVal != "" || *registerFlag
+	includeSbom := *sbomFlag && (sendingTelemetry || !*quickFlag)
+	if includeSbom {
+		fmt.Printf("✦ Including OS-package SBOM audit (software bill of materials)...\n")
+	}
+
+	allFindings, scannedFilesCount, err := headlessScan(*quickFlag, *pathFlag, includeSbom)
 	if err != nil {
 		fmt.Printf("❌ Scan error: %v\n", err)
 		os.Exit(1)
