@@ -58,6 +58,19 @@ const buildPdf = (r: RoadmapReport, res: Response) => {
   doc.fillColor(r.mosca.verdict === 'ON TRACK' ? '#15803d' : '#b91c1c').fontSize(11).text(`Mosca verdict (X + Y > Z): ${r.mosca.verdict}`);
   doc.fillColor(slate).fontSize(9).text(r.mosca.detail, { align: 'justify' });
 
+  // Cryptographic purpose breakdown (P1)
+  if (r.purposeBreakdown?.length) {
+    h('Cryptographic Purpose Breakdown');
+    doc.fillColor(slate).fontSize(9).text('Purpose                         Vuln   Threat urgency');
+    rule();
+    r.purposeBreakdown.forEach(p => {
+      doc.fillColor('#111').fontSize(9).text(
+        `${p.label.padEnd(30).slice(0, 30)}  ${String(p.count).padStart(4)}   ${p.urgencyLabel}`
+      );
+    });
+    doc.moveDown(0.3);
+  }
+
   // Top priorities
   h('Top Migration Priorities');
   if (r.priorities.length === 0) doc.fillColor('#111').fontSize(10).text('No quantum-vulnerable assets identified.');
@@ -141,6 +154,16 @@ const buildDocx = async (r: RoadmapReport): Promise<Buffer> => {
     posture,
     new Paragraph({ children: [new TextRun({ text: `Mosca verdict (X + Y > Z): ${r.mosca.verdict}`, bold: true })] }),
     new Paragraph(r.mosca.detail),
+    ...(r.purposeBreakdown?.length ? [
+      new Paragraph({ text: 'Cryptographic Purpose Breakdown', heading: HeadingLevel.HEADING_1 }),
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({ children: [cell('Purpose', true, 30), cell('Vulnerable', true, 15), cell('Threat urgency', true, 35), cell('NIST target', true, 20)] }),
+          ...r.purposeBreakdown.map(p => new TableRow({ children: [cell(p.label, false, 30), cell(String(p.count), false, 15), cell(p.urgencyLabel, false, 35), cell(p.standard, false, 20)] })),
+        ],
+      }),
+    ] : []),
     new Paragraph({ text: 'Top Migration Priorities', heading: HeadingLevel.HEADING_1 }),
     ...(r.priorities.length ? r.priorities.map(p => new Paragraph({ children: [new TextRun({ text: `P${p.rank} [${p.severity.toUpperCase()}] ${p.title}`, bold: true }), new TextRun({ text: ` — ${p.rationale}` })] })) : [new Paragraph('No quantum-vulnerable assets identified.')]),
     new Paragraph({ text: 'Remediation Recommendations', heading: HeadingLevel.HEADING_1 }),
@@ -231,6 +254,12 @@ th{background:#f1f5f9;color:var(--navy)}
 <div class="kpi"><div class="n">${r.totals.avgRisk}/100</div><div class="l">Avg risk</div></div>
 </div>
 <div class="verdict ${r.mosca.verdict === 'ON TRACK' ? 'ok' : 'warn'}">Mosca verdict (X + Y &gt; Z): ${esc(r.mosca.verdict)}<div class="d">${esc(r.mosca.detail)}</div></div>
+
+${r.purposeBreakdown?.length ? `<h2>Cryptographic Purpose Breakdown</h2>
+<p style="color:var(--slate);font-size:13px;margin:4px 0 8px">What the quantum-vulnerable crypto is <em>used for</em> — key establishment is an immediate Harvest-Now-Decrypt-Later concern; signatures and trust anchors are a planned forgery concern that activates once a CRQC exists.</p>
+<table><thead><tr><th>Purpose</th><th>Vulnerable</th><th>Threat urgency</th><th>NIST target</th></tr></thead><tbody>
+${r.purposeBreakdown.map(p => `<tr><td><strong>${esc(p.label)}</strong></td><td>${p.count}</td><td>${esc(p.urgencyLabel)}</td><td>${esc(p.standard)}</td></tr>`).join('')}
+</tbody></table>` : ''}
 
 <h2>Top Migration Priorities</h2>
 ${r.priorities.length ? r.priorities.map(p => `<div class="pri ${p.severity}"><div class="t"><span class="sev">${esc(p.severity)}</span>P${p.rank} · ${esc(p.title)}</div><div class="r">${esc(p.rationale)}</div></div>`).join('') : '<p>No quantum-vulnerable assets identified.</p>'}

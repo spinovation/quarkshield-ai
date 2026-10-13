@@ -25,7 +25,40 @@ export interface Priority {
   exposure: string;         // human-readable dominant exposure
   score: number;
   rationale: string;
+  purpose?: string;         // dominant CryptoPurpose for this algorithm group (CBOM purpose, P1)
+  purposeLabel?: string;    // human label for the dominant purpose
 }
+
+/** Threat urgency a cryptographic PURPOSE implies (decouples HNDL from forgery). */
+export type PurposeUrgency = 'immediate_hndl' | 'forgery_planned' | 'hardening' | 'review';
+
+export interface PurposeBreakdown {
+  purpose: string;          // raw CryptoPurpose value (key_establishment, tls_certificate, ...)
+  label: string;
+  count: number;            // vulnerable assets with this purpose
+  urgency: PurposeUrgency;
+  urgencyLabel: string;
+  standard: string;         // dominant NIST target for this purpose
+}
+
+// Purpose → urgency/label/standard. Mirrors the HNDL-vs-forgery split in
+// docs/PQC_FUNCTIONAL_ANALYSIS_AND_REMEDIATION.md: key establishment is an
+// IMMEDIATE Harvest-Now-Decrypt-Later concern; signatures/trust are a PLANNED
+// forgery concern that only activates once a CRQC exists.
+const PURPOSE_META: Record<string, { label: string; urgency: PurposeUrgency; urgencyLabel: string; standard: string }> = {
+  key_establishment:    { label: 'Key establishment',   urgency: 'immediate_hndl',  urgencyLabel: 'Immediate — Harvest-Now-Decrypt-Later', standard: 'FIPS 203 (ML-KEM)' },
+  rsa_key_transport:    { label: 'RSA key transport',    urgency: 'immediate_hndl',  urgencyLabel: 'Immediate — Harvest-Now-Decrypt-Later', standard: 'FIPS 203 (ML-KEM)' },
+  tls_certificate:      { label: 'TLS certificate',      urgency: 'forgery_planned', urgencyLabel: 'Planned — signature forgery risk',      standard: 'FIPS 204 (ML-DSA)' },
+  code_or_data_signing: { label: 'Code / data signing',  urgency: 'forgery_planned', urgencyLabel: 'Planned — signature forgery risk',      standard: 'FIPS 204 / 205' },
+  ca_trust_anchor:      { label: 'CA trust anchor',      urgency: 'forgery_planned', urgencyLabel: 'Planned — signature forgery risk',      standard: 'FIPS 204 (ML-DSA)' },
+  ssh_authentication:   { label: 'SSH authentication',   urgency: 'forgery_planned', urgencyLabel: 'Planned — signature forgery risk',      standard: 'FIPS 204 (ML-DSA)' },
+  symmetric:            { label: 'Symmetric encryption', urgency: 'hardening',       urgencyLabel: 'Hardening — ensure AES-256',            standard: 'CNSA 2.0' },
+  configuration:        { label: 'Crypto configuration', urgency: 'hardening',       urgencyLabel: 'Hardening — disable legacy ciphers',    standard: 'CNSA 2.0' },
+  unknown:              { label: 'Unclassified',         urgency: 'review',          urgencyLabel: 'Review — purpose not yet classified',   standard: '—' },
+};
+const URGENCY_RANK: Record<PurposeUrgency, number> = { immediate_hndl: 0, forgery_planned: 1, hardening: 2, review: 3 };
+/** Resolve purpose metadata, defaulting unknown/legacy (NULL purpose) rows safely. */
+export const purposeMeta = (purpose?: string | null) => PURPOSE_META[(purpose || 'unknown')] || PURPOSE_META.unknown;
 
 export interface Remediation {
   finding: string;          // classical primitive / config
@@ -62,6 +95,7 @@ export interface RoadmapReport {
   priorities: Priority[];
   remediation: Remediation[];
   roadmap: RoadmapPhase[];
+  purposeBreakdown: PurposeBreakdown[];  // vulnerable assets grouped by crypto purpose (P1)
   perTenant: TenantBreakdown[];   // populated for collective
   summary: string;                // narrative (AI or templated)
 }
@@ -140,9 +174,16 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     `SELECT COALESCE(algorithm,'Unknown') AS algorithm,
             COUNT(*)::int AS count,
             MODE() WITHIN GROUP (ORDER BY COALESCE(source,'endpoint')) AS dominant_source,
+            MODE() WITHIN GROUP (ORDER BY COALESCE(NULLIF(purpose,''),'unknown')) AS dominant_purpose,
             (ARRAY_AGG(DISTINCT COALESCE(risk_level,'high')))::text[] AS risks
      FROM assets ${where}${where ? ' AND' : 'WHERE'} is_vulnerable
      GROUP BY algorithm ORDER BY count DESC LIMIT 40`, params);
+
+  // Vulnerable assets grouped by crypto PURPOSE (P1 — "what is my crypto used FOR").
+  const purposeQ = await pool.query(
+    `SELECT COALESCE(NULLIF(purpose,''),'unknown') AS purpose, COUNT(*)::int AS count
+     FROM assets ${where}${where ? ' AND' : 'WHERE'} is_vulnerable
+     GROUP BY 1`, params);
 
   // Remediation families present (vulnerable).
   const t = totalsQ.rows[0] || {};
@@ -160,21 +201,39 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     const exposureW = EXPOSURE_WEIGHT[src] ?? 1.0;
     const shorBreakable = ['RSA', 'ECDSA', 'ECDH', 'ECC', 'DH'].includes(fam);
     const shorMult = shorBreakable ? 1.25 : 1.0;
-    const score = Math.round(r.count * severityRank(sev) * exposureW * shorMult);
-    return { algorithm: r.algorithm, fam, count: r.count, sev, src, score, shorBreakable };
+    const purpose = r.dominant_purpose || 'unknown';
+    // HNDL purposes (key establishment / RSA key transport) are harvestable TODAY,
+    // so they outrank an equally-breakable signing key of the same algorithm.
+    const hndlMult = purposeMeta(purpose).urgency === 'immediate_hndl' ? 1.15 : 1.0;
+    const score = Math.round(r.count * severityRank(sev) * exposureW * shorMult * hndlMult);
+    return { algorithm: r.algorithm, fam, count: r.count, sev, src, score, shorBreakable, purpose };
   }).filter(x => x.fam !== 'PQC' && x.fam !== 'AES'); // exclude already-safe primitives
 
   scored.sort((a, b) => b.score - a.score);
-  const priorities: Priority[] = scored.slice(0, 8).map((x, i) => ({
-    rank: i + 1,
-    title: x.algorithm,
-    algorithm: x.algorithm,
-    count: x.count,
-    severity: (['critical', 'high', 'medium', 'low'].includes(x.sev.toLowerCase()) ? x.sev.toLowerCase() : 'high') as Priority['severity'],
-    exposure: SOURCE_LABEL[x.src] || 'assets',
-    score: x.score,
-    rationale: `${x.count} ${x.algorithm} asset${x.count === 1 ? '' : 's'} on ${SOURCE_LABEL[x.src] || 'assets'}${x.shorBreakable ? ', breakable by Shor’s algorithm on a CRQC (Harvest-Now-Decrypt-Later risk today)' : ''}.`,
-  }));
+  const priorities: Priority[] = scored.slice(0, 8).map((x, i) => {
+    const meta = purposeMeta(x.purpose);
+    const purposeNote = x.purpose && x.purpose !== 'unknown' ? ` Purpose: ${meta.label.toLowerCase()} (${meta.urgencyLabel}).` : '';
+    return {
+      rank: i + 1,
+      title: x.algorithm,
+      algorithm: x.algorithm,
+      count: x.count,
+      severity: (['critical', 'high', 'medium', 'low'].includes(x.sev.toLowerCase()) ? x.sev.toLowerCase() : 'high') as Priority['severity'],
+      exposure: SOURCE_LABEL[x.src] || 'assets',
+      score: x.score,
+      rationale: `${x.count} ${x.algorithm} asset${x.count === 1 ? '' : 's'} on ${SOURCE_LABEL[x.src] || 'assets'}${x.shorBreakable ? ', breakable by Shor’s algorithm on a CRQC (Harvest-Now-Decrypt-Later risk today)' : ''}.${purposeNote}`,
+      purpose: x.purpose,
+      purposeLabel: meta.label,
+    };
+  });
+
+  // ---- Purpose breakdown (vulnerable), ordered immediate-HNDL first ----
+  const purposeBreakdown: PurposeBreakdown[] = purposeQ.rows
+    .map((r: any) => {
+      const meta = purposeMeta(r.purpose);
+      return { purpose: r.purpose, label: meta.label, count: r.count, urgency: meta.urgency, urgencyLabel: meta.urgencyLabel, standard: meta.standard };
+    })
+    .sort((a, b) => URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency] || b.count - a.count);
 
   // ---- Remediation (families actually present) ----
   const famsPresent = Array.from(new Set(scored.map(x => x.fam)));
@@ -234,6 +293,7 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     priorities,
     remediation,
     roadmap,
+    purposeBreakdown,
     perTenant,
     summary: '', // filled by generateNarrative()
   };
@@ -245,7 +305,10 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
  * has a professional summary even offline / without keys. Never invents numbers.
  */
 export const generateNarrative = async (r: RoadmapReport, tenant?: string): Promise<string> => {
-  const facts = `Scope: ${r.scopeLabel}. Assets: ${r.totals.assets}. Quantum-vulnerable: ${r.totals.vulnerable} (${r.totals.vulnPct}%). Endpoints: ${r.totals.machines}. Avg risk: ${r.totals.avgRisk}/100. Top priorities: ${r.priorities.slice(0, 3).map(p => p.title).join(', ') || 'none'}. Mosca verdict: ${r.mosca.verdict}.`;
+  const hndl = r.purposeBreakdown.filter(p => p.urgency === 'immediate_hndl').reduce((n, p) => n + p.count, 0);
+  const sig = r.purposeBreakdown.filter(p => p.urgency === 'forgery_planned').reduce((n, p) => n + p.count, 0);
+  const purposeFact = r.purposeBreakdown.length ? ` By purpose: ${hndl} key-establishment (immediate HNDL), ${sig} signature/trust (planned forgery risk).` : '';
+  const facts = `Scope: ${r.scopeLabel}. Assets: ${r.totals.assets}. Quantum-vulnerable: ${r.totals.vulnerable} (${r.totals.vulnPct}%). Endpoints: ${r.totals.machines}. Avg risk: ${r.totals.avgRisk}/100. Top priorities: ${r.priorities.slice(0, 3).map(p => p.title).join(', ') || 'none'}. Mosca verdict: ${r.mosca.verdict}.${purposeFact}`;
   const template =
     `${r.scopeLabel} has ${r.totals.assets} catalogued cryptographic assets, of which ${r.totals.vulnerable} (${r.totals.vulnPct}%) are quantum-vulnerable classical primitives exposed to Harvest-Now-Decrypt-Later attacks. ` +
     `The highest-priority exposures are ${r.priorities.slice(0, 3).map(p => p.title).join(', ') || 'being assessed'}. ` +
