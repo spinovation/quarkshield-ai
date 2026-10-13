@@ -131,6 +131,7 @@ interface ClientInfo {
   status: 'active' | 'offline' | 'pending_licensing';
   subscriptionTier?: string;
   mcaLimit?: number;
+  planAddons?: string[];
   userCount?: number;
   assetCount?: number;
   contactName?: string;
@@ -447,6 +448,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [licenseFilter, setLicenseFilter] = useState('');
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null);
+  const [togglingAddonOrg, setTogglingAddonOrg] = useState<string | null>(null);
   const [emailSendingKey, setEmailSendingKey] = useState<string | null>(null);
   const [emailSuccessMsg, setEmailSuccessMsg] = useState<string | null>(null);
   const [expandedLicenseOrgs, setExpandedLicenseOrgs] = useState<Record<string, boolean>>({});
@@ -917,21 +920,100 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   };
 
   const handleRevokeLicense = async (id: string, key: string) => {
-    if (!window.confirm(`Are you sure you want to revoke license key ${key}? Endpoints using this key will immediately lose central fleet authorization.`)) {
-      return;
-    }
+    // Build a confirmation that warns loudly when the key is still inside its paid term —
+    // revoking early is the "did I make a mistake?" case the operator asked us to guard.
+    const lic = licenses.find(l => l.id === id || l.licenseKey === key);
+    const exp = lic?.expiresAt ? new Date(lic.expiresAt) : null;
+    const stillValid = !!(exp && exp.getTime() > Date.now());
+    const org = lic?.tenantName ? ` for ${lic.tenantName}` : '';
+    const warn = stillValid
+      ? `⚠️ This license${org} is still VALID until ${exp!.toLocaleDateString()}.\n\n`
+      : '';
+    const msg =
+      `${warn}Revoke license key ${key}?\n\n` +
+      `• Endpoints using this key immediately lose central fleet authorization.\n` +
+      `• The tenant admin will be emailed about the revocation.\n` +
+      `• This can be undone later with Reactivate.`;
+    if (!window.confirm(msg)) return;
     setRevokingId(id);
     try {
       const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
-      await fetch(`/api/admin/licenses/${id}`, {
+      const res = await fetch(`/api/admin/licenses/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       });
       setLicenses(prev => prev.map(l => (l.id === id || l.licenseKey === key) ? { ...l, status: 'revoked' } : l));
+      try {
+        const data = await res.json();
+        if (data?.success && data.emailed === false && data.tenant) {
+          console.warn(`License revoked but tenant notification not sent: ${data.emailError || 'no contact email'}`);
+        }
+      } catch { /* ignore body parse */ }
     } catch (err) {
       setLicenses(prev => prev.map(l => (l.id === id || l.licenseKey === key) ? { ...l, status: 'revoked' } : l));
     } finally {
       setRevokingId(null);
+    }
+  };
+
+  const handleReactivateLicense = async (id: string, key: string) => {
+    const lic = licenses.find(l => l.id === id || l.licenseKey === key);
+    const org = lic?.tenantName ? ` for ${lic.tenantName}` : '';
+    if (!window.confirm(
+      `Reactivate license key ${key}${org}?\n\n` +
+      `• Enrolled endpoints regain central fleet authorization.\n` +
+      `• If the key is past its expiry, it is extended by its original term from today.\n` +
+      `• The tenant admin will be emailed.`
+    )) return;
+    setReactivatingId(id);
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch(`/api/admin/licenses/${id}/reactivate`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        setLicenses(prev => prev.map(l => (l.id === id || l.licenseKey === key)
+          ? { ...l, status: 'active', ...(data.expiresAt ? { expiresAt: data.expiresAt } : {}) }
+          : l));
+      } else {
+        alert(data?.error || 'Failed to reactivate license.');
+      }
+    } catch (err: any) {
+      alert(`Reactivate failed: ${err?.message || 'server unavailable'}`);
+    } finally {
+      setReactivatingId(null);
+    }
+  };
+
+  // Enable/disable the Risk Assurance add-on (Threat & Risk Graph) for a tenant.
+  const handleToggleThreatModel = async (orgName: string, enable: boolean) => {
+    setTogglingAddonOrg(orgName.toUpperCase());
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch(`/api/admin/clients/${encodeURIComponent(orgName)}/addons`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addon: 'risk_assurance', enabled: enable })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        const addons: string[] = (data.addons || []).map((a: string) => String(a).toLowerCase());
+        setClients(prev => prev.map(c =>
+          (c.name.toLowerCase() === orgName.toLowerCase()
+            || c.name.replace(/-/g, '').toLowerCase() === orgName.replace(/-/g, '').toLowerCase())
+            ? { ...c, planAddons: addons }
+            : c));
+      } else if (res.status === 409) {
+        alert(data?.error || 'Risk Assurance can only be enabled for Enterprise-class tenants. Activate an Enterprise/Corporate license for this tenant first.');
+      } else {
+        alert(data?.error || 'Failed to update Threat Model add-on.');
+      }
+    } catch (err: any) {
+      alert(`Could not update add-on: ${err?.message || 'server unavailable'}`);
+    } finally {
+      setTogglingAddonOrg(null);
     }
   };
 
@@ -4646,6 +4728,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                     <th style={{ padding: '0.75rem' }}>Sub-Licenses</th>
                     <th style={{ padding: '0.75rem' }}>Total Seats</th>
                     <th style={{ padding: '0.75rem' }}>Status</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'center' }}>Threat Model</th>
                     <th style={{ padding: '0.75rem', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
@@ -4653,6 +4736,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                   {filteredLicenseGroups.map(group => {
                     const isExpanded = (licenseFilter && licenseFilter.trim().length > 1) || !!expandedLicenseOrgs[group.orgKey];
                     const isCorp = group.tier === 'corporate' || group.tier === 'corp';
+
+                    // Threat & Risk Graph (Risk Assurance add-on) state for this org.
+                    const orgClient = clients.find(c =>
+                      c.name.toLowerCase() === (group.tenantName || '').toLowerCase()
+                      || c.name.replace(/-/g, '').toLowerCase() === (group.tenantName || '').replace(/-/g, '').toLowerCase());
+                    const tmEnabled = (orgClient?.planAddons || []).map(a => String(a).toLowerCase()).includes('risk_assurance');
+                    const enterpriseClass = ['enterprise', 'corporate', 'corp', 'partner'];
+                    const tmEligible = enterpriseClass.includes(String(group.tier || '').toLowerCase())
+                      || enterpriseClass.includes(String(orgClient?.subscriptionTier || '').toLowerCase());
+                    const tmBusy = togglingAddonOrg === group.orgKey;
 
                     return (
                       <React.Fragment key={group.orgKey}>
@@ -4766,13 +4859,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                               <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem' }}>
                                 <span style={{
                                   fontWeight: 700,
-                                  color: group.usedSeats > 0 ? '#38bdf8' : 'var(--text-primary)',
+                                  color: group.totalSeats === 0 ? 'var(--text-muted)' : (group.usedSeats > 0 ? '#38bdf8' : 'var(--text-primary)'),
                                   fontSize: '0.88rem'
                                 }}>
-                                  {group.usedSeats} / {group.totalSeats.toLocaleString()}
+                                  {group.usedSeats} / {group.totalSeats > 0 ? group.totalSeats.toLocaleString() : '—'}
                                 </span>
                                 <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                  Seats Used ({Math.round((group.usedSeats / Math.max(1, group.totalSeats)) * 100)}%)
+                                  {group.totalSeats > 0
+                                    ? `Seats Used (${Math.round((group.usedSeats / group.totalSeats) * 100)}%)`
+                                    : 'No active capacity'}
                                 </span>
                               </div>
                               {group.usedSeats > 0 ? (
@@ -4845,6 +4940,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                               </span>
                             )}
                           </td>
+                          <td style={{ padding: '0.75rem', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (tmBusy) return;
+                                if (!tmEnabled && !tmEligible) {
+                                  alert('Threat & Risk Graph (Risk Assurance) is Enterprise-only. Activate an Enterprise/Corporate/Partner license for this tenant first, then enable it here.');
+                                  return;
+                                }
+                                handleToggleThreatModel(group.tenantName, !tmEnabled);
+                              }}
+                              disabled={tmBusy}
+                              title={
+                                tmEnabled
+                                  ? 'Threat & Risk Graph is ENABLED for this tenant — click to disable'
+                                  : tmEligible
+                                    ? 'Click to enable the Threat & Risk Graph (Risk Assurance) for this tenant'
+                                    : 'Enterprise-only: activate an Enterprise/Corporate/Partner license for this tenant first'
+                              }
+                              style={{
+                                background: tmEnabled ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                                border: tmEnabled ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid var(--border-normal)',
+                                color: tmEnabled ? '#4ade80' : (tmEligible ? 'var(--text-secondary)' : 'var(--text-muted)'),
+                                borderRadius: '999px',
+                                padding: '0.25rem 0.6rem',
+                                fontSize: '0.72rem',
+                                fontWeight: 600,
+                                cursor: tmBusy ? 'wait' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                opacity: (!tmEnabled && !tmEligible) ? 0.6 : 1
+                              }}
+                            >
+                              <span style={{
+                                width: '7px', height: '7px', borderRadius: '50%',
+                                background: tmEnabled ? '#4ade80' : 'var(--text-muted)'
+                              }} />
+                              {tmBusy ? '…' : tmEnabled ? 'Enabled' : 'Disabled'}
+                            </button>
+                          </td>
                           <td style={{ padding: '0.75rem', textAlign: 'right' }}>
                             <button
                               onClick={(e) => {
@@ -4883,7 +5019,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                         {/* Collapsible Sub-Licenses Child View */}
                         {isExpanded && (
                           <tr style={{ background: 'rgba(0, 0, 0, 0.3)', borderBottom: '1px solid var(--border-normal)' }}>
-                            <td colSpan={9} style={{ padding: '0.5rem 1.25rem 1.25rem 2.5rem' }}>
+                            <td colSpan={10} style={{ padding: '0.5rem 1.25rem 1.25rem 2.5rem' }}>
                               <div style={{
                                 background: 'rgba(255, 255, 255, 0.02)',
                                 border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -5071,6 +5207,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                                                     {revokingId === lic.id ? 'Revoking...' : 'Revoke'}
                                                   </button>
                                                 )}
+                                                {isRevoked && (
+                                                  <button
+                                                    onClick={(e) => {
+                                                      e.stopPropagation();
+                                                      handleReactivateLicense(lic.id, lic.licenseKey);
+                                                    }}
+                                                    disabled={reactivatingId === lic.id}
+                                                    title="Reactivate (un-revoke) this license and notify the tenant admin"
+                                                    style={{
+                                                      background: 'rgba(34, 197, 94, 0.12)',
+                                                      border: '1px solid rgba(34, 197, 94, 0.4)',
+                                                      color: '#4ade80',
+                                                      borderRadius: '4px',
+                                                      padding: '0.25rem 0.55rem',
+                                                      fontSize: '0.72rem',
+                                                      cursor: 'pointer',
+                                                      display: 'inline-flex',
+                                                      alignItems: 'center',
+                                                      gap: '0.25rem'
+                                                    }}
+                                                  >
+                                                    <RefreshCw size={11} />
+                                                    {reactivatingId === lic.id ? 'Reactivating...' : 'Reactivate'}
+                                                  </button>
+                                                )}
                                               </div>
                                             </td>
                                           </tr>
@@ -5112,7 +5273,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                                           <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
-                                            <span>Seat Utilization: <strong style={{ color: group.usedSeats > 0 ? '#38bdf8' : 'var(--text-secondary)' }}>{group.usedSeats} / {group.totalSeats} ({Math.round((group.usedSeats / Math.max(1, group.totalSeats)) * 100)}%)</strong></span>
+                                            <span>Seat Utilization: <strong style={{ color: group.usedSeats > 0 ? '#38bdf8' : 'var(--text-secondary)' }}>{group.usedSeats} / {group.totalSeats > 0 ? group.totalSeats : '—'} {group.totalSeats > 0 ? `(${Math.round((group.usedSeats / group.totalSeats) * 100)}%)` : '(no active capacity)'}</strong></span>
                                             {group.macCount > 0 && <span style={{ color: '#38bdf8' }}>• {group.macCount} macOS</span>}
                                             {group.winCount > 0 && <span style={{ color: '#c084fc' }}>• {group.winCount} Windows</span>}
                                             {group.linuxCount > 0 && <span style={{ color: '#4ade80' }}>• {group.linuxCount} Linux</span>}
