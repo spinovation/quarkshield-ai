@@ -9,6 +9,7 @@ import { PURPOSE_LABELS } from '../lib/threatGraph/cryptoPurpose';
 import { FRAMEWORKS, CONTROL_TITLES } from '../lib/threatGraph/controlMap';
 import { RemediationStatus, CryptoNode, TrAsset, TrRelationship } from '../lib/threatGraph/types';
 import { cryptoBlastRadius } from '../lib/threatGraph/blastRadius';
+import { assessSizeImpact } from '../lib/threatGraph/sizeImpact';
 
 /**
  * Threat & Risk Graph API (Risk Assurance plan). Four MVP screens: Overview, Graph,
@@ -464,6 +465,23 @@ export const getCryptoBlastRadius = withTenant(async (req, res, tenant, key) => 
     (await pool.query(`SELECT data FROM tr_assets WHERE tenant_key = $1`, [key])).rows.map((r: any) => [r.data.id, r.data]));
   const relationships = (await pool.query(`SELECT data FROM tr_relationships WHERE tenant_key = $1`, [key])).rows.map((r: any) => r.data as TrRelationship);
   res.json(cryptoBlastRadius(c, assetsById, relationships));
+});
+
+/**
+ * Crypto size-impact (dependency-map P2): "will the PQC replacement physically FIT
+ * the systems that depend on this key?" Deterministic — exact NIST object sizes
+ * vs nominal system limits; findings are conditional on how the key is hosted.
+ */
+export const getCryptoSizeImpact = withTenant(async (req, res, tenant, key) => {
+  await ensureBuilt(tenant, key);
+  const c = (await pool.query(
+    `SELECT data FROM tr_nodes WHERE tenant_key = $1 AND node_type = 'crypto' AND id = $2`, [key, req.params.id])).rows[0]?.data as CryptoNode | undefined;
+  if (!c) { res.status(404).json({ error: 'Crypto finding not found in the Risk Graph' }); return; }
+  const target = typeof req.query.target === 'string' ? req.query.target : undefined;
+  res.json({
+    crypto_id: c.id, name: c.name, purpose: c.purpose,
+    ...assessSizeImpact({ algorithm: c.algorithm, key_size: c.key_size, purpose: c.purpose, pqc_target: target }),
+  });
 });
 
 // ---------------------------------------------------------------------------

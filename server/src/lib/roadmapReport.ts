@@ -57,6 +57,15 @@ const PURPOSE_META: Record<string, { label: string; urgency: PurposeUrgency; urg
   unknown:              { label: 'Unclassified',         urgency: 'review',          urgencyLabel: 'Review — purpose not yet classified',   standard: '—' },
 };
 const URGENCY_RANK: Record<PurposeUrgency, number> = { immediate_hndl: 0, forgery_planned: 1, hardening: 2, review: 3 };
+
+/** PQC size-impact ("what breaks") summary across the inventory (P2). */
+export interface MigrationFriction {
+  signingAssets: number;       // assets whose signatures grow (cert/code/CA/SSH)
+  kexAssets: number;           // assets whose key exchange grows (key establishment / RSA transport)
+  firmwareOrRootAssets: number;// code-signing + CA trust-anchor — the fixed-slot risk
+  headline: string;
+  detail: string;
+}
 /** Resolve purpose metadata, defaulting unknown/legacy (NULL purpose) rows safely. */
 export const purposeMeta = (purpose?: string | null) => PURPOSE_META[(purpose || 'unknown')] || PURPOSE_META.unknown;
 
@@ -96,6 +105,7 @@ export interface RoadmapReport {
   remediation: Remediation[];
   roadmap: RoadmapPhase[];
   purposeBreakdown: PurposeBreakdown[];  // vulnerable assets grouped by crypto purpose (P1)
+  migrationFriction: MigrationFriction;  // PQC size-impact ("what breaks") summary (P2)
   perTenant: TenantBreakdown[];   // populated for collective
   summary: string;                // narrative (AI or templated)
 }
@@ -235,6 +245,26 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     })
     .sort((a, b) => URGENCY_RANK[a.urgency] - URGENCY_RANK[b.urgency] || b.count - a.count);
 
+  // ---- Migration friction / "what breaks" size impact (P2) ----
+  const pCount = (ps: string[]) => purposeBreakdown.filter(p => ps.includes(p.purpose)).reduce((n, p) => n + p.count, 0);
+  const signingAssets = pCount(['tls_certificate', 'code_or_data_signing', 'ca_trust_anchor', 'ssh_authentication']);
+  const kexAssets = pCount(['key_establishment', 'rsa_key_transport']);
+  const firmwareOrRootAssets = pCount(['code_or_data_signing', 'ca_trust_anchor']);
+  const frictionParts: string[] = [];
+  if (signingAssets) frictionParts.push(`${signingAssets} signature-bearing asset(s) move to ML-DSA (~50× an Ed25519 / ~13× an RSA-2048 signature)`);
+  if (kexAssets) frictionParts.push(`${kexAssets} key-establishment asset(s) move to ML-KEM (~35× an X25519 key share)`);
+  const migrationFriction: MigrationFriction = {
+    signingAssets, kexAssets, firmwareOrRootAssets,
+    headline: frictionParts.length
+      ? `Post-quantum objects are far larger: ${frictionParts.join('; ')}.`
+      : 'No size-sensitive classical crypto detected.',
+    detail: firmwareOrRootAssets
+      ? `${firmwareOrRootAssets} code-signing / root-of-trust key(s) are the hardest: SLH-DSA firmware signatures are ≈7.9 KB, so systems with fixed secure-boot signature slots or smartcard/HSM storage may need header re-layout or hardware changes — not a config switch. Larger ML-KEM/ML-DSA objects can also stress TLS cert chains, QUIC anti-amplification and IKEv2/MTU fragmentation on constrained paths.`
+      : (signingAssets || kexAssets)
+        ? 'Larger ML-KEM/ML-DSA objects can stress TLS certificate chains, QUIC anti-amplification limits and IKEv2/MTU fragmentation on constrained paths; verify per-system before rollout.'
+        : 'No material size-impact risk identified from the current inventory.',
+  };
+
   // ---- Remediation (families actually present) ----
   const famsPresent = Array.from(new Set(scored.map(x => x.fam)));
   const remediation: Remediation[] = famsPresent
@@ -256,8 +286,12 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
   ];
 
   // ---- Mosca verdict ----
+  // Migration time (Y) is longer than a config change when firmware/root keys are in scope.
+  const frictionClause = vulnPct > 0 && firmwareOrRootAssets
+    ? ` Migration time (Y) is longer than it looks: ${firmwareOrRootAssets} code-signing / root-of-trust key(s) may need firmware or hardware changes to fit larger PQC signatures, not just a config switch.`
+    : '';
   const mosca = vulnPct > 0
-    ? { verdict: 'ACTION REQUIRED', detail: `With ${vulnPct}% of assets quantum-vulnerable and multi-year migration timelines, data harvested today is at risk before migration completes (X + Y > Z). Begin Phase 2 now.` }
+    ? { verdict: 'ACTION REQUIRED', detail: `With ${vulnPct}% of assets quantum-vulnerable and multi-year migration timelines, data harvested today is at risk before migration completes (X + Y > Z). Begin Phase 2 now.${frictionClause}` }
     : { verdict: 'ON TRACK', detail: 'No quantum-vulnerable assets detected in the current inventory. Maintain continuous CBOM attestation.' };
 
   // ---- Per-tenant breakdown (collective) ----
@@ -294,6 +328,7 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     remediation,
     roadmap,
     purposeBreakdown,
+    migrationFriction,
     perTenant,
     summary: '', // filled by generateNarrative()
   };

@@ -71,6 +71,14 @@ const buildPdf = (r: RoadmapReport, res: Response) => {
     doc.moveDown(0.3);
   }
 
+  // Migration size impact — "what breaks" (P2)
+  if (r.migrationFriction && (r.migrationFriction.signingAssets || r.migrationFriction.kexAssets)) {
+    h('Migration Size Impact — "What Breaks"');
+    doc.fillColor('#b91c1c').fontSize(10).text(r.migrationFriction.headline);
+    doc.fillColor(slate).fontSize(9).text(r.migrationFriction.detail, { align: 'justify' });
+    doc.moveDown(0.3);
+  }
+
   // Top priorities
   h('Top Migration Priorities');
   if (r.priorities.length === 0) doc.fillColor('#111').fontSize(10).text('No quantum-vulnerable assets identified.');
@@ -163,6 +171,11 @@ const buildDocx = async (r: RoadmapReport): Promise<Buffer> => {
           ...r.purposeBreakdown.map(p => new TableRow({ children: [cell(p.label, false, 30), cell(String(p.count), false, 15), cell(p.urgencyLabel, false, 35), cell(p.standard, false, 20)] })),
         ],
       }),
+    ] : []),
+    ...(r.migrationFriction && (r.migrationFriction.signingAssets || r.migrationFriction.kexAssets) ? [
+      new Paragraph({ text: 'Migration Size Impact — "What Breaks"', heading: HeadingLevel.HEADING_1 }),
+      new Paragraph({ children: [new TextRun({ text: r.migrationFriction.headline, bold: true })] }),
+      new Paragraph(r.migrationFriction.detail),
     ] : []),
     new Paragraph({ text: 'Top Migration Priorities', heading: HeadingLevel.HEADING_1 }),
     ...(r.priorities.length ? r.priorities.map(p => new Paragraph({ children: [new TextRun({ text: `P${p.rank} [${p.severity.toUpperCase()}] ${p.title}`, bold: true }), new TextRun({ text: ` — ${p.rationale}` })] })) : [new Paragraph('No quantum-vulnerable assets identified.')]),
@@ -260,6 +273,9 @@ ${r.purposeBreakdown?.length ? `<h2>Cryptographic Purpose Breakdown</h2>
 <table><thead><tr><th>Purpose</th><th>Vulnerable</th><th>Threat urgency</th><th>NIST target</th></tr></thead><tbody>
 ${r.purposeBreakdown.map(p => `<tr><td><strong>${esc(p.label)}</strong></td><td>${p.count}</td><td>${esc(p.urgencyLabel)}</td><td>${esc(p.standard)}</td></tr>`).join('')}
 </tbody></table>` : ''}
+
+${r.migrationFriction && (r.migrationFriction.signingAssets || r.migrationFriction.kexAssets) ? `<h2>Migration Size Impact — "What Breaks"</h2>
+<div class="verdict warn"><div>${esc(r.migrationFriction.headline)}</div><div class="d">${esc(r.migrationFriction.detail)}</div></div>` : ''}
 
 <h2>Top Migration Priorities</h2>
 ${r.priorities.length ? r.priorities.map(p => `<div class="pri ${p.severity}"><div class="t"><span class="sev">${esc(p.severity)}</span>P${p.rank} · ${esc(p.title)}</div><div class="r">${esc(p.rationale)}</div></div>`).join('') : '<p>No quantum-vulnerable assets identified.</p>'}

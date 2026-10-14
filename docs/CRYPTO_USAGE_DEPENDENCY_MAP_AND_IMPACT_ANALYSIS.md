@@ -228,7 +228,7 @@ Ingest unchanged in shape: these ride the existing `POST /api/scan/agent/ingest`
 | **P0 — Persist purpose** ✅ | Add `purpose` column; write the `CryptoPurpose` we already compute (`cryptoPurpose.ts`) into `assets`. No new collection. | — | **S** | Internal; unlocks querying by purpose |
 | **P1a — Purpose in roadmap** ✅ | Consume persisted `purpose` in `roadmapReport.ts`: purpose breakdown, HNDL-vs-forgery urgency split, HNDL-aware priority scoring, rendered in exec report. | P0 | **S** | Purpose breakdown + sharper priorities in the exec report |
 | **P1b — Blast-radius (reverse-dependency)** ✅ | Compute "what breaks if I rotate this key" over the *existing* topology edges (server-only). Dedicated `secured_by`/`chains_to` edges deferred — they need agent cert-parsing. | P0 | **M** | "What depends on this key" via API |
-| **P2 — What-Breaks engine (F3)** | Size + constraint tables, verdict logic, `tr_impact_findings`, roadmap `impact` field + Mosca friction, UI blockers tile. | P1 | **M** | The headline differentiator |
+| **P2 — What-Breaks engine (F3)** ✅ | Size + constraint tables, verdict logic, per-finding API, roadmap migration-friction + Mosca friction, exec-report section. (`tr_impact_findings` persistence + UI blockers tile deferred.) | P1 | **M** | The headline differentiator |
 | **P3 — Lifecycle (F2)** | `key_fingerprint` correlation, keystore/trust-store agent scan (§7.2), `key_stored_in`/`key_generated_by`, lifecycle roles. | P1, agent work | **L** | generated/stored/trusted map |
 | **P4 — Portability** | CycloneDX `dependencies` + impact extension; CI gate can fail on new `blocker` impacts. | P2 | **S–M** | Standards-aligned export |
 
@@ -265,7 +265,18 @@ The reverse-dependency question — *"what breaks if I rotate/replace this key o
 - **Deferred (needs agent work, out of this server-only slice):** SAN/issuer-keyed edges, and the Risk-Graph UI blast-radius panel (the API is ready for it).
 - **Tests:** `server/test/blastRadius.test.ts` (7, DB-free) — all pass; `npx tsc --noEmit` clean.
 
-**Recommended next slice:** P0 → P2 on the *signing/firmware* path only (the most visceral "it literally won't fit" story), then broaden. P2 can demo on `firmware_slot` + `cert_chain` constraints with measured chain sizes from P1 — a compelling PoC with modest agent work.
+### 8.4 P2 — "what-breaks" size-impact engine, implemented 2026-10-13
+
+The headline differentiator is implemented as a deterministic engine (server-only).
+
+- **Pure engine** `server/src/lib/threatGraph/sizeImpact.ts` — `assessSizeImpact({algorithm, key_size, purpose, pqc_target?})`. Exact NIST FIPS 203/204/205 object sizes (ML-DSA-65 sig 3,309 B; SLH-DSA-128s 7,856 B; ML-KEM-768 ek+ct 2,272 B; vs Ed25519 64 B / X25519 32 B). Picks signature-vs-KEX bytes by purpose, chooses a default PQC target by purpose (`pqcTargetFor`), and tests the resulting size against nominal system limits: `firmware_slot`, `smartcard_apdu`, `cert_chain`, `quic_amp`, `mtu_frag`. Verdict `breaks`/`tight`/`ok`; severity `blocker` (categorical fixed-slot overflow) / `degraded` / `advisory`.
+- **HONESTY CONTRACT (critical).** Object sizes are exact; **system limits are NOMINAL** and every finding is **conditional** ("applies if this key signs firmware… / is on a smartcard… / serves QUIC…"), because QuarkShield does not yet collect per-device slot sizes, smartcard capability, or path MTU. The engine says so in its `note`, and symmetric/configuration findings correctly return no size migration.
+- **API** `GET /threat-graph/crypto/:id/size-impact?target=<algo>` (`getCryptoSizeImpact`, `risk_assurance`-gated) — pairs with the P1b blast-radius endpoint.
+- **Roadmap integration.** `RoadmapReport.migrationFriction` (counts of signing / key-establishment / firmware-or-root assets + a headline and detail) is computed from the purpose breakdown, folded into the **Mosca** detail ("migration time Y is longer than it looks…"), and rendered as a **"Migration Size Impact — What Breaks"** section in all three exec-report formats.
+- **Deferred (noted, not built):** persisting per-consumer `tr_impact_findings` (needs the blast-radius × size-impact cross-join wired into the graph build), and the UI blockers tile.
+- **Tests:** `server/test/sizeImpact.test.ts` (9, DB-free) — all pass; `npx tsc --noEmit` clean.
+
+**Recommended next slice:** P3 (key lifecycle generated/stored/trusted via agent keystore scan) once agent work is in scope (the most visceral "it literally won't fit" story), then broaden. P2 can demo on `firmware_slot` + `cert_chain` constraints with measured chain sizes from P1 — a compelling PoC with modest agent work.
 
 ---
 

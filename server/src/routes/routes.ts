@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth, requireSuperAdmin, requirePlatformAdmin, requireTenantAccess, requireTenantAdmin, requireIntegrationsEntitlement, requireRiskAssuranceEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole, safeEqual, RISK_ASSURANCE_ADDON } from '../middleware/auth';
 import {
-  getThreatOverview, getThreatGraph, getRelationshipEvidence, getCryptoBlastRadius, listThreatScenarios, getThreatScenario,
+  getThreatOverview, getThreatGraph, getRelationshipEvidence, getCryptoBlastRadius, getCryptoSizeImpact, listThreatScenarios, getThreatScenario,
   listRiskAssets, getAssetRiskDetail, updateRemediation, overrideAssetContext, rebuildThreatGraph,
   listRebuildRuns, getThreatGraphCatalog, scheduleRebuild, getThreatIntelStatus, syncThreatIntelNow,
 } from '../controllers/threatGraphController';
@@ -352,6 +352,7 @@ router.get('/threat-graph/overview', ...tg, getThreatOverview);
 router.get('/threat-graph/graph', ...tg, getThreatGraph);
 router.get('/threat-graph/relationships/:id', ...tg, getRelationshipEvidence);
 router.get('/threat-graph/crypto/:id/blast-radius', ...tg, getCryptoBlastRadius);
+router.get('/threat-graph/crypto/:id/size-impact', ...tg, getCryptoSizeImpact);
 router.get('/threat-graph/scenarios', ...tg, listThreatScenarios);
 router.get('/threat-graph/scenarios/:id', ...tg, getThreatScenario);
 router.get('/threat-graph/assets', ...tg, listRiskAssets);
