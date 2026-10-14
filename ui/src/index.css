@@ -1802,6 +1802,11 @@ section.band { padding-block: 46px; border-top: 1px solid var(--line-soft); }
 .partner-strip .ps-tier { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--cyan); }
 .partner-strip h3 { font-family: var(--font-display); font-weight: 700; font-size: 1.1rem; margin-top: 4px; }
 .partner-strip p { color: var(--muted); font-size: 0.88rem; margin-top: 4px; max-width: 42em; }
+.sov-block { margin-top: 44px; padding-top: 36px; border-top: 1px solid var(--line-soft); }
+.sov-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 24px; align-items: start; }
+.sov-foot { color: var(--faint); font-size: 0.82rem; margin-top: 16px; font-family: var(--font-mono); }
+@media (max-width: 1100px) { .sov-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { .sov-grid { grid-template-columns: 1fr; } }
 
 /* ---------- Downloads ---------- */
 .dl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; }
