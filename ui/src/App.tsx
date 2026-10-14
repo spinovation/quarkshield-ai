@@ -49,6 +49,7 @@ import { PqcProxyGateway } from './components/PqcProxyGateway';
 import SbomInventory from './components/SbomInventory';
 import ResetPasswordPage from './components/ResetPasswordPage';
 import { CryptographicPostureCard, calculatePostureMetrics } from './components/CryptographicPostureCard';
+import PqcRoadmapModal from './components/PqcRoadmapModal';
 
 // Threat & Risk Graph pulls in React Flow; load it only when the tab is opened.
 const ThreatRiskGraph = React.lazy(() => import('./components/ThreatRiskGraph/ThreatRiskGraph'));
@@ -244,6 +245,7 @@ export default function App() {
     host !== 'fedmitigate.com';
 
   const [isSupportMirror, setIsSupportMirror] = useState<boolean>(false);
+  const [showRoadmapModal, setShowRoadmapModal] = useState<boolean>(false);
 
   const [viewMode, setViewMode] = useState<'landing' | 'console' | 'tenant'>(() => {
     // HARD SECURITY BARRIER: On dedicated tenant subdomains (e.g. algomeld.quarkshield.ai, spinovationcorp.quarkshield.ai),
@@ -2527,28 +2529,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                       <ShieldCheck size={14} color="#c084fc" /> Export Attested (CDXA)
                     </button>
                     <button
-                      onClick={() => downloadRoadmapReport('html')}
+                      onClick={() => setShowRoadmapModal(true)}
                       className="btn-secondary"
                       style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderColor: '#34d399', color: '#34d399', background: 'rgba(16, 185, 129, 0.12)' }}
-                      title={selectedTenantFilter === 'all' ? 'Open the fleet-wide PQC Executive Roadmap Report' : `Open the PQC Executive Roadmap Report for ${selectedTenantFilter}`}
+                      title={selectedTenantFilter === 'all' ? 'View the fleet-wide PQC Executive Roadmap (purpose breakdown + what-breaks size impact)' : `View the PQC Executive Roadmap for ${selectedTenantFilter}`}
                     >
-                      <FileText size={14} /> {selectedTenantFilter === 'all' ? 'Fleet PQC Roadmap' : 'PQC Roadmap'}
-                    </button>
-                    <button
-                      onClick={() => downloadRoadmapReport('pdf')}
-                      className="btn-secondary"
-                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderColor: '#f87171', color: '#f87171', background: 'rgba(239, 68, 68, 0.1)' }}
-                      title="Download the PQC Executive Roadmap Report (PDF)"
-                    >
-                      <Download size={14} /> Roadmap PDF
-                    </button>
-                    <button
-                      onClick={() => downloadRoadmapReport('docx')}
-                      className="btn-secondary"
-                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem', borderColor: '#60a5fa', color: '#60a5fa', background: 'rgba(59, 130, 246, 0.1)' }}
-                      title="Download the PQC Executive Roadmap Report (Word / DOCX)"
-                    >
-                      <Download size={14} /> Roadmap DOCX
+                      <FileText size={14} /> View {selectedTenantFilter === 'all' ? 'Fleet ' : ''}PQC Roadmap
                     </button>
                     <button
                       onClick={emailRoadmapReport}
@@ -3771,6 +3757,14 @@ echo "✓ Linux host ${inoculationScriptModal.hostname} successfully hardened."`
               </div>
             </div>
           </div>
+        )}
+
+        {showRoadmapModal && (
+          <PqcRoadmapModal
+            tenantFilter={selectedTenantFilter}
+            onClose={() => setShowRoadmapModal(false)}
+            onDownload={(format) => downloadRoadmapReport(format)}
+          />
         )}
 
         </div>

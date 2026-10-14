@@ -210,7 +210,7 @@ const buildDocx = async (r: RoadmapReport): Promise<Buffer> => {
 
 // --------------------------------------------------------------- HTML --------
 const esc = (s: string) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string));
-const buildHtml = (r: RoadmapReport): string => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+export const buildHtml = (r: RoadmapReport): string => `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QuarkShield PQC Roadmap — ${esc(r.scopeLabel)}</title>
 <style>
 :root{--navy:#0f172a;--cyan:#0284c7;--slate:#475569;--bg:#f8fafc;--card:#fff;--line:#e2e8f0}
@@ -323,12 +323,16 @@ export const exportExecutiveReport = async (req: Request, res: Response) => {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
       return res.send(buildHtml(report));
     }
+    if (format === 'json') {
+      // In-app interactive PQC Roadmap view (purpose breakdown + size impact).
+      return res.json(report);
+    }
     if (format === 'pdf') {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `attachment; filename="quarkshield-pqc-roadmap-${safeName}.pdf"`);
       return buildPdf(report, res);
     }
-    return res.status(400).json({ error: "Unsupported format. Use 'pdf', 'docx' or 'html'." });
+    return res.status(400).json({ error: "Unsupported format. Use 'pdf', 'docx', 'html' or 'json'." });
   } catch (err: any) {
     console.error('Error generating executive roadmap report:', err);
     if (!res.headersSent) res.status(500).json({ error: 'Failed to generate report.' });
