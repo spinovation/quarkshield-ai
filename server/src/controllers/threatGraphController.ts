@@ -7,7 +7,8 @@ import { RULE_CATALOG } from '../lib/threatGraph/rules';
 import { ATTACK_TECHNIQUES, KILL_CHAIN, STRIDE_LABELS, THREAT_CATEGORY_LABELS } from '../lib/threatGraph/frameworkRef';
 import { PURPOSE_LABELS } from '../lib/threatGraph/cryptoPurpose';
 import { FRAMEWORKS, CONTROL_TITLES } from '../lib/threatGraph/controlMap';
-import { RemediationStatus } from '../lib/threatGraph/types';
+import { RemediationStatus, CryptoNode, TrAsset, TrRelationship } from '../lib/threatGraph/types';
+import { cryptoBlastRadius } from '../lib/threatGraph/blastRadius';
 
 /**
  * Threat & Risk Graph API (Risk Assurance plan). Four MVP screens: Overview, Graph,
@@ -448,6 +449,21 @@ export const getRelationshipEvidence = withTenant(async (req, res, _tenant, key)
   const rel = r.rows[0].data;
   const names = await assetNames(key, [rel.from_asset, rel.to_asset]);
   res.json({ ...rel, from_name: names[rel.from_asset]?.name, to_name: names[rel.to_asset]?.name, first_seen: r.rows[0].first_seen, last_seen: r.rows[0].last_seen });
+});
+
+/**
+ * Crypto blast-radius (dependency-map P1b): "what breaks if I rotate THIS key/cert?"
+ * Reverse-dependency view over the inferred topology — no invented relationships.
+ */
+export const getCryptoBlastRadius = withTenant(async (req, res, tenant, key) => {
+  await ensureBuilt(tenant, key);
+  const c = (await pool.query(
+    `SELECT data FROM tr_nodes WHERE tenant_key = $1 AND node_type = 'crypto' AND id = $2`, [key, req.params.id])).rows[0]?.data as CryptoNode | undefined;
+  if (!c) { res.status(404).json({ error: 'Crypto finding not found in the Risk Graph' }); return; }
+  const assetsById = new Map<string, TrAsset>(
+    (await pool.query(`SELECT data FROM tr_assets WHERE tenant_key = $1`, [key])).rows.map((r: any) => [r.data.id, r.data]));
+  const relationships = (await pool.query(`SELECT data FROM tr_relationships WHERE tenant_key = $1`, [key])).rows.map((r: any) => r.data as TrRelationship);
+  res.json(cryptoBlastRadius(c, assetsById, relationships));
 });
 
 // ---------------------------------------------------------------------------

@@ -227,7 +227,7 @@ Ingest unchanged in shape: these ride the existing `POST /api/scan/agent/ingest`
 | :--- | :--- | :--- | :--- | :--- |
 | **P0 — Persist purpose** ✅ | Add `purpose` column; write the `CryptoPurpose` we already compute (`cryptoPurpose.ts`) into `assets`. No new collection. | — | **S** | Internal; unlocks querying by purpose |
 | **P1a — Purpose in roadmap** ✅ | Consume persisted `purpose` in `roadmapReport.ts`: purpose breakdown, HNDL-vs-forgery urgency split, HNDL-aware priority scoring, rendered in exec report. | P0 | **S** | Purpose breakdown + sharper priorities in the exec report |
-| **P1b — Usage edges (F1)** | R10/R13 (`secured_by`, `chains_to`) from existing cert data + R2/R4. New `RelKind`s, graph render, AssetDetail blast-radius panel. | P0, cert-parse (§7.1) | **M** | "What depends on this key" in Risk Graph |
+| **P1b — Blast-radius (reverse-dependency)** ✅ | Compute "what breaks if I rotate this key" over the *existing* topology edges (server-only). Dedicated `secured_by`/`chains_to` edges deferred — they need agent cert-parsing. | P0 | **M** | "What depends on this key" via API |
 | **P2 — What-Breaks engine (F3)** | Size + constraint tables, verdict logic, `tr_impact_findings`, roadmap `impact` field + Mosca friction, UI blockers tile. | P1 | **M** | The headline differentiator |
 | **P3 — Lifecycle (F2)** | `key_fingerprint` correlation, keystore/trust-store agent scan (§7.2), `key_stored_in`/`key_generated_by`, lifecycle roles. | P1, agent work | **L** | generated/stored/trusted map |
 | **P4 — Portability** | CycloneDX `dependencies` + impact extension; CI gate can fail on new `blocker` impacts. | P2 | **S–M** | Standards-aligned export |
@@ -254,6 +254,16 @@ The persisted `purpose` is now consumed by the deterministic roadmap engine (`ro
 - **Narrative** now states the HNDL vs signature/trust split.
 - **Tests:** `server/test/roadmapPurpose.test.ts` (7, DB-free) — all pass. `npx tsc --noEmit` clean.
 - **Legacy-safe:** NULL `purpose` (un-rescanned rows) resolves to `unknown`/review; all queries `COALESCE` it.
+
+### 8.3 P1b — crypto blast-radius (reverse-dependency), implemented 2026-10-13
+
+The reverse-dependency question — *"what breaks if I rotate/replace this key or cert?"* — is now answerable, computed over the topology edges QuarkShield **already** infers (R1–R9). No new collection, no agent change, no invented edges.
+
+- **Pure core** `server/src/lib/threatGraph/blastRadius.ts` — `cryptoBlastRadius(crypto, assetsById, relationships)`. Walks edges out from the asset holding the finding; for each 1-hop neighbour it records the edge kind, direction, confidence, evidence, and a `relies_on_host_key` flag computed from a per-`RelKind` semantics table (e.g. a host that *serves* a client, or a CA key a client *trusts*, means the neighbour breaks on rotation; an upstream the host merely *connects_to* does not). Consumers sort first.
+- **API** `GET /threat-graph/crypto/:id/blast-radius` (`threatGraphController.getCryptoBlastRadius`) — same `requireRiskAssuranceEntitlement` gate as the rest of the graph; reads `tr_nodes`/`tr_assets`/`tr_relationships`.
+- **Honesty built into the payload.** The `note` states it is a 1-hop view from inferred topology, confidence is per-edge, and absence of edges is not proof of no dependents. It explicitly says the dedicated certificate-SAN (`secured_by`) and issuer-chain (`chains_to`) edges still require **agent cert-parsing** (§7.1) and are not yet collected — so we never overclaim.
+- **Deferred (needs agent work, out of this server-only slice):** SAN/issuer-keyed edges, and the Risk-Graph UI blast-radius panel (the API is ready for it).
+- **Tests:** `server/test/blastRadius.test.ts` (7, DB-free) — all pass; `npx tsc --noEmit` clean.
 
 **Recommended next slice:** P0 → P2 on the *signing/firmware* path only (the most visceral "it literally won't fit" story), then broaden. P2 can demo on `firmware_slot` + `cert_chain` constraints with measured chain sizes from P1 — a compelling PoC with modest agent work.
 
