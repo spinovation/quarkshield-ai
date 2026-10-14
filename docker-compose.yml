@@ -5,12 +5,13 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-postgres}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      # Required: no silent fallback to the postgres default password.
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD in .env}
       POSTGRES_DB: ${DB_DATABASE:-quarkshield_scanner}
     volumes:
       - scanner_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d quarkshield_scanner"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,7 +38,7 @@ services:
       - PORT=5050
       - NODE_ENV=production
       - DB_USER=${DB_USER:-postgres}
-      - DB_PASSWORD=${DB_PASSWORD:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:?Set DB_PASSWORD in .env}
       - DB_HOST=scanner-db
       - DB_PORT=5432
       - DB_DATABASE=${DB_DATABASE:-quarkshield_scanner}
@@ -60,9 +61,25 @@ services:
       - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
       - APP_HOST_URL=${APP_HOST_URL:-https://quarkshield.ai}
+      - SERVER_PUBLIC_URL=${SERVER_PUBLIC_URL:-}
+      - QS_CENTRAL_URL=${QS_CENTRAL_URL:-}
+      - QS_CENTRAL_SERVICE_TOKEN=${QS_CENTRAL_SERVICE_TOKEN:-}
+      - DOWNLOADS_DIR=/app/agent/binaries
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-}
+      - APP_BASE_URL=${APP_BASE_URL:-}
+      - PQCA_INBOX=${PQCA_INBOX:-}
+      - SUPPORT_INBOX=${SUPPORT_INBOX:-}
+      - RESEND_SENDER_EMAIL=${RESEND_SENDER_EMAIL:-}
+      - QS_DEMO_PKI=${QS_DEMO_PKI:-}
+      - QS_GEO_DISABLE=${QS_GEO_DISABLE:-}
     volumes:
-      - ./.env:/app/.env
+      # Origin TLS material persists across restarts (generated on first start).
+      - scanner_certs:/app/certs
+      # The whole .env is no longer mounted into the container: every variable the
+      # app needs is passed explicitly above, so a file-read bug cannot expose it.
 
 volumes:
   scanner_pg_data:
+    driver: local
+  scanner_certs:
     driver: local

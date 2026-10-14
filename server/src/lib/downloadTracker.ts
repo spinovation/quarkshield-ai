@@ -10,13 +10,11 @@ import crypto from 'crypto';
 import { Request } from 'express';
 import pool from '../config/db';
 
-export const clientIp = (req: Request): string => {
-  const cf = (req.headers['cf-connecting-ip'] as string) || '';
-  if (cf) return cf.trim();
-  const xff = (req.headers['x-forwarded-for'] as string) || '';
-  if (xff) return xff.split(',')[0].trim();
-  return (req.ip || req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
-};
+// req.ip already honours `trust proxy` (one hop = Cloudflare). Reading raw
+// cf-connecting-ip / x-forwarded-for headers let anyone reaching the origin
+// directly spoof the recorded address.
+export const clientIp = (req: Request): string =>
+  (req.ip || req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
 
 export const osFromFile = (file: string): string => {
   const f = file.toLowerCase();

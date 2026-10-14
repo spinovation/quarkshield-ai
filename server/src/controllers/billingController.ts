@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import Stripe from 'stripe';
 import crypto from 'crypto';
 import pool from '../config/db';
+import { getTenantEntitlement, isSuperRole, RISK_ASSURANCE_ADDON } from '../middleware/auth';
 
 const APP_HOST = process.env.APP_HOST_URL || 'https://quarkshield.ai';
 
@@ -49,17 +50,10 @@ export const QUARKSHIELD_PLANS: Record<string, PlanTierConfig> = {
   }
 };
 
-const getLicenseSecret = (): string => {
-  const s = process.env.LICENSE_SIGNING_SECRET;
-  if (s && s.length >= 16) return s;
-  return 'dev-insecure-license-secret-change-me';
-};
-
-const computeLicenseSig = (tier: string, tenant: string, expiryHex: string): string => {
-  const hmac = crypto.createHmac('sha256', getLicenseSecret());
-  hmac.update(`${tier}:${tenant}:${expiryHex}`);
-  return hmac.digest('hex').substring(0, 8).toUpperCase();
-};
+// Single source of truth for license signing (fails closed in production when the
+// secret is missing/weak). The previous local copy silently fell back to a public
+// dev secret, so Stripe-issued licenses were forgeable.
+import { computeLicenseSig } from './adminController';
 
 /**
  * POST /api/billing/checkout
@@ -169,10 +163,14 @@ export const getRegistrationStatus = async (req: Request, res: Response) => {
     }
 
     const reg = result.rows[0];
+    // SECURITY (H8): do NOT return the license key from this UNAUTHENTICATED endpoint —
+    // it is a bearer credential (usable to enroll machines). It is delivered to the buyer
+    // by email via the SuperAdmin license portal after onboarding. Expose only whether it
+    // has been issued so the success page can prompt the user to check their email.
     res.json({
       status: reg.status,
       clientId: reg.result_client_id,
-      licenseKey: reg.result_license_key,
+      licenseIssued: !!reg.result_license_key,
       subdomain: reg.subdomain,
       failureReason: reg.failure_reason,
       createdAt: reg.created_at
@@ -472,6 +470,104 @@ export const createCustomerPortalSession = async (req: Request, res: Response) =
   }
 };
 
+// ---------------------------------------------------------------------------
+// Risk Assurance add-on (Threat & Risk Graph + Continuous Monitoring + RMF).
+// Priced per tenant per month; available only to Enterprise-class tenants and never
+// bundled — it is a separate Stripe subscription on the tenant's customer record.
+// ---------------------------------------------------------------------------
+const RISK_ASSURANCE_PRODUCT = {
+  displayName: 'QuarkShield Risk Assurance',
+  description: 'Threat & Risk Graph, attack paths and prioritized risk, Continuous Monitoring, and NIST RMF (SP 800-53 baseline, SSP and artifact analysis). Per tenant, billed monthly.',
+};
+/** Monthly price in cents from RISK_ASSURANCE_MONTHLY_CENTS; null when not configured. */
+const riskAssuranceMonthlyCents = (): number | null => {
+  const n = Number(process.env.RISK_ASSURANCE_MONTHLY_CENTS);
+  return Number.isInteger(n) && n > 0 ? n : null;
+};
+
+const findClient = async (tenant: string) => (await pool.query(
+  `SELECT id, name, display_name, admin_email, stripe_customer_id, risk_assurance_subscription_id FROM admin_clients
+    WHERE LOWER(name) = LOWER($1) OR LOWER(REPLACE(name,'-','')) = LOWER(REPLACE($1,'-','')) OR LOWER(display_name) = LOWER($1)
+    LIMIT 1`, [tenant])).rows[0];
+
+const addonTenant = (req: Request): string =>
+  String(isSuperRole(req.user?.role) ? (req.body?.tenantName || req.query.tenant || '') : (req.user?.tenant || '')).trim();
+
+/** GET /api/billing/risk-assurance — offer state for the current tenant (drives the upgrade card). */
+export const getRiskAssuranceOffer = async (req: Request, res: Response) => {
+  const tenant = addonTenant(req);
+  if (!tenant) return res.status(400).json({ error: 'Tenant is required.' });
+  const ent = await getTenantEntitlement(tenant);
+  const cents = riskAssuranceMonthlyCents();
+  res.json({
+    active: !!ent.riskAssurance,
+    eligible: !!ent.riskAssuranceEligible,
+    tier: ent.tier,
+    monthlyAmountCents: cents,
+    purchasable: !!cents && !!ent.riskAssuranceEligible && !ent.riskAssurance,
+    product: RISK_ASSURANCE_PRODUCT,
+  });
+};
+
+/** POST /api/billing/risk-assurance/checkout — Stripe subscription checkout for the add-on. */
+export const createRiskAssuranceCheckout = async (req: Request, res: Response) => {
+  try {
+    const tenant = addonTenant(req);
+    if (!tenant) return res.status(400).json({ error: 'Tenant is required.' });
+    const ent = await getTenantEntitlement(tenant);
+    if (!ent.riskAssuranceEligible) {
+      return res.status(409).json({ error: 'Risk Assurance is available to Enterprise subscribers. Upgrade to Enterprise first.' });
+    }
+    if (ent.riskAssurance) return res.status(409).json({ error: 'Risk Assurance is already active for this tenant.' });
+    const cents = riskAssuranceMonthlyCents();
+    if (!cents) return res.status(503).json({ error: 'Risk Assurance pricing is not configured (RISK_ASSURANCE_MONTHLY_CENTS).' });
+    const client = await findClient(tenant);
+    if (!client) return res.status(404).json({ error: 'Tenant billing record not found.' });
+
+    const stripe = getStripe();
+    const meta = { product: 'quarkshield', addon: RISK_ASSURANCE_ADDON, tenant: client.name };
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          unit_amount: cents,
+          recurring: { interval: 'month' },
+          product_data: {
+            name: RISK_ASSURANCE_PRODUCT.displayName,
+            description: RISK_ASSURANCE_PRODUCT.description,
+            tax_code: 'txcd_10103001',
+            metadata: { addon: RISK_ASSURANCE_ADDON },
+          },
+        },
+        quantity: 1,
+      }],
+      ...(client.stripe_customer_id
+        ? { customer: client.stripe_customer_id }
+        : client.admin_email ? { customer_email: String(client.admin_email).toLowerCase().trim() } : {}),
+      subscription_data: { metadata: meta },
+      metadata: meta,
+      success_url: `${APP_HOST}/?addon=risk_assurance&status=success`,
+      cancel_url: `${APP_HOST}/?addon=risk_assurance&status=cancelled`,
+    });
+    res.json({ success: true, checkoutUrl: session.url, sessionId: session.id });
+  } catch (err: any) {
+    console.error('Error creating Risk Assurance checkout:', err);
+    res.status(500).json({ error: 'Could not initialize Risk Assurance checkout: ' + err.message });
+  }
+};
+
+const setRiskAssuranceAddon = async (tenant: string, enabled: boolean, subscriptionId: string | null): Promise<void> => {
+  const op = enabled
+    ? `(SELECT ARRAY(SELECT DISTINCT UNNEST(COALESCE(plan_addons, '{}') || ARRAY[$1::text])))`
+    : `ARRAY_REMOVE(COALESCE(plan_addons, '{}'), $1::text)`;
+  await pool.query(
+    `UPDATE admin_clients SET plan_addons = ${op}, risk_assurance_subscription_id = $3
+      WHERE LOWER(name) = LOWER($2)`,
+    [RISK_ASSURANCE_ADDON, tenant, subscriptionId],
+  );
+};
+
 /**
  * Internal helper to fulfill a successful checkout session:
  * Creates client, provisions cryptographic license key, and generates fleet token.
@@ -498,6 +594,18 @@ async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
     }
   }
 
+  // M2 idempotency: a Stripe webhook can be delivered/replayed more than once. If this
+  // session was already fulfilled, do NOT re-provision — otherwise each replay mints a
+  // fresh license + fleet token (duplicate credentials).
+  const dup = await pool.query(
+    "SELECT 1 FROM pending_registrations WHERE stripe_session_id = $1 AND status = 'completed' LIMIT 1",
+    [session.id]
+  );
+  if (dup.rowCount) {
+    console.log(`Stripe fulfillment skipped: session ${session.id} already completed (idempotency).`);
+    return;
+  }
+
   const companyName = meta.companyName || session.customer_details?.name || 'Enterprise Client';
   const email = (meta.email || session.customer_details?.email || '').toLowerCase().trim();
   const contactName = meta.contactName || session.customer_details?.name || 'Client Administrator';
@@ -510,6 +618,28 @@ async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
   const clientId = 'cli-' + crypto.randomUUID().substring(0, 8);
   const stripeCustId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
   const stripeSubId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
+
+  // SECURITY (H3): the tenant key `cleanSlug` is derived from attacker-controllable
+  // companyName. Refuse to fulfill a checkout that targets an EXISTING tenant owned by a
+  // different customer/email — otherwise a public checkout could overwrite that tenant's
+  // tier/seats, repoint its Stripe customer, and mint victim-scoped license/fleet tokens.
+  const existingClient = await pool.query(
+    'SELECT stripe_customer_id, admin_email FROM admin_clients WHERE name = $1',
+    [cleanSlug]
+  );
+  if (existingClient.rowCount && existingClient.rows[0]) {
+    const row = existingClient.rows[0];
+    const sameCustomer = !!stripeCustId && !!row.stripe_customer_id && row.stripe_customer_id === stripeCustId;
+    const sameEmail = !!row.admin_email && !!email && String(row.admin_email).toLowerCase() === String(email).toLowerCase();
+    if (!sameCustomer && !sameEmail) {
+      console.error(`SECURITY: blocked checkout-hijack of existing tenant '${cleanSlug}' by ${email} (stripe cust ${stripeCustId}). No provisioning performed.`);
+      await pool.query(
+        `UPDATE pending_registrations SET status = 'conflict', updated_at = CURRENT_TIMESTAMP WHERE stripe_session_id = $1 OR id = $2`,
+        [session.id, meta.registrationId || '']
+      ).catch(() => {});
+      return;
+    }
+  }
 
   // 1. Provision or update admin_clients
   await pool.query(
@@ -591,9 +721,11 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
 
   let event: Stripe.Event;
 
-  // Fail closed: in production or when a webhook secret is configured, a verified signature is mandatory.
-  // Otherwise a forged webhook could fulfill a checkout (create a tenant / mark it paid).
-  if ((process.env.NODE_ENV === 'production' || webhookSecret) && (!webhookSecret || typeof signature !== 'string')) {
+  // Fail closed by DEFAULT: a verified signature is mandatory unless NODE_ENV is
+  // EXPLICITLY development/test. (The old "not production" check failed open when
+  // NODE_ENV was simply unset — a forged webhook could then create a paid tenant.)
+  const isDevLike = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+  if (!isDevLike && (!webhookSecret || typeof signature !== 'string')) {
     console.error('Stripe webhook rejected: STRIPE_WEBHOOK_SECRET/signature required.');
     return res.status(400).send('Webhook signature verification required.');
   }
@@ -603,7 +735,7 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
     if (webhookSecret && typeof signature === 'string') {
       event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret);
     } else {
-      // Non-production only (no secret configured): parse the raw body directly.
+      // Explicit dev/test only (no secret configured): parse the raw body directly.
       const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8')
         : (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
       event = JSON.parse(raw) as Stripe.Event;
@@ -617,7 +749,16 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        if (session.metadata?.customCheckoutInviteId) {
+        if (session.metadata?.addon === RISK_ASSURANCE_ADDON && session.metadata?.tenant) {
+          const subId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id || null;
+          await setRiskAssuranceAddon(session.metadata.tenant, true, subId);
+          if (typeof session.customer === 'string') {
+            await pool.query(
+              `UPDATE admin_clients SET stripe_customer_id = COALESCE(stripe_customer_id, $1) WHERE LOWER(name) = LOWER($2)`,
+              [session.customer, session.metadata.tenant],
+            );
+          }
+        } else if (session.metadata?.customCheckoutInviteId) {
           const inviteId = session.metadata.customCheckoutInviteId;
           await pool.query(
             `UPDATE custom_checkout_invites SET status = 'paid', paid_at = CURRENT_TIMESTAMP WHERE id = $1`,
@@ -630,6 +771,13 @@ export const handleStripeWebhook = async (req: Request, res: Response) => {
       }
       case 'customer.subscription.deleted': {
         const sub = event.data.object as Stripe.Subscription;
+        // Cancelling the Risk Assurance add-on removes only the add-on, never the tenant.
+        if (sub.metadata?.addon === RISK_ASSURANCE_ADDON) {
+          const owner = await pool.query(`SELECT name FROM admin_clients WHERE risk_assurance_subscription_id = $1`, [sub.id]);
+          const tenant = owner.rows[0]?.name || sub.metadata.tenant;
+          if (tenant) await setRiskAssuranceAddon(tenant, false, null);
+          break;
+        }
         await pool.query(
           `UPDATE admin_clients SET status = 'suspended' WHERE stripe_subscription_id = $1`,
           [sub.id]

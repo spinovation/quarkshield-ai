@@ -1,6 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import pool from '../config/db';
+
+/** Constant-time string compare for shared secrets / service tokens. */
+export const safeEqual = (a: string, b: string): boolean => {
+  const ba = Buffer.from(String(a || ''));
+  const bb = Buffer.from(String(b || ''));
+  if (ba.length === 0 || ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+};
 
 /**
  * Session authentication and authorization.
@@ -18,12 +27,20 @@ export const SESSION_COOKIE = 'qs_session';
 const DEFAULT_TTL = '7d';
 const SESSION_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
+// A value is a placeholder/weak secret if it is short OR matches a known template
+// string. Length alone is insufficient: the committed .env.example placeholders are
+// 40-60 chars long and would otherwise pass, letting a server boot on a PUBLIC secret.
+const PLACEHOLDER_SECRET_RE = /replace-with|change[-_ ]?me|changeme|example|dev-insecure|your[-_]|placeholder|xxxx|secret-here|<.*>/i;
+export const isWeakSecret = (s?: string): boolean =>
+  !s || s.length < 32 || PLACEHOLDER_SECRET_RE.test(s);
+
 const getSecret = (): string => {
   const s = process.env.JWT_SECRET;
-  if (s && s.length >= 16) return s;
-  // Fail closed in production; only fall back in non-production for local runs.
+  if (!isWeakSecret(s)) return s as string;
+  // Fail closed in production: never sign/verify sessions with a weak or
+  // placeholder JWT secret (that lets anyone forge a superadmin session).
   if (process.env.NODE_ENV === 'production') {
-    throw new Error('JWT_SECRET is not set (required in production)');
+    throw new Error('JWT_SECRET is missing, too short (<32), or a placeholder — refusing to start. Set a strong random JWT_SECRET.');
   }
   return 'dev-insecure-secret-change-me';
 };
@@ -57,9 +74,110 @@ declare global {
   }
 }
 
-const SUPER_ROLES = ['superadmin', 'root_admin', 'secops_lead', 'support_engineer', 'compliance_auditor'];
+// Platform operator roles. All of them may VIEW across tenants (the fleet console);
+// only PLATFORM_ADMIN_ROLES may perform destructive/privilege-changing operations
+// (delete tenants/users, change roles, mint licenses, invite operators, change mail
+// settings, run custom checkouts). Previously every operator role was a full
+// superadmin, so a "read-only" compliance auditor could delete a tenant.
+const PLATFORM_ADMIN_ROLES = ['superadmin', 'root_admin'];
+const SUPER_ROLES = [...PLATFORM_ADMIN_ROLES, 'secops_lead', 'support_engineer', 'compliance_auditor'];
 
 export const isSuperRole = (role?: string): boolean => !!role && SUPER_ROLES.includes(role);
+export const isPlatformAdmin = (role?: string): boolean => !!role && PLATFORM_ADMIN_ROLES.includes(role);
+
+/** Require a platform ADMIN (superadmin/root_admin) — for destructive admin operations. */
+export const requirePlatformAdmin = (req: Request, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (!isPlatformAdmin(req.user.role)) {
+    res.status(403).json({ error: 'Platform administrator access required' });
+    return;
+  }
+  next();
+};
+
+// ---------------------------------------------------------------------------
+// Session revocation. JWTs are stateless, so locking/deleting a user or resetting
+// a password used to leave existing 7-day tokens valid. Every authenticated
+// request now checks the user row: it must still exist, not be locked/disabled,
+// and the token must have been issued AFTER `sessions_revoked_at`. Results are
+// cached briefly to keep this to one indexed PK lookup per user per 30s.
+// ---------------------------------------------------------------------------
+interface UserState { exists: boolean; locked: boolean; revokedAt: number }
+const USER_STATE_TTL_MS = 30 * 1000;
+const userStateCache = new Map<string, { at: number; val: UserState }>();
+
+const tableForAccount = (accountType: string): 'admin_users' | 'tenant_users' =>
+  accountType === 'tenant' ? 'tenant_users' : 'admin_users';
+
+const loadUserState = async (accountType: string, id: string): Promise<UserState> => {
+  const key = `${accountType}:${id}`;
+  const cached = userStateCache.get(key);
+  if (cached && Date.now() - cached.at < USER_STATE_TTL_MS) return cached.val;
+  const table = tableForAccount(accountType);
+  const r = table === 'admin_users'
+    ? await pool.query('SELECT row_locked AS locked, sessions_revoked_at FROM admin_users WHERE id = $1', [id])
+    : await pool.query("SELECT (status IS NOT NULL AND status <> 'active') AS locked, sessions_revoked_at FROM tenant_users WHERE id = $1", [id]);
+  const row = r.rows[0];
+  const val: UserState = row
+    ? { exists: true, locked: !!row.locked, revokedAt: row.sessions_revoked_at ? new Date(row.sessions_revoked_at).getTime() : 0 }
+    : { exists: false, locked: true, revokedAt: 0 };
+  userStateCache.set(key, { at: Date.now(), val });
+  return val;
+};
+
+/** Invalidate the cached state for a user (call after lock/delete/revoke). */
+export const forgetUserState = (accountType: 'tenant' | 'admin', id: string): void => {
+  userStateCache.delete(`${accountType === 'tenant' ? 'tenant' : 'admin'}:${id}`);
+  // admin accountType is 'superadmin' | 'operator' in tokens; clear both spellings.
+  userStateCache.delete(`superadmin:${id}`);
+  userStateCache.delete(`operator:${id}`);
+};
+
+/**
+ * Revoke every existing session for a user. Call on lock, password reset, 2FA
+ * reset, role change, and logout. Tokens issued before now are rejected.
+ */
+export const revokeUserSessions = async (table: 'admin_users' | 'tenant_users', id: string): Promise<void> => {
+  await pool.query(`UPDATE ${table} SET sessions_revoked_at = CURRENT_TIMESTAMP WHERE id = $1`, [id]).catch(() => {});
+  forgetUserState(table === 'tenant_users' ? 'tenant' : 'admin', id);
+};
+
+// Roles a TENANT user may legitimately hold. Critically this list contains NO
+// platform/super role, so a tenant-scoped write can never mint a role that
+// isSuperRole() would honour (tenant login signs this role straight into the JWT).
+const TENANT_ROLES = ['admin', 'secops', 'analyst', 'auditor', 'viewer', 'user'];
+
+/**
+ * Coerce a client-supplied role for a tenant user into a safe tenant role.
+ * Any platform/super role (or unknown value) collapses to the fallback — this is
+ * the hard stop against tenant→superadmin privilege escalation.
+ */
+export const sanitizeTenantRole = (role?: string, fallback = 'secops'): string => {
+  const r = (role || '').toLowerCase().trim();
+  if (!r) return fallback;
+  if (isSuperRole(r)) return fallback;          // never allow a platform role
+  return TENANT_ROLES.includes(r) ? r : fallback;
+};
+
+/**
+ * Require that the session is a tenant ADMINISTRATOR (or a platform super role).
+ * Gate tenant user-management writes with this so an ordinary tenant member
+ * cannot create/alter users, reset passwords, or reset 2FA.
+ */
+export const requireTenantAdmin = (req: Request, res: Response, next: NextFunction): void => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (isSuperRole(req.user.role) || req.user.role === 'admin' || req.user.role === 'owner') {
+    next();
+    return;
+  }
+  res.status(403).json({ error: 'Tenant administrator access required' });
+};
 
 export const signSession = (user: SessionUser): string =>
   jwt.sign(user, getSecret(), { expiresIn: DEFAULT_TTL });
@@ -92,14 +210,24 @@ const extractToken = (req: Request): string | null => {
   return null;
 };
 
-/** Populate req.user if a valid session is present; never rejects. */
-export const attachUser = (req: Request, _res: Response, next: NextFunction): void => {
+/** Populate req.user if a valid, non-revoked session is present; never rejects. */
+export const attachUser = async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
   const token = extractToken(req);
   if (token) {
     try {
-      req.user = jwt.verify(token, getSecret()) as SessionUser;
+      const decoded = jwt.verify(token, getSecret()) as SessionUser & { iat?: number };
+      // Server-side liveness check: user must still exist, not be locked/disabled,
+      // and the token must post-date any revocation.
+      const state = await loadUserState(decoded.accountType, decoded.sub);
+      // iat has 1s granularity and is stamped by the Node clock while the revocation
+      // is stamped by Postgres; allow a few seconds of tolerance so a reset-then-login
+      // (or modest clock skew between hosts) does not bounce the user.
+      const issuedAtMs = (decoded.iat || 0) * 1000 + 3000;
+      if (state.exists && !state.locked && issuedAtMs >= state.revokedAt) {
+        req.user = decoded;
+      }
     } catch {
-      // invalid/expired token -> treat as anonymous
+      // invalid/expired token or DB error -> treat as anonymous
     }
   }
   next();
@@ -231,7 +359,25 @@ export interface EntitlementRecord {
   integrations: boolean;
   tier: string;
   seats: number;
+  /** Plan add-ons held via the client record or an active license (e.g. 'risk_assurance'). */
+  addons?: string[];
+  /** Risk Assurance plan: Threat & Risk Graph, Continuous Monitoring, RMF. */
+  riskAssurance?: boolean;
+  /** Tenant is on an Enterprise-class tier and may subscribe to Risk Assurance. */
+  riskAssuranceEligible?: boolean;
 }
+
+/** Add-on that unlocks Threat & Risk Graph, Continuous Monitoring and RMF. */
+export const RISK_ASSURANCE_ADDON = 'risk_assurance';
+
+/**
+ * Risk Assurance is sold per tenant per month, ONLY to Enterprise-class tenants
+ * (enterprise subscription, or corporate/corp/partner enterprise license keys). It is
+ * not bundled: the add-on must be subscribed, and it lapses if the tenant drops below
+ * an Enterprise-class tier.
+ */
+export const ENTERPRISE_TIERS = new Set(['enterprise', 'corporate', 'corp', 'partner']);
+export const isEnterpriseTier = (tier?: string | null): boolean => ENTERPRISE_TIERS.has(String(tier || '').toLowerCase());
 
 // BILL-3: the CENTRAL plane is the single source of truth for a tenant's plan.
 // A tenant pod (separate DB) resolves entitlement by asking central and caching the
@@ -244,7 +390,7 @@ const entCache = new Map<string, { at: number; val: EntitlementRecord }>();
 
 /** Resolve a tenant's entitlement from THIS instance's own database. */
 export const localTenantEntitlement = async (tenant?: string | null): Promise<EntitlementRecord> => {
-  if (!tenant) return { integrations: false, tier: 'none', seats: 0 };
+  if (!tenant) return { integrations: false, tier: 'none', seats: 0, addons: [], riskAssurance: false, riskAssuranceEligible: false };
   try {
     const r = await pool.query(
       `SELECT
@@ -259,7 +405,17 @@ export const localTenantEntitlement = async (tenant?: string | null): Promise<En
          (SELECT subscription_tier FROM admin_clients
             WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-',''))) LIMIT 1) AS cli_tier,
          (SELECT mca_limit FROM admin_clients
-            WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-',''))) LIMIT 1) AS cli_seats`,
+            WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-',''))) LIMIT 1) AS cli_seats,
+         ARRAY(
+           SELECT DISTINCT a FROM (
+             SELECT UNNEST(plan_addons) AS a FROM admin_clients
+              WHERE (LOWER(name)=LOWER($1) OR LOWER(REPLACE(name,'-',''))=LOWER(REPLACE($1,'-','')))
+             UNION
+             SELECT UNNEST(plan_addons) AS a FROM admin_licenses
+              WHERE (LOWER(tenant_name)=LOWER($1) OR LOWER(REPLACE(tenant_name,' ',''))=LOWER(REPLACE($1,' ','')))
+                AND status <> 'revoked' AND (expires_at IS NULL OR expires_at > NOW())
+           ) s WHERE a IS NOT NULL
+         ) AS addons`,
       [tenant]
     );
     const row = r.rows[0] || {};
@@ -270,11 +426,19 @@ export const localTenantEntitlement = async (tenant?: string | null): Promise<En
     // Display the highest-ranked tier the tenant holds (so a panel-set 'enterprise' beats an older 'corp' license).
     const tier = [licTier, cliTier].filter(Boolean).sort((a, b) => (TIER_RANK[b] || 0) - (TIER_RANK[a] || 0))[0] || 'entry';
     const seats = Math.max(Number(row.lic_seats || 0), Number(row.cli_seats || 0)) || 0;
-    return { integrations, tier, seats };
+    const addons: string[] = (row.addons || []).map((a: string) => String(a).toLowerCase());
+    const riskAssuranceEligible = isEnterpriseTier(licTier) || isEnterpriseTier(cliTier);
+    return {
+      integrations, tier, seats, addons, riskAssuranceEligible,
+      riskAssurance: riskAssuranceEligible && addons.includes(RISK_ASSURANCE_ADDON),
+    };
   } catch (e) {
-    // Fail-open: never block a paying tenant on a transient DB hiccup.
-    console.warn('localTenantEntitlement failed, assuming entitled:', (e as Error).message);
-    return { integrations: true, tier: 'unknown', seats: 0 };
+    // Fail CLOSED: a DB error must not silently grant paid entitlements to an
+    // unentitled tenant (the old fail-open handed every tenant the integrations
+    // surface on any transient hiccup). Briefly withholding a paid feature is the
+    // safer failure mode than leaking it. Add-ons (Risk Assurance) are absent, i.e. denied.
+    console.warn('localTenantEntitlement failed; denying entitlement (fail-closed):', (e as Error).message);
+    return { integrations: false, tier: 'unknown', seats: 0 };
   }
 };
 
@@ -303,7 +467,7 @@ const fetchCentralEntitlement = async (tenant: string): Promise<EntitlementRecor
 
 /** Resolve entitlement: central-first on tenant pods, local on the central plane. */
 export const getTenantEntitlement = async (tenant?: string | null): Promise<EntitlementRecord> => {
-  if (!tenant) return { integrations: false, tier: 'none', seats: 0 };
+  if (!tenant) return { integrations: false, tier: 'none', seats: 0, addons: [], riskAssurance: false, riskAssuranceEligible: false };
   if (CENTRAL_URL && CENTRAL_SERVICE_TOKEN) {
     const remote = await fetchCentralEntitlement(tenant);
     if (remote) return remote;
@@ -337,5 +501,34 @@ export const requireIntegrationsEntitlement = async (req: Request, res: Response
   res.status(403).json({
     error: 'Integrations & Gateways require a Growth or Enterprise plan.',
     code: 'UPGRADE_REQUIRED',
+  });
+};
+
+/**
+ * Route guard for the Risk Assurance plan (Threat & Risk Graph, Continuous Monitoring,
+ * RMF). Super roles always pass. Unlike integrations, reads are gated too: the graph
+ * itself is the paid deliverable.
+ */
+export const requireRiskAssuranceEntitlement = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Authentication required' });
+    return;
+  }
+  if (isSuperRole(req.user.role)) {
+    next();
+    return;
+  }
+  const ent = await getTenantEntitlement(req.user.tenant);
+  if (ent.riskAssurance) {
+    next();
+    return;
+  }
+  res.status(403).json({
+    error: ent.riskAssuranceEligible
+      ? 'Threat & Risk Graph requires a Risk Assurance subscription.'
+      : 'Risk Assurance is available to Enterprise subscribers.',
+    code: 'UPGRADE_REQUIRED',
+    plan: RISK_ASSURANCE_ADDON,
+    eligible: !!ent.riskAssuranceEligible,
   });
 };

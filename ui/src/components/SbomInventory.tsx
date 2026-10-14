@@ -101,10 +101,7 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
     if (!guideContent) {
       setGuideLoading(true);
       try {
-        const res = await fetch(`${apiUrl}/api/sbom/superadmin-guide?format=json&admin=true`, {
-          headers: { 'x-admin-role': 'super_admin' },
-          credentials: 'include'
-        });
+        const res = await fetch(`${apiUrl}/api/sbom/superadmin-guide?format=json`, { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           setGuideContent(data.content || '');
@@ -122,9 +119,6 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
     try {
       const tenantParam = encodeURIComponent(activeTenant);
       const headers: Record<string, string> = {};
-      if (isSuperAdmin) {
-        headers['x-admin-role'] = 'super_admin';
-      }
       const [compRes, statsRes] = await Promise.all([
         fetch(`${apiUrl}/api/sbom/components?tenant=${tenantParam}&limit=200`, { headers, credentials: 'include' }),
         fetch(`${apiUrl}/api/sbom/stats?tenant=${tenantParam}`, { headers, credentials: 'include' })
@@ -187,13 +181,11 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
   const totalPages = Math.ceil(filteredComponents.length / pageSize) || 1;
 
   const handleExportJson = () => {
-    const adminParam = isSuperAdmin ? '&admin=true' : '';
-    window.open(`${apiUrl}/api/sbom/export?tenant=${encodeURIComponent(activeTenant)}${adminParam}`, '_blank');
+    window.open(`${apiUrl}/api/sbom/export?tenant=${encodeURIComponent(activeTenant)}`, '_blank');
   };
 
   const handleDownloadFixScript = () => {
-    const adminParam = isSuperAdmin ? '&admin=true' : '';
-    window.open(`${apiUrl}/api/sbom/fix-script?tenant=${encodeURIComponent(activeTenant)}${adminParam}`, '_blank');
+    window.open(`${apiUrl}/api/sbom/fix-script?tenant=${encodeURIComponent(activeTenant)}`, '_blank');
   };
 
   const exportCsv = () => {
@@ -1019,7 +1011,7 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 <button
-                  onClick={() => window.open(`${apiUrl}/api/sbom/superadmin-guide?admin=true`, '_blank')}
+                  onClick={() => window.open(`${apiUrl}/api/sbom/superadmin-guide`, '_blank')}
                   style={{
                     background: 'rgba(168, 85, 247, 0.25)',
                     border: '1px solid rgba(168, 85, 247, 0.5)',

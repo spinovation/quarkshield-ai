@@ -44,8 +44,11 @@ func ensureBackgroundService(serverURL string) {
 	if serverURL == "" {
 		serverURL = "https://quarkshield.ai"
 	}
-	// schtasks /TR wants one string; keep the exe path quoted. Go escapes the inner
-	// quotes when it builds schtasks.exe's command line.
+	// The task command is ONE string parsed by schtasks: refuse any value that could
+	// smuggle extra arguments or break quoting.
+	if validateServerURL(serverURL) != nil || strings.ContainsAny(serverURL, " \t\"'&|<>^%") || strings.ContainsAny(exePath, "\"&|<>^%") {
+		return
+	}
 	tr := fmt.Sprintf(`"%s" --daemon --server %s`, exePath, serverURL)
 	schtasks := winSystem32("schtasks.exe")
 
@@ -78,6 +81,8 @@ func createDesktopAndStartMenuShortcuts() {
 	}
 	exeDir := filepath.Dir(exePath)
 
+	// Single-quoted PowerShell literals: the only escape needed is doubling quotes.
+	psQuote := func(v string) string { return strings.ReplaceAll(v, "'", "''") }
 	psScript := fmt.Sprintf(`
 $ws = New-Object -ComObject WScript.Shell
 $exe = '%s'
@@ -102,7 +107,7 @@ if ($progs -and (Test-Path $progs)) {
     $s2.IconLocation = "$exe,0"
     $s2.Save()
 }
-`, exePath, exeDir)
+`, psQuote(exePath), psQuote(exeDir))
 
 	cmd := exec.Command(winPowerShell(), "-NoProfile", "-NonInteractive", "-Command", psScript)
 	hideConsole(cmd)
@@ -151,9 +156,10 @@ func pickFolderOS() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "powershell.exe",
+	// Absolute path (never a PATH lookup) and no execution-policy bypass: -Command
+	// does not need one, and Bypass would only widen what a planted script could do.
+	cmd := exec.CommandContext(ctx, winPowerShell(),
 		"-NoProfile",
-		"-ExecutionPolicy", "Bypass",
 		"-Sta",
 		"-WindowStyle", "Hidden",
 		"-Command", psScript,

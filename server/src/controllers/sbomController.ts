@@ -821,10 +821,8 @@ export const ENTERPRISE_TENANT_SBOM_TEMPLATE = [
  * Access Control Gate: Verifies Super Admin status for internal platform stack audits.
  */
 function checkSuperAdminAccess(req: Request): boolean {
-  if (req.user?.role && isSuperRole(req.user.role)) return true;
-  const adminRole = req.headers['x-admin-role'] as string;
-  const adminQuery = req.query.admin as string;
-  return adminRole === 'super_admin' || adminRole === 'root_admin' || adminQuery === 'true';
+  // Only the verified session role counts. A client header / query flag is not proof.
+  return !!(req.user?.role && isSuperRole(req.user.role));
 }
 
 /**
@@ -842,7 +840,7 @@ function resolveTenant(req: Request): string {
   if (req.query.tenant) {
     return (req.query.tenant as string).trim();
   }
-  return 'SPINOVATIONCORP';
+  return '';
 }
 
 /**
@@ -856,8 +854,12 @@ async function ensureTenantSbomSeed(tenant: string) {
     `SELECT COUNT(*) FROM sbom_components WHERE LOWER(tenant_name) = $1`,
     [normTenant]
   );
+  // Only the platform's OWN stack is seeded. Real tenants must never receive the
+  // fabricated enterprise template (invented CVEs and fix commands would appear as
+  // genuine findings in their inventory and remediation script).
+  if (normTenant !== 'quarkshield.ai') return;
   if (parseInt(check.rows[0].count, 10) === 0) {
-    const listToSeed = normTenant === 'quarkshield.ai' ? QUARKSHIELD_PLATFORM_STACK : ENTERPRISE_TENANT_SBOM_TEMPLATE;
+    const listToSeed = QUARKSHIELD_PLATFORM_STACK;
     let endpointHost = `Desktop Agent (${tenant} Endpoint)`;
     try {
       const machRes = await pool.query(
@@ -909,6 +911,7 @@ async function ensureTenantSbomSeed(tenant: string) {
 export async function getSbomComponents(req: Request, res: Response) {
   try {
     const tenant = resolveTenant(req);
+    if (!tenant) return res.status(400).json({ success: false, error: 'A tenant is required.' });
 
     if (tenant.toLowerCase() === 'quarkshield.ai' && !checkSuperAdminAccess(req)) {
       return res.status(403).json({
@@ -990,6 +993,7 @@ export async function getSbomComponents(req: Request, res: Response) {
 export async function getSbomStats(req: Request, res: Response) {
   try {
     const tenant = resolveTenant(req);
+    if (!tenant) return res.status(400).json({ success: false, error: 'A tenant is required.' });
 
     if (tenant.toLowerCase() === 'quarkshield.ai' && !checkSuperAdminAccess(req)) {
       return res.status(403).json({
@@ -1053,6 +1057,7 @@ export async function getSbomStats(req: Request, res: Response) {
 export async function exportSbom(req: Request, res: Response) {
   try {
     const tenant = resolveTenant(req);
+    if (!tenant) return res.status(400).json({ success: false, error: 'A tenant is required.' });
 
     if (tenant.toLowerCase() === 'quarkshield.ai' && !checkSuperAdminAccess(req)) {
       return res.status(403).json({
@@ -1157,6 +1162,7 @@ export async function exportSbom(req: Request, res: Response) {
 export async function getFixScript(req: Request, res: Response) {
   try {
     const tenant = resolveTenant(req);
+    if (!tenant) return res.status(400).json({ success: false, error: 'A tenant is required.' });
     const isPlatform = tenant.toLowerCase() === 'quarkshield.ai';
 
     if (isPlatform) {
@@ -1232,44 +1238,59 @@ echo "======================================================================"
       WHERE LOWER(tenant_name) = LOWER($1) AND has_vulnerabilities = true
     `, [tenant]);
 
+    // SECURITY: component names, CVE ids and remediation commands originate from agent
+    // telemetry (anyone holding a fleet token can submit them). They must never be
+    // pasted raw into a bash script a tenant admin will run. Only commands matching a
+    // strict package-manager allow-list are emitted; everything else becomes a
+    // comment with shell-safe quoting.
+    const SAFE_CMD_RE = /^(npm (install|update|audit fix)|yarn (add|upgrade)|pnpm (add|update)|pip3? install|poetry (add|update)|go get|cargo (update|install)|gem (install|update)|bundle update|composer (require|update)|apt(-get)? (install|upgrade)|apk (add|upgrade)|yum (install|update)|dnf (install|update)|brew (install|upgrade)|mvn versions:use-latest-releases|gradle dependencies)( [A-Za-z0-9@._\-/:=^~<>+,\[\]]+)*$/;
+    const comment = (v: unknown) => String(v ?? '').replace(/[\r\n]+/g, ' ').slice(0, 200);
+    const sq = (v: unknown) => `'${String(v ?? '').replace(/'/g, `'\\''`).replace(/[\r\n]+/g, ' ').slice(0, 200)}'`;
     let fixCommands = '';
     for (const row of dataRes.rows) {
       if (Array.isArray(row.vulnerabilities)) {
         for (const v of row.vulnerabilities) {
           if (v.remediationCmd && v.remediationCmd !== 'N/A') {
-            fixCommands += `# Fix ${row.name} (${row.ecosystem}) - ${v.cveId} [${(v.severity || '').toUpperCase()}]\n`;
-            fixCommands += `echo "🔧 Remediating ${row.name} (${v.cveId})..."\n`;
-            fixCommands += `${v.remediationCmd}\n\n`;
+            const cmd = String(v.remediationCmd).trim();
+            fixCommands += `# Fix ${comment(row.name)} (${comment(row.ecosystem)}) - ${comment(v.cveId)} [${comment((v.severity || '').toUpperCase())}]\n`;
+            fixCommands += `echo "🔧 Remediating" ${sq(row.name)} "(" ${sq(v.cveId)} ")..."\n`;
+            if (SAFE_CMD_RE.test(cmd)) {
+              fixCommands += `${cmd}\n\n`;
+            } else {
+              fixCommands += `# Suggested remediation (not auto-run; review manually): ${comment(cmd)}\n\n`;
+            }
           }
         }
       }
     }
 
     if (!fixCommands) {
-      fixCommands = `echo "✅ All tracked software components for ${tenant} are verified clean of known CVEs."\n`;
+      fixCommands = `echo "✅ All tracked software components for" ${sq(tenant)} "are verified clean of known CVEs."\n`;
     }
+    const safeTenant = String(tenant).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
 
     const tenantScript = `#!/bin/bash
 # ==============================================================================
 # QuarkShield Automated CVE Vulnerability Remediation Script
-# Target Organization / Tenant: ${tenant}
+# Target Organization / Tenant: ${safeTenant}
 # Generated: ${new Date().toISOString()}
-# Security Posture: Automated 1-Click Remediation | NIST SP 800-218 Aligned
+# Review every command before running. Commands that did not match the
+# package-manager allow-list are included as comments only.
 # ==============================================================================
 
 set -e
 
-echo "🛡️ Starting QuarkShield Automated CVE Remediation for ${tenant}..."
+echo "🛡️ Starting QuarkShield Automated CVE Remediation for ${safeTenant}..."
 
 ${fixCommands}
 
 echo "======================================================================"
-echo "✅ QuarkShield CVE Remediation Complete for ${tenant}!"
+echo "✅ QuarkShield CVE Remediation Complete for ${safeTenant}!"
 echo "======================================================================"
 `;
 
     res.setHeader('Content-Type', 'text/x-shellscript');
-    res.setHeader('Content-Disposition', `attachment; filename="${tenant.toLowerCase()}-cve-remediation.sh"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeTenant.toLowerCase()}-cve-remediation.sh"`);
     return res.send(tenantScript);
   } catch (error: any) {
     console.error('Error generating fix script:', error);

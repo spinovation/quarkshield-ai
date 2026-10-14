@@ -51,10 +51,30 @@ ALTER TABLE assets ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS source VARCHAR(100) DEFAULT 'endpoint';
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS source_ref VARCHAR(500);
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255) DEFAULT 'SPINOVATIONCORP';
+ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS last_sync TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+-- Parameterized fleet commands (Fleet Probe + push-upgrade shared channel).
+-- `command` stays the type discriminator ('scan_and_sync', 'probe', later 'upgrade');
+-- `args` carries typed parameters (e.g. probe targets). Existing rows keep working
+-- with an empty args object. `issued_by` records the admin who queued the command for
+-- the audit trail; `scope` labels how it was triggered (machine | group | all).
+ALTER TABLE fleet_commands ADD COLUMN IF NOT EXISTS args JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE fleet_commands ADD COLUMN IF NOT EXISTS issued_by VARCHAR(255);
+ALTER TABLE fleet_commands ADD COLUMN IF NOT EXISTS scope VARCHAR(50);
+
+-- Per-tenant kill switch for remote endpoint probing (Fleet Probe agent opt-out).
+-- When a row exists with probe_enabled = false, the server refuses to enqueue probe
+-- commands for that tenant. Absent row = enabled (default on). Separate from the
+-- per-host local agent flag, which the agent enforces itself.
+CREATE TABLE IF NOT EXISTS tenant_probe_policy (
+  tenant_name VARCHAR(255) PRIMARY KEY,
+  probe_enabled BOOLEAN NOT NULL DEFAULT true,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
 
 -- Projects (BILL-4 / OSCAL): a Project is an authorization boundary (a Program of
 -- Record, a location/region, or a business unit). Every tenant can create them;
@@ -136,6 +156,9 @@ CREATE TABLE IF NOT EXISTS fleet_commands (
   command VARCHAR(50) NOT NULL,
   status VARCHAR(50) DEFAULT 'pending',
   details TEXT,
+  args JSONB DEFAULT '{}'::jsonb,       -- typed command parameters (e.g. probe targets)
+  issued_by VARCHAR(255),               -- admin who queued the command (audit trail)
+  scope VARCHAR(50),                    -- how it was triggered: machine | group | all
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   completed_at TIMESTAMP WITH TIME ZONE
 );
@@ -261,11 +284,7 @@ INSERT INTO admin_users
    web3_enabled, row_locked, company, must_change_password, last_login)
 VALUES
   ('usr-super', 'superadmin@quarkshield.ai', NULL, NULL, 'superadmin', true, true, true, true, false,
-   'QuarkShield Core', true, CURRENT_TIMESTAMP),
-  -- non-privileged sample rows (no passwords)
-  ('usr-demo',    'democlient@example.com',     NULL, NULL, 'user', true, true,  false, false, false, 'Demo Client Workspace',   false, CURRENT_TIMESTAMP - INTERVAL '12 minutes'),
-  ('usr-locked',  'locked_client@example.com',  NULL, NULL, 'user', true, false, false, false, true,  'Locked Security Node',    false, CURRENT_TIMESTAMP - INTERVAL '24 minutes'),
-  ('usr-pending', 'pending_client@example.com', NULL, NULL, 'user', true, false, false, false, false, 'Pending Evaluation Node', false, NULL)
+   'QuarkShield Core', true, CURRENT_TIMESTAMP)
 ON CONFLICT (email) DO NOTHING;  -- create-only; never overwrite a real password on restart
 
 -- Seed initial client organizations / tenants for quarkshield.ai
@@ -273,10 +292,7 @@ INSERT INTO admin_clients (id, name, display_name, app_port, db_port, status, su
 VALUES 
   ('client-demo', 'democlient', 'Demo Client Workspace', 5001, 5433, 'active', 'growth', 250, 'optional', 1, 6, 'corporate', 'CORP-5120', 'democlient@example.com', 'Demo Administrator'),
   ('client-090e8814', 'spinovationcorp', 'Spinovation Corp', 5002, 5434, 'active', 'growth', 100, 'optional', 1, 10, 'corporate', 'CORP-9812', 'sridhargs@spinovation.com', 'GS Sridhar'),
-  ('client-8518769e', 'algomeld', 'Algomeld', 5004, 5438, 'active', 'growth', 100, 'optional', 1, 10, 'partner', 'PART-4421', 'sridhargs@algomeld.ai', 'GS Sridhar'),
-  ('client-vanguard-corp', 'vanguard-logistics', 'Vanguard Global Logistics', 5003, 5435, 'active', 'growth', 500, 'optional', 1, 8, 'corporate', 'CORP-4821', 's.jenkins@vanguardlogistics.com', 'Sarah Jenkins'),
-  ('client-apex-msp', 'apex-cyber', 'Apex Cyber Defense MSP', 5050, 5436, 'active', 'growth', 300, 'optional', 1, 12, 'partner', 'PART-9148', 'm.vance@apexcyberdefense.io', 'Marcus Vance'),
-  ('client-cyber-shield', 'cybershield-partners', 'CyberShield Managed Security', 5051, 5437, 'active', 'growth', 50, 'optional', 1, 4, 'partner', 'PART-8830', 'd.chen@cybershieldsec.com', 'David Chen')
+  ('client-8518769e', 'algomeld', 'Algomeld', 5004, 5438, 'active', 'growth', 100, 'optional', 1, 10, 'partner', 'PART-4421', 'sridhargs@algomeld.ai', 'GS Sridhar')
 ON CONFLICT (name) DO NOTHING;  -- seed only, do not overwrite tenant edits on restart (DEF-18)
 
 -- Seed tenant admins WITHOUT passwords. Each sets their own via the reset/invite
@@ -289,19 +305,25 @@ VALUES
   ('tu-sridhar-algo-ai', 'algomeld',        'sridhargs@algomeld.ai',     'Sridhar', 'GS', 'admin', 'active', NULL, NULL, true)
 ON CONFLICT (tenant_name, email) DO NOTHING;  -- CRITICAL: create-only. NEVER DO UPDATE the password_hash.
 
-INSERT INTO admin_licenses (id, license_key, tenant_name, customer_id, tier, duration_days, seats, status, expires_at, contact_name, contact_email)
-VALUES
-  ('lic-corp-spinovation', 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8', 'SPINOVATIONCORP', 'CORP-9812', 'corporate', 365, 100, 'active', CURRENT_TIMESTAMP + INTERVAL '365 days', 'GS Sridhar', 'sridhargs@spinovation.com'),
-  ('lic-corp-apexlabs', 'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E', 'APEXDEFENSELABS', 'CORP-4821', 'corporate', 365, 500, 'active', CURRENT_TIMESTAMP + INTERVAL '365 days', 'Sarah Jenkins', 's.jenkins@vanguardlogistics.com'),
-  ('lic-corp-demo', 'QS-CORP-DEMOCLIENT-6C8A00AF-E49AB1C1', 'DEMOCLIENT', 'CORP-5120', 'corporate', 365, 250, 'active', CURRENT_TIMESTAMP + INTERVAL '365 days', 'Demo Administrator', 'democlient@example.com'),
-  ('lic-apex-sub-1', 'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF8523-56AAF752', 'APEXCYBERDEFENSEMSP', 'PART-9148', 'partner', 30, 50, 'active', CURRENT_TIMESTAMP + INTERVAL '30 days', 'Marcus Vance', 'm.vance@apexcyberdefense.io'),
-  ('lic-apex-sub-2', 'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF8540-E2611017', 'APEXCYBERDEFENSEMSP', 'PART-9148', 'partner', 30, 50, 'active', CURRENT_TIMESTAMP + INTERVAL '30 days', 'Marcus Vance', 'm.vance@apexcyberdefense.io'),
-  ('lic-apex-sub-3', 'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF87F9-B61B99FC', 'APEXCYBERDEFENSEMSP', 'PART-9148', 'partner', 30, 50, 'active', CURRENT_TIMESTAMP + INTERVAL '30 days', 'Marcus Vance', 'm.vance@apexcyberdefense.io'),
-  ('lic-apex-sub-4', 'QS-PARTNER-APEXCYBERDEFENSEMSP-6AF7E81F-457D9F5B', 'APEXCYBERDEFENSEMSP', 'PART-9148', 'partner', 60, 50, 'active', CURRENT_TIMESTAMP + INTERVAL '60 days', 'Marcus Vance', 'm.vance@apexcyberdefense.io'),
-  ('lic-apex-sub-5', 'QS-PARTNER-APEXCYBERDEFENSEMSP-6B05175B-D5CF3CE4', 'APEXCYBERDEFENSEMSP', 'PART-9148', 'partner', 60, 50, 'active', CURRENT_TIMESTAMP + INTERVAL '60 days', 'Marcus Vance', 'm.vance@apexcyberdefense.io'),
-  ('lic-apex-sub-6', 'QS-PARTNER-APEXCYBERDEFENSEMSP-6B124697-74B82994', 'APEXCYBERDEFENSEMSP', 'PART-9148', 'partner', 90, 50, 'active', CURRENT_TIMESTAMP + INTERVAL '90 days', 'Marcus Vance', 'm.vance@apexcyberdefense.io'),
-  ('lic-part-test', 'QS-PARTNER-PARTNERTEST-6AF00609-C7486296', 'PARTNERTEST', 'PART-8830', 'partner', 30, 50, 'active', CURRENT_TIMESTAMP + INTERVAL '30 days', 'David Chen', 'd.chen@cybershieldsec.com')
-ON CONFLICT (license_key) DO NOTHING;
+-- SECURITY: the license keys that used to be seeded here were committed to a public
+-- repository and are accepted as fleet enrollment credentials by /api/scan/agent/ingest.
+-- They are revoked on every boot so no install keeps honouring them. Real licenses are
+-- generated from the Super Admin console (POST /api/admin/licenses/generate).
+UPDATE admin_licenses SET status = 'revoked'
+WHERE license_key IN (
+  'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8',
+  'QS-CORP-APEXDEFENSELABS-6AC90C8C-A34F928E',
+  'QS-CORP-DEMOCLIENT-6C8A00AF-E49AB1C1',
+  'QS-CORP-DEMOCLIENT-6AF00609-C7486296',
+  'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF8523-56AAF752',
+  'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF8540-E2611017',
+  'QS-PARTNER-APEXCYBERDEFENSEMSP-6ACF87F9-B61B99FC',
+  'QS-PARTNER-APEXCYBERDEFENSEMSP-6AF7E81F-457D9F5B',
+  'QS-PARTNER-APEXCYBERDEFENSEMSP-6B05175B-D5CF3CE4',
+  'QS-PARTNER-APEXCYBERDEFENSEMSP-6B124697-74B82994',
+  'QS-PARTNER-PARTNERTEST-6AF00609-C7486296',
+  'QS-PARTNER-AMBEROON-6B273FAD-218F40C9'
+) AND status <> 'revoked';
 
 -- Remote Git Repository Security & PQC Audit Logs
 CREATE TABLE IF NOT EXISTS git_scans (
@@ -338,35 +360,13 @@ UPDATE fleet_machines
 SET computer_name = hostname 
 WHERE computer_name IS NULL OR computer_name = '';
 
--- 5. Sync client asset count for Spinovation Corp
-UPDATE admin_clients
-SET asset_count = (
-  SELECT COALESCE(SUM(asset_count), 0) 
-  FROM fleet_machines 
-  WHERE LOWER(tenant_name) LIKE '%spinovation%'
-)
-WHERE LOWER(name) IN ('spinovation', 'spinovationcorp');
-
--- 6. Initialize initial daily snapshot for Spinovation Corp
-INSERT INTO fleet_daily_snapshots (
-  id, tenant_name, snapshot_date, active_workstations, total_assets, vulnerable_assets, average_risk_score
-)
-SELECT 
-  'snap-spinovation-' || TO_CHAR(CURRENT_DATE, 'YYYYMMDD'),
-  'SPINOVATIONCORP',
-  CURRENT_DATE,
-  COUNT(DISTINCT id),
-  COALESCE(SUM(asset_count), 0),
-  COALESCE(SUM(vulnerable_count), 0),
-  COALESCE(ROUND(AVG(quantum_risk_score)), 0)
-FROM fleet_machines 
-WHERE LOWER(tenant_name) LIKE '%spinovation%'
-ON CONFLICT (tenant_name, snapshot_date) DO NOTHING;
+-- (Owner-specific boot-time snapshot/asset-count statements removed; snapshots are
+--  written by ingest for every tenant.)
 
 -- Backfill existing assets with tenant_name, source, and source_ref from fleet_machines
 UPDATE assets 
 SET 
-  tenant_name = COALESCE(assets.tenant_name, m.tenant_name, 'SPINOVATIONCORP'),
+  tenant_name = COALESCE(assets.tenant_name, m.tenant_name),
   source = COALESCE(assets.source, 'endpoint_deploy'),
   source_ref = COALESCE(assets.source_ref, m.hostname, 'workstation')
 FROM fleet_machines m
@@ -378,7 +378,7 @@ WHERE assets.machine_id = m.id AND (assets.tenant_name IS NULL OR assets.source 
 
 CREATE TABLE IF NOT EXISTS ci_security_gates (
   id VARCHAR(100) PRIMARY KEY,
-  tenant_name VARCHAR(255) NOT NULL DEFAULT 'SPINOVATIONCORP',
+  tenant_name VARCHAR(255) NOT NULL,
   provider VARCHAR(50) NOT NULL, -- 'github', 'gitlab', 'bitbucket', 'cli'
   repo_name VARCHAR(255) NOT NULL,
   repo_url VARCHAR(500),
@@ -420,7 +420,7 @@ CREATE TABLE IF NOT EXISTS ci_gate_policies (
 
 CREATE TABLE IF NOT EXISTS pki_connectors (
   id VARCHAR(100) PRIMARY KEY,
-  tenant_name VARCHAR(255) NOT NULL DEFAULT 'SPINOVATIONCORP',
+  tenant_name VARCHAR(255) NOT NULL,
   name VARCHAR(255) NOT NULL,
   provider VARCHAR(50) NOT NULL, -- 'aws_kms', 'azure_keyvault', 'hashicorp_vault', 'ad_cs'
   endpoint_url VARCHAR(500),
@@ -460,7 +460,7 @@ CREATE TABLE IF NOT EXISTS pki_synced_assets (
 
 CREATE TABLE IF NOT EXISTS pqc_proxies (
   id VARCHAR(100) PRIMARY KEY,
-  tenant_name VARCHAR(255) NOT NULL DEFAULT 'SPINOVATIONCORP',
+  tenant_name VARCHAR(255) NOT NULL,
   name VARCHAR(255) NOT NULL,
   listen_port INTEGER NOT NULL,
   upstream_url VARCHAR(500) NOT NULL,
@@ -477,14 +477,12 @@ CREATE TABLE IF NOT EXISTS pqc_proxies (
 -- SEED INITIAL MOCK DATA FOR DEMONSTRATION & ENTERPRISE TESTING
 -- =========================================================================
 
--- Seed sample CI/CD gates
-INSERT INTO ci_security_gates (id, tenant_name, provider, repo_name, repo_url, branch, pr_number, commit_hash, commit_author, commit_message, status, violations_count, critical_count, high_count, quantum_risk_score, policy_name, markdown_report)
-VALUES 
-  ('gate-pr-104', 'SPINOVATIONCORP', 'github', 'spinovation/payments-microservice', 'https://github.com/spinovation/payments-microservice', 'feature/stripe-v2', 'PR #104', 'e3a180b', 'alex.mercer@spinovation.com', 'feat: update payment signing and auth keys', 'BLOCKED', 3, 2, 1, 88, 'CNSA 2.0 Strict Gate', '### QuarkShield CI/CD Gate: FAILED\n\n**3 Quantum-Vulnerable Cryptographic Assets Detected**\n\n- **CRITICAL**: Hardcoded RSA-2048 private key in `src/auth/signer.ts:42`\n- **HIGH**: Deprecated SHA-1 signature algorithm in `config/token.json:12`\n- **CRITICAL**: Classical ECDSA secp256k1 signature without PQC ML-DSA fallback.\n\n*Please migrate keys to NIST FIPS 204 (ML-DSA) or hybrid X25519MLKEM768.*'),
-  ('gate-pr-105', 'SPINOVATIONCORP', 'github', 'spinovation/auth-service', 'https://github.com/spinovation/auth-service', 'fix/session-tokens', 'PR #105', '9bc231a', 'elena.rostova@spinovation.com', 'fix: migrate JWT to ML-DSA hybrid signature', 'PASSED', 0, 0, 0, 10, 'CNSA 2.0 Strict Gate', '### QuarkShield CI/CD Gate: PASSED\n\nAll commits verified compliant with NIST FIPS 203/204 and NSA CNSA 2.0 requirements. Zero classical vulnerabilities detected.'),
-  ('gate-pr-42', 'SPINOVATIONCORP', 'gitlab', 'spinovation/core-api-gateway', 'https://gitlab.com/spinovation/core-api-gateway', 'main', 'MR #42', 'f88219c', 'devops@spinovation.com', 'chore: update TLS ingress ciphers', 'PASSED', 0, 0, 0, 12, 'CNSA 2.0 Strict Gate', '### QuarkShield CI/CD Gate: PASSED\n\nTLS 1.3 hybrid curve X25519MLKEM768 enabled on all ingress listeners.'),
-  ('gate-pr-88', 'AMBEROON', 'github', 'amberoon/aml-risk-engine', 'https://github.com/amberoon/aml-risk-engine', 'feat/financial-tx-signer', 'PR #88', '2c4180d', 'shirish.netke@amberoon.com', 'feat: add transaction verification pipeline', 'BLOCKED', 2, 1, 1, 78, 'CNSA 2.0 Strict Gate', '### QuarkShield CI/CD Gate: FAILED\n\n- **CRITICAL**: RSA 2048 encryption key discovered in `services/encryptor.py:19`\n- **HIGH**: 3DES legacy encryption cipher in legacy adapter.\n\n*Action Required: Replace with AES-256-GCM and NIST FIPS 203 ML-KEM-768.*')
-ON CONFLICT (id) DO NOTHING;
+-- Fabricated demo rows (CI gates, PKI connectors/assets, proxies) that used to be
+-- seeded into real customer tenants on every boot are removed; purge any copies.
+DELETE FROM ci_security_gates WHERE id IN ('gate-pr-104', 'gate-pr-105', 'gate-pr-42', 'gate-pr-88');
+DELETE FROM pki_synced_assets WHERE id IN ('pki-ast-01', 'pki-ast-02', 'pki-ast-03', 'pki-ast-04', 'pki-ast-05', 'pki-ast-06');
+DELETE FROM pki_connectors WHERE id IN ('conn-aws-kms', 'conn-azure-kv', 'conn-hashi-vault', 'conn-ad-cs', 'conn-amb-aws');
+DELETE FROM pqc_proxies WHERE id IN ('prx-api-ingress', 'prx-legacy-crm', 'prx-amb-gateway');
 
 -- Seed default CI Gate policies
 INSERT INTO ci_gate_policies (id, tenant_name, name, block_on_rsa, block_on_ecc, block_on_deprecated_hash, block_on_hardcoded_keys, max_quantum_risk_score, enforce_cnsa_2026, is_default)
@@ -493,35 +491,6 @@ VALUES
   ('policy-standard-migration', 'global', 'NIST PQC Transition Balanced Gate', true, false, true, true, 60, false, false),
   ('policy-fips-zero-tolerance', 'global', 'Zero-Tolerance Quantum Resistant Gate', true, true, true, true, 10, true, false)
 ON CONFLICT (tenant_name, name) DO NOTHING;
-
--- Seed sample PKI connectors
-INSERT INTO pki_connectors (id, tenant_name, name, provider, endpoint_url, auth_type, config_summary, sync_status, total_keys_discovered, vulnerable_keys_count, pqc_ready_count, last_sync_at)
-VALUES
-  ('conn-aws-kms', 'SPINOVATIONCORP', 'AWS KMS Production (us-east-1)', 'aws_kms', 'https://kms.us-east-1.amazonaws.com', 'iam_role', '{"region": "us-east-1", "role_arn": "arn:aws:iam::123456789012:role/QuarkShieldDiscoveryRole", "key_count": 28}'::jsonb, 'active', 28, 22, 6, CURRENT_TIMESTAMP - INTERVAL '14 minutes'),
-  ('conn-azure-kv', 'SPINOVATIONCORP', 'Azure Key Vault (East US)', 'azure_keyvault', 'https://spin-prod-vault.vault.azure.net', 'service_principal', '{"tenant_id": "72f988bf-86f1-41af-91ab-2d7cd011db47", "client_id": "e8910d-prod-sp", "vault_name": "spin-prod-vault"}'::jsonb, 'active', 19, 15, 4, CURRENT_TIMESTAMP - INTERVAL '32 minutes'),
-  ('conn-hashi-vault', 'SPINOVATIONCORP', 'HashiCorp Vault Enterprise (Datacenter A)', 'hashicorp_vault', 'https://vault.internal.spinovation.com:8200', 'token', '{"pki_engine_mount": "pki_v1", "transit_engine_mount": "transit", "auth_method": "approle"}'::jsonb, 'active', 44, 38, 6, CURRENT_TIMESTAMP - INTERVAL '1 hour'),
-  ('conn-ad-cs', 'SPINOVATIONCORP', 'Active Directory Certificate Services (AD CS)', 'ad_cs', 'ldap://ca01.corp.spinovation.local:389', 'kerberos', '{"ca_name": "Spinovation-Enterprise-Root-CA", "base_dn": "DC=corp,DC=spinovation,DC=local", "template_count": 14}'::jsonb, 'active', 62, 58, 4, CURRENT_TIMESTAMP - INTERVAL '2 hours'),
-  ('conn-amb-aws', 'AMBEROON', 'Amberoon AWS KMS (us-west-2)', 'aws_kms', 'https://kms.us-west-2.amazonaws.com', 'iam_role', '{"region": "us-west-2", "role_arn": "arn:aws:iam::987654321098:role/AmberoonQuarkShieldKmsRole"}'::jsonb, 'active', 16, 12, 4, CURRENT_TIMESTAMP - INTERVAL '40 minutes')
-ON CONFLICT (id) DO NOTHING;
-
--- Seed sample PKI assets
-INSERT INTO pki_synced_assets (id, connector_id, tenant_name, asset_name, asset_type, algorithm, key_size, is_vulnerable, risk_level, quantum_threat, status, rotation_enabled, expires_at)
-VALUES
-  ('pki-ast-01', 'conn-aws-kms', 'SPINOVATIONCORP', 'spin-payment-master-key', 'asymmetric_key', 'RSA-2048', 2048, true, 'critical', 'Shor''s Algorithm factorization risk. HNDL exposure.', 'Active', false, CURRENT_TIMESTAMP + INTERVAL '300 days'),
-  ('pki-ast-02', 'conn-aws-kms', 'SPINOVATIONCORP', 'spin-pqc-kem-hybrid', 'asymmetric_key', 'ML-KEM-768 + X25519', 768, false, 'secure', 'NIST FIPS 203 Post-Quantum Resilient.', 'Active', true, CURRENT_TIMESTAMP + INTERVAL '365 days'),
-  ('pki-ast-03', 'conn-azure-kv', 'SPINOVATIONCORP', 'ssl-wildcard-spinovation-com', 'certificate', 'ECDSA-P256', 256, true, 'critical', 'Discrete log vulnerability via Shor''s algorithm on CRQC.', 'Active', true, CURRENT_TIMESTAMP + INTERVAL '120 days'),
-  ('pki-ast-04', 'conn-hashi-vault', 'SPINOVATIONCORP', 'transit/keys/customer-pii-cipher', 'symmetric_key', 'AES-256-GCM', 256, false, 'secure', 'Grover resistant (128-bit quantum security strength).', 'Active', true, CURRENT_TIMESTAMP + INTERVAL '700 days'),
-  ('pki-ast-05', 'conn-ad-cs', 'SPINOVATIONCORP', 'Spinovation Enterprise Root CA', 'ca_root', 'RSA-4096', 4096, true, 'critical', 'Root of trust vulnerable to quantum factorization. Subordinate CAs compromised.', 'Active', false, CURRENT_TIMESTAMP + INTERVAL '1800 days'),
-  ('pki-ast-06', 'conn-ad-cs', 'SPINOVATIONCORP', 'Smartcard Logon Certificate Template', 'template', 'RSA-2048', 2048, true, 'critical', 'Workstation logon signatures vulnerable to identity forgery by CRQC.', 'Active', false, CURRENT_TIMESTAMP + INTERVAL '365 days')
-ON CONFLICT (id) DO NOTHING;
-
--- Seed sample PQC Proxy
-INSERT INTO pqc_proxies (id, tenant_name, name, listen_port, upstream_url, tls_curve, status, handshake_count, active_connections)
-VALUES
-  ('prx-api-ingress', 'SPINOVATIONCORP', 'API Ingress Quantum Hybrid Proxy', 5443, 'http://127.0.0.1:5050', 'X25519MLKEM768', 'running', 1420, 8),
-  ('prx-legacy-crm', 'SPINOVATIONCORP', 'Legacy Core Banking Gateway Proxy', 8443, 'http://127.0.0.1:8080', 'X25519MLKEM768', 'running', 389, 2),
-  ('prx-amb-gateway', 'AMBEROON', 'Amberoon Hybrid PQC Gateway', 9443, 'http://127.0.0.1:3000', 'X25519MLKEM768', 'running', 215, 3)
-ON CONFLICT (id) DO NOTHING;
 
 -- =========================================================================
 -- SOFTWARE BILL OF MATERIALS (SBOM) & VULNERABILITY CATALOG SCHEMA
@@ -585,7 +554,7 @@ ON CONFLICT (id) DO NOTHING;
 -- =========================================================================
 
 -- git_scans (ALTER originally precedes its CREATE)
-ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255) DEFAULT 'SPINOVATIONCORP';
+ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 
 -- admin_licenses (ALTERs originally precede its CREATE)
 ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS customer_id VARCHAR(100);
@@ -764,3 +733,244 @@ CREATE TABLE IF NOT EXISTS pqc_assessments (
 );
 CREATE INDEX IF NOT EXISTS idx_pqc_assessments_email ON pqc_assessments(email);
 
+-- ==================================================================-- SECURITY HARDENING (2026-10-07)
+-- =========================================================================
+-- Server-side session revocation: tokens issued before this timestamp are rejected.
+ALTER TABLE admin_users  ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE tenant_users ADD COLUMN IF NOT EXISTS sessions_revoked_at TIMESTAMP WITH TIME ZONE;
+
+-- No silent default tenant: a write that omits tenant_name must fail, not land in a
+-- real customer's tenant.
+ALTER TABLE git_scans         ALTER COLUMN tenant_name DROP DEFAULT;
+ALTER TABLE ci_security_gates ALTER COLUMN tenant_name DROP DEFAULT;
+ALTER TABLE pki_connectors    ALTER COLUMN tenant_name DROP DEFAULT;
+ALTER TABLE pqc_proxies       ALTER COLUMN tenant_name DROP DEFAULT;
+
+-- Indexes on the tenant-scoped hot paths (every agent sync hits assets by machine_id).
+CREATE INDEX IF NOT EXISTS idx_assets_machine        ON assets (machine_id);
+CREATE INDEX IF NOT EXISTS idx_assets_tenant_lower   ON assets (LOWER(tenant_name));
+CREATE INDEX IF NOT EXISTS idx_machines_tenant_lower ON fleet_machines (LOWER(tenant_name));
+CREATE INDEX IF NOT EXISTS idx_machines_hw_uuid      ON fleet_machines (hardware_uuid);
+CREATE INDEX IF NOT EXISTS idx_tokens_tenant_lower   ON fleet_tokens (LOWER(tenant_name));
+CREATE INDEX IF NOT EXISTS idx_tokens_token          ON fleet_tokens (token);
+CREATE INDEX IF NOT EXISTS idx_commands_machine_stat ON fleet_commands (machine_id, status);
+CREATE INDEX IF NOT EXISTS idx_licenses_key_upper    ON admin_licenses (UPPER(TRIM(license_key)));
+CREATE INDEX IF NOT EXISTS idx_licenses_tenant_lower ON admin_licenses (LOWER(tenant_name));
+CREATE INDEX IF NOT EXISTS idx_gates_tenant_lower    ON ci_security_gates (LOWER(tenant_name));
+CREATE INDEX IF NOT EXISTS idx_pki_tenant_lower      ON pki_connectors (LOWER(tenant_name));
+CREATE INDEX IF NOT EXISTS idx_git_scans_tenant      ON git_scans (LOWER(tenant_name));
+CREATE INDEX IF NOT EXISTS idx_tenant_users_email    ON tenant_users (LOWER(email));
+CREATE INDEX IF NOT EXISTS idx_tenant_settings_key   ON tenant_settings (LOWER(tenant_name), key);
+-- One account per (tenant, email) regardless of case. Lookups already use LOWER();
+-- without this a second row with different casing could shadow the first.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_users_ci ON tenant_users (LOWER(tenant_name), LOWER(email));
+
+-- =========================================================================
+-- THREAT & RISK GRAPH (Risk Assurance plan, Phase 1)
+-- Derived tables (tr_*) are fully recomputed per tenant by lib/threatGraph/store.ts
+-- from fleet / CBOM / SBOM / git / PKI / proxy data; relationships are inferred,
+-- never entered manually. tenant_key = lowercase alphanumerics of the tenant name.
+-- State tables (remediation state, context overrides, risk→control links, rebuild
+-- runs) are NOT recomputed and survive every rebuild via stable object ids.
+-- =========================================================================
+
+-- Plan add-ons (e.g. 'risk_assurance' = Threat & Risk Graph + Continuous Monitoring + RMF)
+ALTER TABLE admin_clients ADD COLUMN IF NOT EXISTS plan_addons TEXT[] DEFAULT '{}';
+ALTER TABLE admin_licenses ADD COLUMN IF NOT EXISTS plan_addons TEXT[] DEFAULT '{}';
+-- Stripe subscription that pays for the Risk Assurance add-on (separate from the base plan subscription)
+ALTER TABLE admin_clients ADD COLUMN IF NOT EXISTS risk_assurance_subscription_id VARCHAR(100);
+
+CREATE TABLE IF NOT EXISTS tr_assets (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(300) NOT NULL,
+  type VARCHAR(40) NOT NULL,
+  name VARCHAR(500) NOT NULL,
+  environment VARCHAR(40),
+  criticality SMALLINT NOT NULL,
+  data_classification VARCHAR(20) NOT NULL,
+  internet_exposed BOOLEAN NOT NULL DEFAULT false,
+  context_origin VARCHAR(20) NOT NULL DEFAULT 'inferred',
+  source_table VARCHAR(60),
+  source_id VARCHAR(300),
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+CREATE TABLE IF NOT EXISTS tr_relationships (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(700) NOT NULL,
+  from_asset VARCHAR(300) NOT NULL,
+  to_asset VARCHAR(300) NOT NULL,
+  kind VARCHAR(40) NOT NULL,
+  confidence VARCHAR(10) NOT NULL,
+  rule_id VARCHAR(20) NOT NULL,
+  data JSONB NOT NULL,
+  first_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_key, id)
+);
+
+-- Component / vulnerability / crypto-finding projections (node_type = component | vuln | crypto)
+CREATE TABLE IF NOT EXISTS tr_nodes (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(400) NOT NULL,
+  node_type VARCHAR(20) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+CREATE INDEX IF NOT EXISTS idx_tr_nodes_asset ON tr_nodes (tenant_key, asset_id);
+
+CREATE TABLE IF NOT EXISTS tr_threats (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(400) NOT NULL,
+  rule_id VARCHAR(20) NOT NULL,
+  category VARCHAR(60) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  likelihood SMALLINT NOT NULL,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+CREATE TABLE IF NOT EXISTS tr_attack_paths (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(100) NOT NULL,
+  entry_threat_id VARCHAR(400) NOT NULL,
+  goal_asset_id VARCHAR(300) NOT NULL,
+  path_risk SMALLINT NOT NULL,
+  level VARCHAR(10) NOT NULL,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+CREATE TABLE IF NOT EXISTS tr_risks (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(500) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  threat_id VARCHAR(400) NOT NULL,
+  attack_path_id VARCHAR(100),
+  likelihood SMALLINT NOT NULL,
+  impact SMALLINT NOT NULL,
+  inherent_score SMALLINT NOT NULL,
+  residual_score SMALLINT NOT NULL,
+  level VARCHAR(10) NOT NULL,
+  priority INTEGER NOT NULL,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+CREATE TABLE IF NOT EXISTS tr_remediations (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(500) NOT NULL,
+  action_type VARCHAR(30) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  breaks_paths INTEGER NOT NULL DEFAULT 0,
+  data JSONB NOT NULL,
+  PRIMARY KEY (tenant_key, id)
+);
+
+-- STRIDE / ATT&CK / kill-chain tags on core objects (PASTA and others attach the same way)
+CREATE TABLE IF NOT EXISTS tr_framework_tags (
+  tenant_key VARCHAR(255) NOT NULL,
+  object_type VARCHAR(20) NOT NULL,
+  object_id VARCHAR(500) NOT NULL,
+  framework VARCHAR(20) NOT NULL,
+  ref VARCHAR(60) NOT NULL,
+  rule_id VARCHAR(20),
+  rationale TEXT,
+  PRIMARY KEY (tenant_key, object_type, object_id, framework, ref)
+);
+CREATE INDEX IF NOT EXISTS idx_tr_tags_ref ON tr_framework_tags (tenant_key, framework, ref);
+
+-- ---- Persistent state (survives rebuilds) ----
+CREATE TABLE IF NOT EXISTS tr_remediation_state (
+  tenant_key VARCHAR(255) NOT NULL,
+  id VARCHAR(500) NOT NULL,
+  owner VARCHAR(255),
+  target_date DATE,
+  status VARCHAR(20) NOT NULL DEFAULT 'open', -- open | in_progress | done | verified | risk_accepted
+  notes TEXT,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_key, id)
+);
+
+-- Admin corrections to INFERRED context only (criticality / classification / environment).
+-- Relationships are never entered manually.
+CREATE TABLE IF NOT EXISTS tr_context_overrides (
+  tenant_key VARCHAR(255) NOT NULL,
+  asset_id VARCHAR(300) NOT NULL,
+  criticality SMALLINT,
+  data_classification VARCHAR(20),
+  environment VARCHAR(40),
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_key, asset_id)
+);
+
+-- RMF / MGC attach point: risk → NIST SP 800-53 control (populated in the RMF phase).
+CREATE TABLE IF NOT EXISTS tr_risk_controls (
+  tenant_key VARCHAR(255) NOT NULL,
+  risk_id VARCHAR(500) NOT NULL,
+  control_ref VARCHAR(40) NOT NULL,          -- e.g. SC-8, SI-2, IA-5(1)
+  framework VARCHAR(40) NOT NULL DEFAULT 'nist-800-53r5',
+  project_id VARCHAR(100),
+  origin VARCHAR(20) NOT NULL DEFAULT 'rule',
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (tenant_key, risk_id, control_ref, framework)
+);
+
+-- Every rebuild is recorded: the time series that Continuous Monitoring trends and alerts on.
+CREATE TABLE IF NOT EXISTS tr_rebuild_runs (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_key VARCHAR(255) NOT NULL,
+  tenant_name VARCHAR(255),
+  trigger VARCHAR(40) NOT NULL,
+  status VARCHAR(20) NOT NULL,                -- success | error
+  stats JSONB,
+  error TEXT,
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  finished_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_tr_runs_tenant ON tr_rebuild_runs (tenant_key, started_at DESC);
+
+-- =========================================================================
+-- EXPLOITATION-LIKELIHOOD INTELLIGENCE (shared reference data, not tenant data)
+-- CISA Known Exploited Vulnerabilities + FIRST EPSS, synced daily by
+-- lib/threatIntel/feeds.ts. Used ONLY to adjust likelihood in the Threat & Risk
+-- Graph — never impact, never IOC/actor matching.
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS ti_kev (
+  cve_id VARCHAR(40) PRIMARY KEY,
+  vendor VARCHAR(255),
+  product VARCHAR(255),
+  vulnerability_name VARCHAR(500),
+  date_added DATE,
+  due_date DATE,
+  ransomware_use BOOLEAN NOT NULL DEFAULT false,   -- knownRansomwareCampaignUse = 'Known'
+  short_description TEXT,
+  required_action TEXT,
+  cwes TEXT[] DEFAULT '{}',
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ti_epss (
+  cve_id VARCHAR(40) PRIMARY KEY,
+  epss REAL NOT NULL,          -- probability of exploitation activity in the next 30 days
+  percentile REAL NOT NULL,
+  score_date DATE
+);
+
+CREATE TABLE IF NOT EXISTS ti_feed_runs (
+  id VARCHAR(100) PRIMARY KEY,
+  feed VARCHAR(20) NOT NULL,   -- kev | epss
+  status VARCHAR(20) NOT NULL, -- running | success | error
+  source VARCHAR(500),
+  records INTEGER,
+  feed_version VARCHAR(100),   -- KEV catalogVersion / EPSS model+score date
+  sha256 VARCHAR(64),
+  error TEXT,
+  started_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  finished_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_ti_feed_runs_feed ON ti_feed_runs (feed, started_at DESC);

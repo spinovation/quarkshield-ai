@@ -8,7 +8,9 @@ BACKUP_DIR="${QS_BACKUP_DIR:-/opt/backups/quarkshield}"
 RETAIN_DAYS="${QS_BACKUP_RETAIN_DAYS:-14}"
 CONTAINER="${QS_DB_CONTAINER:-pqc-scanner-db}"
 
+umask 077   # dumps contain password hashes and encrypted secrets: owner-only
 mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
 ts="$(date +%Y%m%d-%H%M%S)"
 out="$BACKUP_DIR/quarkshield_${ts}.sql.gz"
 

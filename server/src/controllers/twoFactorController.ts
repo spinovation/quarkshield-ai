@@ -27,6 +27,16 @@ export const twoFactorStatus = async (req: Request, res: Response) => {
 export const twoFactorSetup = async (req: Request, res: Response) => {
   if (!req.user) return res.status(401).json({ error: 'Not authenticated' });
   const table = tableFor(req);
+  // If 2FA is already enabled, re-enrolling replaces the second factor. Require a
+  // current code so a stolen session cannot swap in the attacker's authenticator.
+  const cur = await pool.query(`SELECT two_factor_enabled, two_factor_secret FROM ${table} WHERE id = $1`, [req.user.sub]);
+  if (cur.rows[0]?.two_factor_enabled) {
+    const { code } = req.body || {};
+    const existing = cur.rows[0].two_factor_secret ? decryptSecret(cur.rows[0].two_factor_secret) : null;
+    if (!code || !existing || !verifyTotp(String(code), existing)) {
+      return res.status(401).json({ error: 'Two-factor authentication is already enabled. Enter your current code to re-enroll.' });
+    }
+  }
   const secret = generateSecret();
   // Store the (encrypted) secret but leave 2FA disabled until a code is verified.
   await pool.query(
@@ -78,3 +88,19 @@ export const twoFactorDisable = async (req: Request, res: Response) => {
   );
   return res.json({ success: true, enabled: false });
 };
+
+// Express 4 does not catch rejected promises from async handlers; without this a
+// transient DB error during any 2FA call would terminate the Node process.
+const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) =>
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      await fn(req, res);
+    } catch (err) {
+      console.error('2FA handler error:', err);
+      if (!res.headersSent) res.status(500).json({ error: 'Two-factor operation failed.' });
+    }
+  };
+export const twoFactorStatusSafe = wrap(twoFactorStatus);
+export const twoFactorSetupSafe = wrap(twoFactorSetup);
+export const twoFactorVerifySafe = wrap(twoFactorVerify);
+export const twoFactorDisableSafe = wrap(twoFactorDisable);

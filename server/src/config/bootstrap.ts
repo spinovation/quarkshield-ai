@@ -1,6 +1,11 @@
 import pool from './db';
 import { hashPassword } from '../utils/password';
 
+// A placeholder/weak bootstrap password (e.g. the committed .env.example template
+// "replace-with-secure-bootstrap-password") is long enough to pass a length check but
+// is PUBLIC — booting a superadmin on it is a known-credential takeover.
+const PLACEHOLDER_PW_RE = /replace-with|change[-_ ]?me|changeme|example|password123|your[-_]|placeholder|<.*>/i;
+
 /**
  * Break-glass administrator.
  *
@@ -15,6 +20,10 @@ export const bootstrapAdmin = async (): Promise<void> => {
   if (!email || !password) return;
   if (password.length < 12) {
     console.warn('BOOTSTRAP_ADMIN_PASSWORD too short (min 12); skipping bootstrap admin.');
+    return;
+  }
+  if (PLACEHOLDER_PW_RE.test(password)) {
+    console.error('BOOTSTRAP_ADMIN_PASSWORD looks like a placeholder/template value; refusing to create a superadmin on a public password. Set a strong unique password.');
     return;
   }
   try {

@@ -69,10 +69,34 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
   const [connAuthType, setConnAuthType] = useState('iam_role');
   const [awsRegion, setAwsRegion] = useState('us-east-1');
   const [awsRoleArn, setAwsRoleArn] = useState('');
+  const [awsAccessKeyId, setAwsAccessKeyId] = useState('');
+  const [awsSecretAccessKey, setAwsSecretAccessKey] = useState('');
   const [azureTenantId, setAzureTenantId] = useState('');
   const [azureClientId, setAzureClientId] = useState('');
+  const [azureClientSecret, setAzureClientSecret] = useState('');
   const [vaultToken, setVaultToken] = useState('');
+  const [vaultRoleId, setVaultRoleId] = useState('');
+  const [vaultSecretId, setVaultSecretId] = useState('');
+  const [vaultPkiMount, setVaultPkiMount] = useState('');
   const [adCsCaName, setAdCsCaName] = useState('');
+
+  // Clear any entered secrets from component state (hygiene: never keep plaintext
+  // creds in memory longer than the submit that sends them).
+  const resetConnectorForm = () => {
+    setConnName('');
+    setConnEndpoint('');
+    setAwsRoleArn('');
+    setAwsAccessKeyId('');
+    setAwsSecretAccessKey('');
+    setAzureTenantId('');
+    setAzureClientId('');
+    setAzureClientSecret('');
+    setVaultToken('');
+    setVaultRoleId('');
+    setVaultSecretId('');
+    setVaultPkiMount('');
+    setAdCsCaName('');
+  };
 
   const fetchConnectors = async () => {
     try {
@@ -146,18 +170,52 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
     e.preventDefault();
     if (!connName) return;
 
+    // AD CS is agent-based (pushed by a domain-joined host agent), not an
+    // agentless pull connector — the backend rejects a console enrollment. Guard
+    // here too so the form never POSTs a connector that would look successful but
+    // sync to zero keys.
+    if (connProvider === 'ad_cs') {
+      alert('Microsoft AD CS is agent-based. Run the QuarkShield agent with --adcs on the CA host; it reports its inventory automatically and the connector appears here once it does.');
+      return;
+    }
+
     try {
+      // Credential/config keys must match the server-side parsers
+      // (parseKmsConfig / parseAzureConfig / parseVaultConfig), which read
+      // camelCase. Only send secrets the user actually provided — the backend
+      // seal()-encrypts accessKeyId/secretAccessKey/clientSecret/token/secretId
+      // at rest and never logs them.
       const config: any = {};
+      // Endpoint is derived per provider (see below), not hardcoded.
+      let endpointUrl = connEndpoint.trim();
+
       if (connProvider === 'aws_kms') {
-        config.region = awsRegion;
-        config.role_arn = awsRoleArn || 'arn:aws:iam::123456789012:role/QuarkShieldDiscoveryRole';
+        const region = awsRegion.trim() || 'us-east-1';
+        config.region = region;
+        // role_arn is genuinely optional now — only sent when the user supplies
+        // one (no fake placeholder). Static access keys authenticate the plain VPS
+        // pod, which has no AWS identity of its own.
+        if (awsRoleArn.trim()) config.roleArn = awsRoleArn.trim();
+        if (awsAccessKeyId.trim()) config.accessKeyId = awsAccessKeyId.trim();
+        if (awsSecretAccessKey.trim()) config.secretAccessKey = awsSecretAccessKey.trim();
+        // Display the real regional endpoint derived from the selected region,
+        // not a hardcoded us-east-1 URL (which also wrongly pinned the SDK call).
+        endpointUrl = `https://kms.${region}.amazonaws.com`;
       } else if (connProvider === 'azure_keyvault') {
-        config.tenant_id = azureTenantId;
-        config.client_id = azureClientId;
+        config.tenantId = azureTenantId.trim();
+        config.clientId = azureClientId.trim();
+        if (azureClientSecret.trim()) config.clientSecret = azureClientSecret.trim();
+        // The vault URL IS the endpoint for Azure.
+        endpointUrl = connEndpoint.trim();
       } else if (connProvider === 'hashicorp_vault') {
-        config.pki_engine = 'pki_v1';
-      } else if (connProvider === 'ad_cs') {
-        config.ca_name = adCsCaName || 'Enterprise-Root-CA';
+        if (vaultToken.trim()) config.token = vaultToken.trim();
+        // AppRole is an alternative to a static token (role_id + secret_id).
+        if (vaultRoleId.trim()) config.roleId = vaultRoleId.trim();
+        if (vaultSecretId.trim()) config.secretId = vaultSecretId.trim();
+        // Optional PKI mount: classifies issuer CA certs, which is what actually
+        // drives `trusts` edges to hosts (transit keys alone do not).
+        if (vaultPkiMount.trim()) config.pkiMount = vaultPkiMount.trim();
+        endpointUrl = connEndpoint.trim();
       }
 
       const res = await fetch('/api/pki/connectors', {
@@ -166,7 +224,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
         body: JSON.stringify({
           name: connName,
           provider: connProvider,
-          endpointUrl: connEndpoint || (connProvider === 'aws_kms' ? 'https://kms.us-east-1.amazonaws.com' : 'https://vault.enterprise.local'),
+          endpointUrl,
           authType: connAuthType,
           config
         })
@@ -175,8 +233,8 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
       const data = await res.json();
       if (res.ok) {
         setShowAddModal(false);
-        setNotification({ msg: data.message, type: 'success' });
-        setConnName('');
+        setNotification({ msg: data.warning || data.message, type: data.warning ? 'error' : 'success' });
+        resetConnectorForm();
         fetchConnectors();
         fetchAssets();
       } else {
@@ -186,6 +244,13 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
       alert('Error creating connector: ' + err.message);
     }
   };
+
+  // Connectors that synced keys but no CA/issuer certificates. Trust (`trusts`)
+  // edges in the Threat & Risk Graph only form from CA/issuer certs that hosts'
+  // certificates chain to, so a key-only sync legitimately produces zero arrows.
+  const CA_ASSET_TYPES = new Set(['ca_root', 'certificate']);
+  const connectorHasCaCert = (connectorId: string): boolean =>
+    assets.some(a => a.connector_id === connectorId && CA_ASSET_TYPES.has(a.asset_type));
 
   // Metrics
   const totalKeys = connectors.reduce((acc, c) => acc + (c.total_keys_discovered || 0), 0);
@@ -239,8 +304,14 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
               </span>
             </div>
             <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.86rem', maxWidth: '850px', lineHeight: 1.5 }}>
-              Automated cryptographic discovery synchronization for <strong>Microsoft Active Directory Certificate Services (AD CS)</strong>, <strong>AWS KMS</strong>, <strong>Azure Key Vault</strong>, and <strong>HashiCorp Vault</strong>. Continuously catalogs enterprise roots of trust, asymmetric key pairs, and certificate templates to evaluate quantum risk without installing endpoint agents.
+              Agentless cryptographic discovery for <strong>AWS KMS</strong>, <strong>Azure Key Vault</strong>, and <strong>HashiCorp Vault</strong>, plus agent-reported <strong>Microsoft AD CS</strong>. Continuously catalogs enterprise roots of trust, asymmetric key pairs, and certificate templates to evaluate quantum risk.
             </p>
+            <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.45rem', alignItems: 'flex-start', fontSize: '0.74rem', color: 'var(--text-muted)', lineHeight: 1.5, maxWidth: '850px' }}>
+              <Info size={13} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+              <span>
+                The cloud console reaches <strong>public cloud endpoints</strong> (AWS/Azure/public Vault). On-prem or firewalled KMS/Vault/AD CS behind a private network can&apos;t be reached from the console — those require agent-side collection. A successful sync populates the inventory and PKI box; <strong>trust</strong> arrows to hosts in the Threat &amp; Risk Graph appear only once the connector syncs the CA/issuer certificates that your hosts&apos; certificates chain to (e.g. a Vault PKI mount or AD CS CA), not from app-level transit/KMS keys alone.
+              </span>
+            </div>
           </div>
 
           <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -386,6 +457,20 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
                 <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
                   Last sync: {c.last_sync_at ? new Date(c.last_sync_at).toLocaleString() : 'Never'}
                 </div>
+
+                {c.last_error && c.sync_status !== 'active' && (
+                  <div style={{ marginTop: '0.6rem', fontSize: '0.7rem', color: '#fca5a5', background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.25)', borderRadius: '5px', padding: '0.4rem 0.55rem', lineHeight: 1.45, display: 'flex', gap: '0.35rem', alignItems: 'flex-start', wordBreak: 'break-word' }}>
+                    <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                    <span>{c.last_error}</span>
+                  </div>
+                )}
+
+                {c.sync_status === 'active' && c.total_keys_discovered > 0 && c.provider !== 'ad_cs' && !connectorHasCaCert(c.id) && (
+                  <div style={{ marginTop: '0.6rem', fontSize: '0.7rem', color: 'var(--text-secondary)', background: 'rgba(59, 130, 246, 0.07)', border: '1px solid rgba(59, 130, 246, 0.22)', borderRadius: '5px', padding: '0.4rem 0.55rem', lineHeight: 1.45, display: 'flex', gap: '0.35rem', alignItems: 'flex-start' }}>
+                    <Info size={12} color="#60a5fa" style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                    <span>No CA/issuer certs found — trust relationships to hosts require a PKI/CA source{c.provider === 'hashicorp_vault' ? ' (set a PKI mount on this connector)' : ''}.</span>
+                  </div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '0.85rem' }}>
@@ -555,7 +640,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
                     { id: 'aws_kms', label: 'AWS KMS & Secrets' },
                     { id: 'azure_keyvault', label: 'Azure Key Vault' },
                     { id: 'hashicorp_vault', label: 'HashiCorp Vault' },
-                    { id: 'ad_cs', label: 'Microsoft AD CS' }
+                    { id: 'ad_cs', label: 'Microsoft AD CS · agent' }
                   ].map(p => (
                     <button
                       type="button"
@@ -597,12 +682,26 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>AWS Region</label>
-                      <input type="text" value={awsRegion} onChange={e => setAwsRegion(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
+                      <input type="text" placeholder="ap-south-1" value={awsRegion} onChange={e => setAwsRegion(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
                     </div>
                     <div>
                       <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>IAM Role ARN (Optional)</label>
-                      <input type="text" placeholder="arn:aws:iam::123456789012:role/..." value={awsRoleArn} onChange={e => setAwsRoleArn(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
+                      <input type="text" placeholder="arn:aws:iam::123456789012:role/... (leave blank to use keys directly)" value={awsRoleArn} onChange={e => setAwsRoleArn(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
                     </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Access Key ID</label>
+                      <input type="text" autoComplete="off" placeholder="AKIA..." value={awsAccessKeyId} onChange={e => setAwsAccessKeyId(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff', fontFamily: 'monospace' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Secret Access Key</label>
+                      <input type="password" autoComplete="new-password" placeholder="••••••••••••••••••••" value={awsSecretAccessKey} onChange={e => setAwsSecretAccessKey(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff', fontFamily: 'monospace' }} />
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5, display: 'flex', gap: '0.4rem' }}>
+                    <Info size={13} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                    <span>Provide an Access Key ID + Secret for a read-only IAM user (<code>kms:ListKeys</code>, <code>DescribeKey</code>, <code>ListAliases</code>, <code>GetKeyRotationStatus</code>). If you also supply a Role ARN, the keys are used to AssumeRole. Keys are AES-256-GCM encrypted at rest and never returned by the API.</span>
                   </div>
                 </>
               )}
@@ -623,20 +722,58 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
                       <input type="text" placeholder="Service Principal App ID" value={azureClientId} onChange={e => setAzureClientId(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
                     </div>
                   </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Client Secret</label>
+                    <input type="password" autoComplete="new-password" placeholder="Service Principal secret value" value={azureClientSecret} onChange={e => setAzureClientSecret(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff', fontFamily: 'monospace' }} />
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5, display: 'flex', gap: '0.4rem' }}>
+                    <Info size={13} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                    <span>Service-principal (client-credentials) auth. The app registration needs <code>Key Vault Reader</code> / list+get key permissions on the vault. The secret is AES-256-GCM encrypted at rest and never returned by the API.</span>
+                  </div>
                 </>
               )}
 
               {connProvider === 'hashicorp_vault' && (
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Vault Server URL</label>
-                  <input type="text" placeholder="https://vault.internal.corp:8200" value={connEndpoint} onChange={e => setConnEndpoint(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
-                </div>
+                <>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Vault Server URL</label>
+                    <input type="text" placeholder="https://vault.example.com:8200" value={connEndpoint} onChange={e => setConnEndpoint(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Vault Token</label>
+                    <input type="password" autoComplete="new-password" placeholder="hvs.••••••••••••••••" value={vaultToken} onChange={e => setVaultToken(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff', fontFamily: 'monospace' }} />
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                    — or authenticate with AppRole instead of a static token —
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>AppRole Role ID (Optional)</label>
+                      <input type="text" autoComplete="off" placeholder="role_id" value={vaultRoleId} onChange={e => setVaultRoleId(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff', fontFamily: 'monospace' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>AppRole Secret ID (Optional)</label>
+                      <input type="password" autoComplete="new-password" placeholder="secret_id" value={vaultSecretId} onChange={e => setVaultSecretId(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff', fontFamily: 'monospace' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>PKI Mount (Optional)</label>
+                    <input type="text" placeholder="pki (classifies issuer CA certs — drives trust arrows)" value={vaultPkiMount} onChange={e => setVaultPkiMount(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff', fontFamily: 'monospace' }} />
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5, display: 'flex', gap: '0.4rem' }}>
+                    <Info size={13} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                    <span>Supply a <strong>Token</strong> or <strong>AppRole</strong> (Role ID + Secret ID). Transit-engine keys populate the inventory; add a <strong>PKI mount</strong> to also catalog issuer CA certificates — those are what link to hosts in the Threat &amp; Risk Graph. Token / Secret ID are AES-256-GCM encrypted at rest.</span>
+                  </div>
+                </>
               )}
 
               {connProvider === 'ad_cs' && (
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>CA Server Hostname or LDAP Base DN</label>
-                  <input type="text" placeholder="ca01.corp.domain.local" value={connEndpoint} onChange={e => setConnEndpoint(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
+                <div style={{ padding: '1rem', borderRadius: '6px', background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.3)', display: 'flex', gap: '0.6rem', alignItems: 'flex-start' }}>
+                  <Info size={16} color="#3b82f6" style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.55 }}>
+                    <div style={{ fontWeight: 700, color: '#93c5fd', marginBottom: '0.3rem' }}>Agent-based — no console enrollment</div>
+                    Microsoft AD CS inventory is collected on-prem by a domain-joined host agent and pushed to QuarkShield automatically; it cannot be pulled from the cloud console (the CA lives behind your firewall). Run the QuarkShield agent with <code>--adcs</code> on the CA host. Once it reports, an <strong>AD CS</strong> connector appears here with the discovered CA certificates and templates.
+                  </div>
                 </div>
               )}
 
@@ -644,7 +781,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
                 <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary">
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
+                <button type="submit" className="btn btn-primary" disabled={connProvider === 'ad_cs'} style={connProvider === 'ad_cs' ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}>
                   Save &amp; Execute Initial Sync
                 </button>
               </div>

@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,9 +21,25 @@ import (
 
 // QuarkShield HMAC secret for offline license verification.
 // Override at build time to match the server:
-//   go build -ldflags "-X main.LicenseSigningSecret=$SECRET"
+//
+//	go build -ldflags "-X main.LicenseSigningSecret=$SECRET"
+//
 // (DEF-20) Keep this in sync with the server LICENSE_SIGNING_SECRET.
 var LicenseSigningSecret = "QuarkShield_PQC_Fleet_Master_License_Secret_2026"
+
+// defaultLicenseSigningSecret is the value compiled in when the build did NOT inject
+// a real secret. It is public (committed to the repo), so a key signed with it proves
+// nothing. Offline activation is only honoured when a real secret was injected.
+const defaultLicenseSigningSecret = "QuarkShield_PQC_Fleet_Master_License_Secret_2026"
+
+// errLicenseRejected marks an explicit rejection by the licensing server (as opposed
+// to a network failure). A rejected key must never fall back to offline validation.
+type errLicenseRejected struct{ msg string }
+
+// licenseServerURL is the licensing authority. Overridable in tests only.
+var licenseServerURL = "https://quarkshield.ai"
+
+func (e *errLicenseRejected) Error() string { return e.msg }
 
 type LicenseState struct {
 	InstallID  string    `json:"installId"`
@@ -62,7 +80,7 @@ func getLicenseStoragePath() string {
 		localApp := os.Getenv("LOCALAPPDATA")
 		if localApp != "" {
 			dir := filepath.Join(localApp, "QuarkShield")
-			_ = os.MkdirAll(dir, 0755)
+			_ = os.MkdirAll(dir, 0700)
 			return filepath.Join(dir, "license.json")
 		}
 	}
@@ -71,7 +89,7 @@ func getLicenseStoragePath() string {
 		home = "."
 	}
 	dir := filepath.Join(home, ".quarkshield")
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0700)
 	return filepath.Join(dir, "license.json")
 }
 
@@ -260,8 +278,15 @@ func QueryServerLicenseVerify(key string) (*ServerLicenseVerifyResponse, error) 
 		return nil, fmt.Errorf("empty license key")
 	}
 
-	serverURL := "https://quarkshield.ai"
-	endpoint := fmt.Sprintf("%s/api/scan/license/verify", serverURL)
+	base := licenseServerURL
+	// A self-hosted deployment issues its own licenses; verify against the server
+	// the agent is enrolled with (validated https / loopback-http only).
+	// (LoadEnrollmentConfig fills in the vendor default when unenrolled, so only an
+	// ENROLLED agent is redirected.)
+	if cfg := LoadEnrollmentConfig(); cfg.Token != "" && strings.TrimSpace(cfg.ServerURL) != "" && validateServerURL(cfg.ServerURL) == nil {
+		base = strings.TrimRight(strings.TrimSpace(cfg.ServerURL), "/")
+	}
+	endpoint := fmt.Sprintf("%s/api/scan/license/verify", base)
 
 	reqBody, _ := json.Marshal(map[string]string{"key": key})
 	client := &http.Client{Timeout: 4 * time.Second}
@@ -277,19 +302,29 @@ func QueryServerLicenseVerify(key string) (*ServerLicenseVerifyResponse, error) 
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 500 {
+		return nil, fmt.Errorf("license server unavailable (HTTP %d)", resp.StatusCode)
+	}
 	if resp.StatusCode != http.StatusOK {
 		var errData map[string]interface{}
-		_ = json.NewDecoder(resp.Body).Decode(&errData)
+		_ = json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&errData)
 		errMsg := "License verification rejected by central server"
 		if msg, ok := errData["error"].(string); ok {
 			errMsg = msg
 		}
-		return nil, fmt.Errorf("%s", errMsg)
+		return nil, &errLicenseRejected{msg: errMsg}
 	}
 
 	var result ServerLicenseVerifyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 64*1024)).Decode(&result); err != nil {
 		return nil, err
+	}
+	if !result.Valid {
+		msg := result.Error
+		if msg == "" {
+			msg = "License key is not valid"
+		}
+		return nil, &errLicenseRejected{msg: msg}
 	}
 	return &result, nil
 }
@@ -327,12 +362,20 @@ func ActivateLicense(key string) (LicenseInfoResponse, error) {
 		return GetLicenseInfo(), nil
 	}
 
-	// 2. If server explicitly rejected due to revocation
-	if srvErr != nil && strings.Contains(strings.ToLower(srvErr.Error()), "revoked") {
+	// 2. ANY explicit server rejection (revoked, expired, unknown, invalid) is final.
+	//    Only a network failure may proceed to the offline path.
+	var rejected *errLicenseRejected
+	if errors.As(srvErr, &rejected) {
 		return GetLicenseInfo(), srvErr
 	}
 
-	// 3. Fallback: Cryptographic offline HMAC validation (for air-gapped workstations)
+	// 3. Fallback: offline HMAC validation (air-gapped workstations). This is only
+	//    meaningful when the binary was built with a private signing secret; the
+	//    default compiled-in secret is public, so a key verified against it proves
+	//    nothing and is refused.
+	if LicenseSigningSecret == defaultLicenseSigningSecret {
+		return GetLicenseInfo(), fmt.Errorf("could not reach the licensing server (%v) and this build does not support offline activation", srvErr)
+	}
 	tier, tenant, expiresAt, err := ValidateLicenseKey(key)
 	if err != nil {
 		return GetLicenseInfo(), err

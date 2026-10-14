@@ -3,6 +3,13 @@
 # QuarkShield Agent Build & Azure Trusted Signing Automation
 # ==============================================================================
 set -e
+# The agent's offline license check is only meaningful when a PRIVATE signing
+# secret is compiled in; the default in license.go is public. Require it.
+if [ -z "${LICENSE_SIGNING_SECRET:-}" ] || [ "${#LICENSE_SIGNING_SECRET}" -lt 32 ]; then
+  echo "❌ LICENSE_SIGNING_SECRET must be set (>=32 chars) and match the server's value before building release binaries." >&2
+  exit 1
+fi
+GO_LDFLAGS="-s -w -X main.LicenseSigningSecret=${LICENSE_SIGNING_SECRET}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -13,7 +20,7 @@ echo "======================================================================"
 
 # 1. Compile Windows amd64 binary with embedded syso resources
 echo "⚙️ [1/4] Compiling quarkshield-scanner-windows-amd64.exe..."
-GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o quarkshield-scanner-windows-amd64.exe .
+GOOS=windows GOARCH=amd64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-windows-amd64.exe .
 
 # 2. Authenticode Sign via Azure Trusted Signing or local FedMitigate PKI fallback
 echo "🔑 [2/4] Authenticode Signing (FedMitigate LLC)..."
@@ -31,7 +38,7 @@ if [ "$SIGNED" = false ]; then
   if command -v osslsigncode >/dev/null 2>&1; then
     osslsigncode sign \
       -pkcs12 certs/fedmitigate-codesign.p12 \
-      -pass fedmitigate \
+      -pass "${FEDMITIGATE_P12_PASSWORD:?set FEDMITIGATE_P12_PASSWORD for local signing}" \
       -h sha256 \
       -n "QuarkShield Post-Quantum Guard" \
       -i "https://quarkshield.ai" \
@@ -40,7 +47,7 @@ if [ "$SIGNED" = false ]; then
       -out quarkshield-scanner-windows-amd64.exe.signed || \
     osslsigncode sign \
       -pkcs12 certs/fedmitigate-codesign.p12 \
-      -pass fedmitigate \
+      -pass "${FEDMITIGATE_P12_PASSWORD:?set FEDMITIGATE_P12_PASSWORD for local signing}" \
       -h sha256 \
       -n "QuarkShield Post-Quantum Guard" \
       -i "https://quarkshield.ai" \

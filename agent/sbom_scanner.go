@@ -24,6 +24,21 @@ type SbomComponentMetadata struct {
 	RemediationCmd string   `json:"remediationCmd"`
 }
 
+// collectSbomFindings runs the OS-package / SBOM audit for headless (CLI/daemon)
+// fleet syncs and returns its "package" findings (ecosystem os_pkg/deb/rpm/apk/brew).
+// It is best-effort: SBOM collection must never block or fail a crypto telemetry
+// sync, so any audit error (including cancellation) still yields whatever packages
+// were gathered. A nil progress callback keeps it silent in non-GUI contexts.
+//
+// This is what lets CLI-enrolled headless servers (which only call RunScan for the
+// crypto-file audit) contribute OS packages — e.g. openssh-server, nginx,
+// postgresql — so the server can classify them as servers and draw R8 service nodes
+// in the Threat & Risk Graph.
+func collectSbomFindings() []AuditResult {
+	findings, _, _ := RunSbomScanWithProgress(context.Background(), nil)
+	return findings
+}
+
 // RunSbomScanWithProgress audits workstation software packages, runtimes, and dependencies for CVEs and PQC agility
 func RunSbomScanWithProgress(ctx context.Context, onProgress func(currentPath string, scannedCount int, foundCount int)) ([]AuditResult, int, error) {
 	var findings []AuditResult
@@ -539,8 +554,8 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 					if len(parts) >= 2 {
 						pkgName := parts[0]
 						pkgVer := parts[1]
-						if isRelevantCryptoPkg(pkgName) {
-							results = append(results, createPkgAuditResult(pkgName, pkgVer, "Homebrew (macOS)", "/opt/homebrew/Cellar/"+pkgName))
+						if isRelevantCryptoPkg(pkgName) || isServerServicePkg(pkgName) {
+							results = append(results, createPkgAuditResult(pkgName, pkgVer, "brew", "/opt/homebrew/Cellar/"+pkgName))
 						}
 					}
 				}
@@ -562,9 +577,9 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 					if len(parts) >= 2 {
 						pkgName := parts[0]
 						pkgVer := parts[1]
-						if isRelevantCryptoPkg(pkgName) && !seenPkgs[pkgName] {
+						if (isRelevantCryptoPkg(pkgName) || isServerServicePkg(pkgName)) && !seenPkgs[pkgName] {
 							seenPkgs[pkgName] = true
-							results = append(results, createPkgAuditResult(pkgName, pkgVer, "dpkg (Debian/Ubuntu)", "/var/lib/dpkg/info/"+pkgName))
+							results = append(results, createPkgAuditResult(pkgName, pkgVer, "deb", "/var/lib/dpkg/info/"+pkgName))
 						}
 					}
 				}
@@ -583,9 +598,9 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 					if len(parts) >= 2 {
 						pkgName := parts[0]
 						pkgVer := parts[1]
-						if isRelevantCryptoPkg(pkgName) && !seenPkgs[pkgName] {
+						if (isRelevantCryptoPkg(pkgName) || isServerServicePkg(pkgName)) && !seenPkgs[pkgName] {
 							seenPkgs[pkgName] = true
-							results = append(results, createPkgAuditResult(pkgName, pkgVer, "RPM (RHEL/Fedora)", "/var/lib/rpm"))
+							results = append(results, createPkgAuditResult(pkgName, pkgVer, "rpm", "/var/lib/rpm"))
 						}
 					}
 				}
@@ -607,9 +622,9 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 						if secondLastDash > 0 {
 							pkgName := line[:secondLastDash]
 							pkgVer := line[secondLastDash+1:]
-							if isRelevantCryptoPkg(pkgName) && !seenPkgs[pkgName] {
+							if (isRelevantCryptoPkg(pkgName) || isServerServicePkg(pkgName)) && !seenPkgs[pkgName] {
 								seenPkgs[pkgName] = true
-								results = append(results, createPkgAuditResult(pkgName, pkgVer, "apk (Alpine)", "/etc/apk"))
+								results = append(results, createPkgAuditResult(pkgName, pkgVer, "apk", "/etc/apk"))
 							}
 						}
 					}
@@ -629,9 +644,9 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 					if len(parts) >= 2 {
 						pkgName := parts[0]
 						pkgVer := parts[1]
-						if isRelevantCryptoPkg(pkgName) && !seenPkgs[pkgName] {
+						if (isRelevantCryptoPkg(pkgName) || isServerServicePkg(pkgName)) && !seenPkgs[pkgName] {
 							seenPkgs[pkgName] = true
-							results = append(results, createPkgAuditResult(pkgName, pkgVer, "pacman (Arch)", "/var/lib/pacman"))
+							results = append(results, createPkgAuditResult(pkgName, pkgVer, "os_pkg", "/var/lib/pacman"))
 						}
 					}
 				}
@@ -657,7 +672,7 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 				name := filepath.Base(binPath)
 				if !seenPkgs[name] {
 					seenPkgs[name] = true
-					results = append(results, createPkgAuditResult(name, "Installed", "Linux Binary", binPath))
+					results = append(results, createPkgAuditResult(name, "Installed", "os_pkg", binPath))
 				}
 			}
 		}
@@ -689,7 +704,7 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 				key := strings.ToLower(dispName)
 				if !seenPkgs[key] {
 					seenPkgs[key] = true
-					results = append(results, createPkgAuditResult(dispName, dispVer, "Windows Software (Registry)", loc))
+					results = append(results, createPkgAuditResult(dispName, dispVer, "winget", loc))
 				}
 			}
 		}
@@ -718,7 +733,7 @@ func auditSystemPackageManagerPackages(ctx context.Context, reportProgress func(
 				key := strings.ToLower(name)
 				if !seenPkgs[key] {
 					seenPkgs[key] = true
-					results = append(results, createPkgAuditResult(name, "Installed", "Windows Application", p))
+					results = append(results, createPkgAuditResult(name, "Installed", "os_pkg", p))
 				}
 			}
 		}
@@ -794,8 +809,8 @@ func auditProjectManifests(ctx context.Context, reportProgress func(string)) []A
 
 func parseManifestForCryptoDependencies(filePath, fileName string) []AuditResult {
 	var findings []AuditResult
-	data, err := os.ReadFile(filePath)
-	if err != nil || len(data) == 0 {
+	data, ok := readScanFile(filePath)
+	if !ok {
 		return findings
 	}
 
@@ -948,6 +963,21 @@ func findExecutable(name string, knownPaths []string) string {
 	return ""
 }
 
+// serverServicePkgRe mirrors the server-side Threat Graph R8 SERVICE_SIGNATURES
+// (server/src/lib/threatGraph/topology.ts). These OS packages indicate a network
+// service running on the host; collecting them headlessly lets the server draw
+// service/database nodes and classify the host as a server (R8 → R9). Keep this in
+// sync with SERVICE_SIGNATURES so the package names the agent sends actually match.
+var serverServicePkgRe = regexp.MustCompile(`(?i)^(postgresql(-?\d+)?(-server)?|postgres|mysql-server|mysql-community-server|mariadb-server|mariadb|mongodb-org-server|mongodb-server|mongod|mongodb|redis|redis-server|mssql-server|elasticsearch|opensearch|nginx|nginx-core|httpd|apache2|openssh-server)$`)
+
+// isServerServicePkg reports whether a package name denotes a server network
+// service (web server, database, SSH server) that the Threat Graph treats as a
+// "runs" signal. It is intentionally broader than isRelevantCryptoPkg, which only
+// covers cryptographic libraries/tools.
+func isServerServicePkg(name string) bool {
+	return serverServicePkgRe.MatchString(strings.TrimSpace(name))
+}
+
 func isRelevantCryptoPkg(name string) bool {
 	lower := strings.ToLower(name)
 	targets := []string{
@@ -971,7 +1001,7 @@ func createPkgAuditResult(name, version, ecosystem, path string) AuditResult {
 		Path:      path,
 		Version:   version,
 		Ecosystem: ecosystem,
-		Purl:      fmt.Sprintf("pkg:generic/%s@%s", name, version),
+		Purl:      fmt.Sprintf("pkg:%s/%s@%s", ecosystem, name, version),
 		Algorithm: "OS Package / Security Runtime",
 	}
 

@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +15,13 @@ import (
 )
 
 func hideConsole(cmd *exec.Cmd) {}
-func detachConsole()            {}
+
+func xmlEscape(s string) string {
+	var b strings.Builder
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
+}
+func detachConsole() {}
 
 // ensureBackgroundService (DEF-39, macOS) installs + loads a per-user LaunchAgent so
 // the agent keeps polling for on-demand pulls and running scheduled syncs even when
@@ -36,9 +43,16 @@ func ensureBackgroundService(serverURL string) {
 	if serverURL == "" {
 		serverURL = "https://quarkshield.ai"
 	}
+	if err := validateServerURL(serverURL); err != nil {
+		return
+	}
 	laDir := filepath.Join(home, "Library", "LaunchAgents")
 	_ = os.MkdirAll(laDir, 0755)
+	logDir := filepath.Join(home, "Library", "Logs", "QuarkShield")
+	_ = os.MkdirAll(logDir, 0700)
 	plistPath := filepath.Join(laDir, "ai.quarkshield.agent.plist")
+	// Values are XML-escaped: exePath/serverURL must not be able to inject extra
+	// <string> arguments into ProgramArguments.
 	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -55,11 +69,11 @@ func ensureBackgroundService(serverURL string) {
     <key>KeepAlive</key><true/>
     <key>ThrottleInterval</key><integer>30</integer>
     <key>ProcessType</key><string>Background</string>
-    <key>StandardOutPath</key><string>/tmp/quarkshield-agent.log</string>
-    <key>StandardErrorPath</key><string>/tmp/quarkshield-agent.err</string>
+    <key>StandardOutPath</key><string>%s</string>
+    <key>StandardErrorPath</key><string>%s</string>
 </dict>
 </plist>
-`, exePath, serverURL)
+`, xmlEscape(exePath), xmlEscape(serverURL), xmlEscape(filepath.Join(logDir, "agent.log")), xmlEscape(filepath.Join(logDir, "agent.err")))
 	existing, _ := os.ReadFile(plistPath)
 	if string(existing) != plist {
 		if err := os.WriteFile(plistPath, []byte(plist), 0644); err != nil {
@@ -171,4 +185,3 @@ func pickFolderOS() string {
 	}
 	return ""
 }
-

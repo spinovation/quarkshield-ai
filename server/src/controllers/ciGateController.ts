@@ -121,18 +121,26 @@ export const evaluateCIGate = async (req: Request, res: Response) => {
     let threshold = 40;
     try {
       const pol = await pool.query(
-        "SELECT max_quantum_risk_score FROM ci_gate_policies WHERE LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global' OR is_default = TRUE ORDER BY (LOWER(tenant_name) = LOWER($1)) DESC, is_default DESC LIMIT 1",
+        "SELECT max_quantum_risk_score FROM ci_gate_policies WHERE LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global' ORDER BY (LOWER(tenant_name) = LOWER($1)) DESC, is_default DESC LIMIT 1",
         [effectiveTenant]
       );
       if (pol.rows[0] && pol.rows[0].max_quantum_risk_score != null) threshold = Number(pol.rows[0].max_quantum_risk_score);
       else if (Number.isFinite(Number(maxAllowedRisk))) threshold = Number(maxAllowedRisk);
     } catch { /* keep default */ }
 
-    // If filesChanged provided, scan them
+    // If filesChanged provided, scan them (bounded: this endpoint is reachable without
+    // a session, so cap the work and storage a single call can cause).
+    const MAX_FILES = 500;
+    const MAX_FILE_BYTES = 512 * 1024;
+    const MAX_FINDINGS = 2000;
+    if (Array.isArray(filesChanged) && filesChanged.length > MAX_FILES) {
+      return res.status(413).json({ error: `Too many files in one evaluation (max ${MAX_FILES}).` });
+    }
     if (Array.isArray(filesChanged) && filesChanged.length > 0) {
       for (const file of filesChanged) {
         if (!file.path || !file.content) continue;
-        const lines = String(file.content).split('\n');
+        if (detectedFindings.length >= MAX_FINDINGS) break;
+        const lines = String(file.content).slice(0, MAX_FILE_BYTES).split('\n');
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i];
           for (const rule of CI_CRYPTO_RULES) {
@@ -254,10 +262,14 @@ export const getCIGateHistory = async (req: Request, res: Response) => {
 
 export const getCIGatePolicies = async (req: Request, res: Response) => {
   try {
-    const { tenant = 'SPINOVATIONCORP' } = req.query;
+    // requireTenantAccess pins ?tenant to the session tenant for non-super sessions.
+    const tenant = String(req.query.tenant || req.user?.tenant || '');
+    if (!tenant) return res.status(400).json({ error: 'A tenant is required.' });
+    // A tenant sees its own policies plus the platform's 'global' templates — never
+    // another tenant's rows, even if they were flagged is_default.
     const result = await pool.query(
-      "SELECT * FROM ci_gate_policies WHERE LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global' OR is_default = TRUE ORDER BY is_default DESC, created_at DESC",
-      [String(tenant)]
+      "SELECT * FROM ci_gate_policies WHERE LOWER(tenant_name) = LOWER($1) OR tenant_name = 'global' ORDER BY is_default DESC, created_at DESC",
+      [tenant]
     );
     res.json(result.rows);
   } catch (err: any) {

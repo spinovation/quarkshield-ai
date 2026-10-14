@@ -5,6 +5,11 @@ import path from 'path';
 
 dotenv.config();
 
+if (process.env.NODE_ENV === 'production' && !process.env.DB_PASSWORD) {
+  // Never connect to a production database with the postgres default password.
+  throw new Error('DB_PASSWORD is not set (required in production).');
+}
+
 const pool = new Pool({
   user: process.env.DB_USER || 'postgres',
   host: process.env.DB_HOST || 'localhost',

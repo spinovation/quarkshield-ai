@@ -68,24 +68,30 @@ export const buildPOAMWorkbook = async (
     : 'See CBOM';
   const today = new Date().toISOString().slice(0, 10);
 
+  // A cell beginning with = + - @ is executed as a formula by Excel; prefix such
+  // user-entered text so it is displayed, not evaluated.
+  const safeCell = (v: unknown): string => {
+    const t = String(v ?? '');
+    return /^[=+\-@\t\r]/.test(t) ? `'${t}` : t;
+  };
   open.forEach((c, i) => {
     ws.addRow([
       `V-${String(i + 1).padStart(4, '0')}`,
       c.control_id,
       `Quantum-vulnerable cryptography (${c.control_id})`,
-      `${c.title}. ${c.fips || ''}`.trim(),
+      safeCell(`${c.title}. ${c.fips || ''}`.trim()),
       DETECTOR,
       `QS-${(c.control_key || 'CTRL')}-${String(i + 1).padStart(3, '0')}`,
       assetSummary,
-      c.owner || '',
+      safeCell(c.owner || ''),
       'Software remediation + migration engineering',
-      c.comments || 'Migrate affected cryptography to NIST FIPS 203/204/205 (ML-KEM / ML-DSA / SLH-DSA).',
+      safeCell(c.comments || 'Migrate affected cryptography to NIST FIPS 203/204/205 (ML-KEM / ML-DSA / SLH-DSA).'),
       today,
       c.target_date ? String(c.target_date).slice(0, 10) : '',
       statusLabel(c.status),
       c.status === 'non_compliant' ? 'High' : 'Moderate',
       typeof c.percent_complete === 'number' ? c.percent_complete : 0,
-      c.comments || '',
+      safeCell(c.comments || ''),
     ]);
   });
   if (open.length === 0) {

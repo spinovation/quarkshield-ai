@@ -52,6 +52,7 @@ import {
   File,
   Calendar,
   ShieldCheck,
+  Radar,
   Users,
   QrCode,
   Settings,
@@ -69,6 +70,9 @@ import { PqcProxyGateway } from './PqcProxyGateway';
 import { GitRepoAuditor } from './GitRepoAuditor';
 import SbomInventory from './SbomInventory';
 import ComplianceProjects from './ComplianceProjects';
+
+// Threat & Risk Graph pulls in React Flow; load it only when the tab is opened.
+const ThreatRiskGraph = React.lazy(() => import('./ThreatRiskGraph/ThreatRiskGraph'));
 import { CryptographicPostureCard, calculatePostureMetrics } from './CryptographicPostureCard';
 
 export interface InternalUserLog {
@@ -529,7 +533,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     avgRiskScore: 87
   });
   const [sessionExpired, setSessionExpired] = useState(false);
-  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'compliance' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'compliance' | 'threat' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
     try {
       const p = new URLSearchParams(window.location.search);
       const t = p.get('tab');
@@ -571,13 +575,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const handleOpenStripePortal = async () => {
     setPortalLoading(true);
     try {
-      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
       const res = await fetch('/api/billing/portal-session', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tenantSlug: client.name })
       });
       const data = await res.json();
@@ -601,9 +602,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const isPartner = client.accountType === 'partner' ||
     (client.customerId && client.customerId.startsWith('PART-')) ||
     cleanSlug.includes('algomeld') ||
-    cleanSlug.includes('partner') ||
-    emailInput.toLowerCase().includes('algomeld') ||
-    emailInput.toLowerCase().includes('partner');
+    cleanSlug.includes('partner');
 
   const displayCustomerId = client.customerId || (cleanSlug.includes('algomeld') ? 'PART-4421' : (cleanSlug.includes('partner') || isPartner ? 'PART-7000' : `CORP-${cleanSlug.slice(0, 4).toUpperCase()}`));
   const displayCustomerName = client.displayName || (cleanSlug.includes('algomeld') ? 'Algomeld' : (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)));
@@ -1077,6 +1076,14 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       const res = await fetch(`/api/tenant/${cleanSlug}/portal-data`);
       if (res.ok) {
         const data = await res.json();
+        // A successful portal-data read proves a valid server session (the cookie is
+        // apex-scoped, while the client-side tenant_auth flag is per-origin and is NOT
+        // set after the landing-page redirect). Treat it as authenticated.
+        if (!isAuthenticated) {
+          setIsAuthenticated(true);
+          try { sessionStorage.setItem(`tenant_auth_${cleanSlug}`, 'true'); } catch { /* ignore */ }
+        }
+        setSessionExpired(false);
         if (data.client) setClient(data.client);
         if (data.machines) setMachines(data.machines);
         if (data.assets) setAssets(data.assets);
@@ -1144,6 +1151,71 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       alert(`Bulk pull error: ${e}`);
     } finally {
       setBulkPulling(null);
+    }
+  };
+
+  // ---- Fleet Probe (on-demand TLS endpoint probing for the Threat & Risk Graph) ----
+  // Admin triggers the agent's TLS prober against a target list; findings sync back
+  // and populate host<->host connects_to / cert serves arrows. Server enforces
+  // tenant-admin + validates/rate-limits; this dialog collects the targets.
+  const [probeDialog, setProbeDialog] = useState<
+    { scope: 'machine' | 'group' | 'all'; machineId?: string; hostname?: string; group?: string } | null
+  >(null);
+  const [probeTargetsText, setProbeTargetsText] = useState('');
+  const [probeSubmitting, setProbeSubmitting] = useState(false);
+
+  // Parse the textarea into host:port lines (one per line / comma separated), trimmed.
+  const parseProbeTargets = (text: string): string[] =>
+    text
+      .split(/[\n,]+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+  const openProbeDialog = (d: { scope: 'machine' | 'group' | 'all'; machineId?: string; hostname?: string; group?: string }) => {
+    setProbeTargetsText('');
+    setProbeDialog(d);
+  };
+
+  const submitProbe = async () => {
+    if (!probeDialog) return;
+    const targets = parseProbeTargets(probeTargetsText);
+    if (targets.length === 0) {
+      alert('Enter at least one target as host:port (one per line), e.g. api.internal:443');
+      return;
+    }
+    setProbeSubmitting(true);
+    try {
+      let url = '';
+      let body: any = { targets };
+      if (probeDialog.scope === 'machine' && probeDialog.machineId) {
+        url = `/api/fleet/machines/${probeDialog.machineId}/probe`;
+      } else {
+        url = `/api/fleet/probe-bulk`;
+        if (probeDialog.scope === 'group' && probeDialog.group) body.group = probeDialog.group;
+      }
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(
+          `${data.message || 'Probe queued.'} Each agent runs the probe on its next check-in; the Threat & Risk Graph populates connectivity arrows once findings sync back.`
+        );
+        setProbeDialog(null);
+        fetchTenantData();
+      } else if (res.status === 403) {
+        alert(data.error || 'Probe not permitted: tenant-administrator access is required (or probing is disabled for this tenant).');
+      } else if (res.status === 429) {
+        alert(data.error || 'Probe rate limit reached; try again shortly.');
+      } else {
+        alert(`Failed to queue probe: ${data.error || res.status}`);
+      }
+    } catch (e) {
+      alert(`Probe error: ${e}`);
+    } finally {
+      setProbeSubmitting(false);
     }
   };
 
@@ -1260,11 +1332,32 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     } catch { /* non-fatal */ }
   };
 
+  // Risk Assurance add-on: the Threat & Risk Graph tab is shown only to tenants that have it.
+  const [hasRiskAssurance, setHasRiskAssurance] = useState(false);
   useEffect(() => {
+    if (!isAuthenticated && !isSupportMirror) return;
+    const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token') || '';
+    fetch('/api/entitlements', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => (r.ok ? r.json() : null))
+      .then(ent => setHasRiskAssurance(!!ent?.riskAssurance))
+      .catch(() => setHasRiskAssurance(false));
+  }, [isAuthenticated, isSupportMirror]);
+
+  useEffect(() => {
+    // Load only once signed in: an anonymous fetch 401s and would latch "session expired",
+    // which then showed right after a successful login.
+    if (!isAuthenticated && !isSupportMirror) return;
+    setSessionExpired(false);
+    // Strip a stale "?session=expired" left in the URL by a transient 401 bounce: the
+    // httpOnly cookie re-authenticated us, so the authenticated portal shouldn't keep
+    // advertising an expired session in the address bar.
+    if (isAuthenticated && typeof window !== 'undefined' && window.location.search.includes('session=expired')) {
+      try { window.history.replaceState(null, '', window.location.pathname + window.location.hash); } catch { /* no-op */ }
+    }
     fetchTenantData();
     fetchPullSchedules();
     fetchFleetGroups();
-  }, [cleanSlug]);
+  }, [cleanSlug, isAuthenticated, isSupportMirror]);
 
   const completeTenantLogin = (data?: any) => {
     setIsAuthenticated(true);
@@ -1304,26 +1397,25 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         })
       });
 
-      let data: any = null;
-      if (res.ok) {
-        data = await res.json();
-      } else {
-        const errJson = await res.json().catch(() => null);
-        if (res.status === 401 || res.status === 400 || res.status === 403) {
-          throw new Error(errJson?.error || 'Invalid credentials. Please verify your password.');
-        }
+      const data: any = await res.json().catch(() => null);
+      // Only an explicit success from the server signs the user in. The old code
+      // treated ANY non-401/400/403 response (500, 502, 429, or 200 without
+      // success) as a successful login with a fabricated "Corporate Admin" role.
+      if (!res.ok || !data || !data.success) {
+        // A 2FA challenge arrives as 200 {success:false, twoFactorRequired:true, message}.
+        throw new Error(data?.error || data?.message || `Sign-in failed (server returned ${res.status}). Please try again.`);
       }
-
-      if (data && data.success) {
-        if (data.mustChangePassword) {
-          setShowTenantForceChangeModal(true);
-          return;
-        }
-        completeTenantLogin(data);
-      } else {
-        // Fallback login
-        completeTenantLogin();
+      if (data.mustChangePassword) {
+        setShowTenantForceChangeModal(true);
+        return;
       }
+      completeTenantLogin(data);
+      // The pre-login portal-data fetch 401s and latches "session expired"; clear
+      // that now and load the real data for this session.
+      setSessionExpired(false);
+      fetchTenantData();
+      fetchPullSchedules();
+      fetchFleetGroups();
     } catch (err: any) {
       setLoginError(err.message || 'Authentication failed. Please verify credentials.');
     } finally {
@@ -1363,11 +1455,25 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       }
 
       setTenantForceSuccess('Password successfully updated. Signing into workspace...');
-      setTimeout(() => {
-        setShowTenantForceChangeModal(false);
-        setPasswordInput(tenantForceNewPassword);
-        completeTenantLogin();
-      }, 1200);
+      // Re-authenticate with the new password so role/account data come from the
+      // server (never a client-side default).
+      const loginRes = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: emailInput.trim(), password: tenantForceNewPassword, totpCode: login2FACode })
+      });
+      const loginData = await loginRes.json().catch(() => null);
+      setShowTenantForceChangeModal(false);
+      setPasswordInput(tenantForceNewPassword);
+      if (!loginRes.ok || !loginData?.success) {
+        setLoginError('Password updated. Please sign in again with your new password.');
+        return;
+      }
+      completeTenantLogin(loginData);
+      setSessionExpired(false);
+      fetchTenantData();
+      fetchPullSchedules();
+      fetchFleetGroups();
     } catch (err: any) {
       setTenantForceError(err.message || 'Failed to change password. Please try again.');
     } finally {
@@ -1405,9 +1511,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   };
 
   const handleSignOut = () => {
+    fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
     setIsAuthenticated(false);
     sessionStorage.removeItem(`tenant_auth_${cleanSlug}`);
     localStorage.removeItem(`tenant_auth_${cleanSlug}`);
+    // Copilot transcripts can contain hostnames and remediation details; never leave
+    // them for the next user of this browser.
+    try { localStorage.removeItem(`quarkshield_copilot_sessions_${cleanSlug}`); } catch { /* ignore */ }
     if (onLogout) onLogout();
   };
 
@@ -1813,35 +1923,18 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         throw new Error('AI service error');
       }
     } catch (err) {
-      console.warn('Backend AI endpoint fallback, generating local PQC response:', err);
-      let fallbackReply = '';
-      const lower = text.toLowerCase();
-      if (lower.includes('factor') || lower.includes('rsa') || lower.includes('prime')) {
-        fallbackReply = `### RSA Factorization Vulnerability (Shor's Algorithm)\n\nClassical RSA relies on the computational hardness of prime integer factorization ($N = p \\times q$).\n\n| Algorithm | Modulus Size | Classical Security | Quantum Vulnerability (Shor's) | Logical Qubits Needed |\n| :--- | :--- | :--- | :--- | :--- |\n| **RSA-2048** | 2,048 bits | 112 bits (GNFS resistant) | **Completely broken in $O((\\log N)^3)$** | ~4,096 logical qubits |\n| **RSA-3072** | 3,072 bits | 128 bits | **Completely broken** | ~6,144 logical qubits |\n| **RSA-4096** | 4,096 bits | 144 bits | **Completely broken** | ~8,192 logical qubits |\n\n• **Polynomial-Time Breakdown**: Shor's algorithm solves factorization in polynomial time $O((\\log N)^3)$ using quantum period-finding via the Quantum Fourier Transform (QFT).\n• **Key Size Inefficacy**: Increasing key length to 4096 or 8192 bits offers zero defense against quantum computers—only a linear increase in qubits is required.\n• **Remediation**: Migrate RSA to **ML-KEM (FIPS 203)** for key exchange and **ML-DSA (FIPS 204)** or **SLH-DSA (FIPS 205)** for signatures.`;
-      } else if (lower.includes('elliptic') || lower.includes('ecc') || lower.includes('ecdsa') || lower.includes('diffie') || lower.includes('2300')) {
-        fallbackReply = `### Elliptic Curve Collapse & Diffie-Hellman Vulnerabilities\n\nECDSA (P-256 / secp256k1) and Diffie-Hellman rely on the Discrete Logarithm Problem ($Q = k \\cdot G$).\n\n| Cryptosystem | Classical Bits | Qubits to Break (Shor's) | Relative Threat vs RSA-2048 |\n| :--- | :--- | :--- | :--- |\n| **ECDSA P-256 (NIST)** | 128 bits | **~2,330 logical qubits** | **Falls ~45% FASTER than RSA-2048** |\n| **secp256k1 (Bitcoin/ETH)** | 128 bits | **~2,330 logical qubits** | **Falls ~45% FASTER than RSA-2048** |\n| **Ed25519 / X25519** | 128 bits | **~2,330 logical qubits** | **Falls ~45% FASTER than RSA-2048** |\n| **Diffie-Hellman 2048** | 112 bits | **~4,096 logical qubits** | Breaks simultaneously with RSA-2048 |\n\n• **Why ECC Collapses Faster**: Because elliptic curves use smaller operand sizes, Shor's algorithm requires only **~2,330 logical qubits**—meaning ECDSA will collapse before RSA-2048!\n• **Remediation**: Upgrade ECDH to **ML-KEM-768 (FIPS 203)** and ECDSA to **ML-DSA-65 (FIPS 204)**.`;
-      } else if (lower.includes('production') || lower.includes('pervasive') || lower.includes('99%') || lower.includes('underpin')) {
-        fallbackReply = `### Pervasive Classical Cryptography in Production (99% Exposure)\n\nClassical RSA and ECC underpin **over 99% of digital enterprise infrastructure** globally:\n\n| Production Layer | Classical Dependency | Quantum Threat Impact | Remediation Standard |\n| :--- | :--- | :--- | :--- |\n| **TLS / HTTPS Ingress** | RSA / ECDSA certificates, ECDH KEX | Retroactive decryption (HNDL), MITM session hijacking | Hybrid TLS 1.3 (\`X25519MLKEM768\`) |\n| **SSH Administration** | \`ssh-rsa\`, \`ecdsa-sha2\` keys | Complete remote server & root access compromise | OpenSSH 9.8+ (\`mlkem768x25519-sha256\`) |\n| **Enterprise VPNs** | IPsec / IKEv2 / OpenVPN DH groups | Adversary eavesdropping on corporate WAN tunnels | Post-quantum IPsec / ML-KEM |\n| **API Tokens & JWTs** | RS256 / ES256 signatures | Forged auth claims, privilege escalation | ML-DSA tokens or symmetric HS256 HMAC |\n| **Code Signing & CI/CD** | Authenticode, Apple Developer, Git commits | Malicious firmware & software supply-chain injection | ML-DSA-65 / NIST SP 800-208 (LMS/XMSS) |\n\nBecause classical algorithms are hardcoded into OS trust stores and HSMs, migration takes 3 to 7 years. Waiting is not an option.`;
-      } else if (lower.includes('harvest') || lower.includes('hndl') || lower.includes('mosca') || lower.includes('traffic')) {
-        fallbackReply = `### Harvested Traffic Threat ('Harvest Now, Decrypt Later' / HNDL) & Mosca's Theorem\n\nAdversaries and state intelligence services are tapping fiber lines and public clouds today to store encrypted traffic for future quantum decryption.\n\n**Mosca's Theorem Risk Equation**:\n$$\\mathbf{X + Y > Z} \\implies \\text{Your Confidentiality Is ALREADY Lost!}$$\n\n• **$X$ (Shelf-Life)**: Number of years sensitive data must remain secret (defense: 30+ yrs, healthcare PII: 50+ yrs, IP: 15-20 yrs).\n• **$Y$ (Migration Time)**: Years required to migrate legacy systems (enterprise average: 4 to 8 years).\n• **$Z$ (CRQC Horizon)**: Years until a Cryptanalytically Relevant Quantum Computer arrives (~2029 - 2033).\n\nIf $X + Y > Z$, data intercepted today is already compromised! Immediate deployment of hybrid key exchange (\`X25519MLKEM768\`) is mandatory.`;
-      } else {
-        fallbackReply = `### QuarkShield Post-Quantum Security Posture\n\n**Organization Overview:**\n- **Tenant:** ${client.displayName} (${client.customerId})\n- **Discovered Assets:** ${stats.totalAssets || assets.length || 98} cryptographic keys, certificates, and ciphers.\n- **Vulnerable Footprint:** Approximately 98% of discovered assets rely on classical RSA and ECDSA, which Shor's algorithm renders insecure.\n\n**Immediate Recommended Actions:**\n1. **OpenSSH Upgrade:** Ensure macOS and Linux workstations run OpenSSH 9.8+ to enforce hybrid \`mlkem768x25519-sha256\`.\n2. **TLS Ingress:** Deploy hybrid \`X25519MLKEM768\` across NGINX and reverse proxies.\n3. **Continuous Discovery:** Keep the QuarkShield endpoint agent active to populate real-time CBOM inventories.`;
-      }
-
+      // Never fabricate an "AI" answer (the old fallback invented asset counts and a
+      // "98% vulnerable" figure). Surface the failure honestly.
+      console.warn('AI copilot request failed:', err);
       const fallbackAiMsg: CopilotMessage = {
         id: 'msg-ai-' + Date.now(),
         sender: 'ai',
-        text: fallbackReply,
+        text: 'The PQC Copilot is temporarily unavailable (the AI service did not respond). Please try again in a moment.',
         timestamp: new Date().toISOString()
       };
-
       setCopilotSessions(prev => prev.map(s => {
         if (s.id === activeSessionId) {
-          return {
-            ...s,
-            updatedAt: new Date().toISOString(),
-            messages: [...s.messages, fallbackAiMsg]
-          };
+          return { ...s, updatedAt: new Date().toISOString(), messages: [...s.messages, fallbackAiMsg] };
         }
         return s;
       }));
@@ -2743,55 +2836,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               }} 
             />
           </div>
-          <button
-            onClick={() => {
-              if (onNavigateHome) onNavigateHome();
-              else window.location.href = 'https://quarkshield.ai';
-            }}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: 'var(--text-muted, #64748b)',
-              cursor: 'pointer',
-              padding: '0.2rem',
-              display: 'flex',
-              alignItems: 'center'
-            }}
-            title="Exit to QuarkShield.ai Landing Page"
-          >
-            <Globe size={16} />
-          </button>
-        </div>
-
-        {/* Tenant Identification Badge */}
-        <div style={{
-          padding: '0.55rem 0.75rem',
-          borderRadius: '6px',
-          background: 'rgba(56, 189, 248, 0.06)',
-          border: '1px solid rgba(56, 189, 248, 0.2)',
-          marginBottom: '0.75rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.2rem'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 800, color: '#ffffff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={client.displayName || displayCustomerName}>
-              {client.displayName || displayCustomerName}
-            </span>
-            <span style={{
-              fontSize: '0.65rem',
-              padding: '0.1rem 0.35rem',
-              borderRadius: '3px',
-              background: 'rgba(34, 197, 94, 0.15)',
-              color: '#4ade80',
-              fontWeight: 700
-            }}>
-              ACTIVE
-            </span>
-          </div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', fontFamily: 'monospace' }}>
-            {client.customerId || 'CORP-9812'} • Port: {client.appPort || 5002}
-          </div>
         </div>
 
         {/* Primary Vertical Navigation Tabs */}
@@ -2800,6 +2844,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             { id: 'overview', label: 'Fleet Overview', icon: Laptop },
             { id: 'cbom', label: 'Cryptographic BOM (CBOM)', icon: FileCode },
             { id: 'compliance', label: 'Compliance (OSCAL)', icon: ShieldCheck },
+            ...(hasRiskAssurance ? [{ id: 'threat', label: 'Threat & Risk Graph', icon: Radar }] : []),
             { id: 'integrations_gw', label: 'Integrations & Gateways', icon: Network },
             { id: 'copilot', label: 'PQC Copilot', icon: Sparkles, badge: 'AI' },
             { id: 'settings', label: 'Settings', icon: Settings }
@@ -2960,63 +3005,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           })}
         </div>
 
-        {/* Subscription Scale Card */}
+        {/* Account / profile footer — subscription scale moved up into the header banner */}
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.65rem', paddingTop: '1rem' }}>
-          <div style={{
-            background: 'rgba(13, 19, 33, 0.85)',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '8px',
-            padding: '0.85rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.55rem'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-muted, #64748b)', letterSpacing: '0.06em', textTransform: 'uppercase', lineHeight: 1.25 }}>
-                SUBSCRIPTION<br />SCALE
-              </div>
-              <div style={{
-                border: '1px solid rgba(255, 255, 255, 0.35)',
-                borderRadius: '4px',
-                padding: '0.18rem 0.45rem',
-                fontSize: '0.68rem',
-                fontWeight: 700,
-                color: '#ffffff',
-                letterSpacing: '0.04em',
-                lineHeight: 1.1,
-                textAlign: 'center'
-              }}>
-                CORPORATE<br />TIER
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#ffffff' }}>Scale Monitored</span>
-              <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#ffffff' }}>
-                {machines.length} <span style={{ color: 'var(--text-muted, #64748b)', fontWeight: 400, fontSize: '0.82rem' }}>/</span> {totalCapacity}
-              </span>
-            </div>
-
-            {/* Progress Bar */}
-            <div style={{ width: '100%', height: '4px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden' }}>
-              <div style={{
-                width: `${Math.min(100, Math.max(8, Math.round((machines.length / Math.max(1, totalCapacity)) * 100)))}%`,
-                height: '100%',
-                background: 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
-                borderRadius: '2px',
-                boxShadow: '0 0 8px rgba(0, 242, 254, 0.6)'
-              }} />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.68rem', color: 'var(--text-muted, #64748b)' }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#10b981', display: 'inline-block', boxShadow: '0 0 6px rgba(16, 185, 129, 0.8)' }} />
-              <span>Continuous asset tracking active</span>
-            </div>
-          </div>
-
-          {/* Separator */}
-          <div style={{ borderTop: '1px solid rgba(255, 255, 255, 0.08)' }} />
-
           {/* Bottom User Profile Bar (Customer ID / Customer Name) */}
           <div style={{
             display: 'flex',
@@ -3166,7 +3156,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               zIndex: 1
             }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem', flexWrap: 'wrap' }}>
                   <h1 style={{ fontSize: '1.45rem', fontWeight: 800, margin: 0, color: '#ffffff', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Shield size={22} color="#38bdf8" />
                     <span>{client.displayName || displayCustomerName}</span>
@@ -3183,17 +3173,26 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   }}>
                     {client.customerId || 'CORP-9812'}
                   </span>
-                  <span style={{
-                    fontSize: '0.68rem',
-                    color: '#4ade80',
-                    background: 'rgba(34, 197, 94, 0.12)',
-                    border: '1px solid rgba(34, 197, 94, 0.3)',
-                    padding: '0.15rem 0.45rem',
-                    borderRadius: '4px',
-                    fontWeight: 600,
-                    textTransform: 'uppercase'
-                  }}>
-                    Active Corporate Tenant
+                  <span
+                    title={`Corporate Tier license — ${machines.length} of ${totalCapacity} seats monitored · continuous asset tracking active`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
+                      fontSize: '0.68rem',
+                      fontWeight: 700,
+                      color: '#38bdf8',
+                      background: 'rgba(56, 189, 248, 0.1)',
+                      border: '1px solid rgba(56, 189, 248, 0.28)',
+                      padding: '0.15rem 0.5rem',
+                      borderRadius: '4px'
+                    }}
+                  >
+                    <Key size={11} />
+                    <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>Corporate Tier</span>
+                    <span style={{ color: 'rgba(255,255,255,0.35)' }}>•</span>
+                    <span style={{ color: '#ffffff', fontWeight: 800, fontFamily: 'monospace' }}>{machines.length}</span>
+                    <span style={{ color: 'var(--text-muted, #64748b)' }}>/ {totalCapacity} seats</span>
                   </span>
                 </div>
                 <div style={{ fontSize: '0.76rem', color: 'var(--text-muted, #94a3b8)' }}>
@@ -3486,6 +3485,27 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         <RefreshCw size={14} className={bulkPulling === 'ALL' ? 'animate-spin' : ''} /> Pull All
                       </button>
                       <button
+                        onClick={() => openProbeDialog(groupFilter ? { scope: 'group', group: groupFilter } : { scope: 'all' })}
+                        disabled={machines.length === 0}
+                        title="Probe TLS endpoints from the fleet to populate the Threat & Risk Graph's connectivity arrows (admin only)"
+                        style={{
+                          background: 'rgba(52, 211, 153, 0.12)',
+                          border: '1px solid rgba(52, 211, 153, 0.3)',
+                          color: '#34d399',
+                          padding: '0.4rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.8rem',
+                          fontWeight: 600,
+                          cursor: machines.length === 0 ? 'not-allowed' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          opacity: machines.length === 0 ? 0.5 : 1
+                        }}
+                      >
+                        <Globe size={14} /> Probe {groupFilter ? 'Group' : 'Endpoints'}
+                      </button>
+                      <button
                         onClick={() => setScheduleModalOpen(true)}
                         style={{
                           background: 'rgba(168, 85, 247, 0.12)',
@@ -3715,6 +3735,26 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 >
                                   <RefreshCw size={12} className={pullingMachineId === m.id ? 'animate-spin' : ''} />
                                   {pullingMachineId === m.id ? 'Pulling...' : 'Pull Telemetry'}
+                                </button>
+                                <button
+                                  onClick={() => openProbeDialog({ scope: 'machine', machineId: m.id, hostname: displayName })}
+                                  style={{
+                                    marginLeft: '0.4rem',
+                                    background: 'rgba(52, 211, 153, 0.08)',
+                                    border: '1px solid rgba(52, 211, 153, 0.25)',
+                                    color: '#34d399',
+                                    padding: '0.3rem 0.6rem',
+                                    borderRadius: '5px',
+                                    fontSize: '0.74rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '0.35rem'
+                                  }}
+                                  title="Probe TLS endpoints from this host to map its connectivity (admin only)"
+                                >
+                                  <Globe size={12} /> Probe
                                 </button>
                               </td>
                             </tr>
@@ -4988,6 +5028,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             {/* Compliance (OSCAL) — authorization boundaries / Projects (BILL-4) */}
             {activeTab === 'compliance' && (
               <ComplianceProjects tenantName={client.displayName} />
+            )}
+
+            {/* Threat & Risk Graph (Risk Assurance plan) — tenant is pinned server-side */}
+            {activeTab === 'threat' && hasRiskAssurance && (
+              <React.Suspense fallback={<div style={{ padding: '1rem', color: 'var(--text-muted)' }}>Loading Threat &amp; Risk Graph…</div>}>
+                <ThreatRiskGraph />
+              </React.Suspense>
             )}
 
             {/* 4. PQC COPILOT ASSISTANT TAB */}
@@ -7081,6 +7128,26 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                       <RefreshCw size={11} className={pullingMachineId === m.id ? 'animate-spin' : ''} />
                                       {pullingMachineId === m.id ? 'Pulling...' : 'Pull'}
                                     </button>
+                                    <button
+                                      onClick={() => openProbeDialog({ scope: 'machine', machineId: m.id, hostname: displayName })}
+                                      style={{
+                                        marginLeft: '0.35rem',
+                                        background: 'rgba(52, 211, 153, 0.08)',
+                                        border: '1px solid rgba(52, 211, 153, 0.25)',
+                                        color: '#34d399',
+                                        padding: '0.25rem 0.5rem',
+                                        borderRadius: '4px',
+                                        fontSize: '0.72rem',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.3rem'
+                                      }}
+                                      title="Probe TLS endpoints from this host (admin only)"
+                                    >
+                                      <Globe size={11} /> Probe
+                                    </button>
                                   </td>
                                 </tr>
                               );
@@ -7503,6 +7570,91 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                 </div>
               </div>
             )}
+
+            {/* Fleet Probe target dialog */}
+            {probeDialog && (() => {
+              const parsed = parseProbeTargets(probeTargetsText);
+              const scopeLabel = probeDialog.scope === 'machine'
+                ? (probeDialog.hostname || 'this endpoint')
+                : probeDialog.scope === 'group'
+                  ? `group "${probeDialog.group}"`
+                  : 'all enrolled endpoints';
+              const hostCount = probeDialog.scope === 'machine' ? 1 : machines.length;
+              return (
+                <div style={{
+                  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                  background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(6px)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  zIndex: 9999, padding: '1rem'
+                }}>
+                  <div style={{
+                    background: '#0d1527', border: '1px solid rgba(52, 211, 153, 0.3)',
+                    borderRadius: '12px', width: '100%', maxWidth: '560px', padding: '1.75rem',
+                    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6)'
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <Globe size={20} color="#34d399" />
+                        <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#ffffff' }}>
+                          Probe TLS Endpoints
+                        </h3>
+                      </div>
+                      <button onClick={() => setProbeDialog(null)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer' }}>
+                        <X size={18} />
+                      </button>
+                    </div>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)', margin: '0 0 1rem 0', lineHeight: 1.5 }}>
+                      Each selected agent will open an outbound TLS handshake to every target and report its
+                      post-quantum posture. Findings populate the Threat &amp; Risk Graph's connectivity arrows.
+                      Enter one <code style={{ color: '#34d399' }}>host:port</code> per line
+                      (e.g. <code>api.internal:443</code>). TLS endpoints only; loopback, link-local and
+                      cloud-metadata addresses are rejected. Max 25 targets per command.
+                    </p>
+                    <textarea
+                      value={probeTargetsText}
+                      onChange={e => setProbeTargetsText(e.target.value)}
+                      placeholder={'api.internal:443\ndb.internal:5432\ngateway.example.com:443'}
+                      rows={6}
+                      style={{
+                        width: '100%', boxSizing: 'border-box', background: '#080e1c',
+                        border: '1px solid rgba(148, 163, 184, 0.25)', borderRadius: '8px',
+                        color: '#e2e8f0', fontFamily: 'monospace', fontSize: '0.82rem',
+                        padding: '0.7rem', resize: 'vertical'
+                      }}
+                    />
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-muted, #94a3b8)', margin: '0.6rem 0 1.1rem 0' }}>
+                      Will queue <strong style={{ color: '#34d399' }}>{parsed.length}</strong> target(s) ×{' '}
+                      <strong style={{ color: '#34d399' }}>{hostCount}</strong> host(s) &nbsp;→&nbsp; {scopeLabel}
+                      <div style={{ marginTop: '0.4rem', color: '#64748b', fontStyle: 'italic' }}>
+                        You assert you are authorized to probe these targets from your own hosts.
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
+                      <button
+                        onClick={() => setProbeDialog(null)}
+                        style={{ background: 'transparent', border: '1px solid rgba(148,163,184,0.3)', color: '#94a3b8', padding: '0.5rem 1rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={submitProbe}
+                        disabled={probeSubmitting || parsed.length === 0}
+                        style={{
+                          background: parsed.length === 0 ? 'rgba(52,211,153,0.15)' : 'rgba(52,211,153,0.2)',
+                          border: '1px solid rgba(52, 211, 153, 0.4)', color: '#34d399',
+                          padding: '0.5rem 1.1rem', borderRadius: '6px', fontSize: '0.82rem', fontWeight: 700,
+                          cursor: probeSubmitting || parsed.length === 0 ? 'not-allowed' : 'pointer',
+                          opacity: probeSubmitting || parsed.length === 0 ? 0.6 : 1,
+                          display: 'inline-flex', alignItems: 'center', gap: '0.4rem'
+                        }}
+                      >
+                        <Globe size={14} /> {probeSubmitting ? 'Queuing...' : 'Queue Probe'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Automated Workstation Sync Schedule Modal */}
             {scheduleModalOpen && (

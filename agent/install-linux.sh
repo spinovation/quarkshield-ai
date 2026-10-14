@@ -74,13 +74,18 @@ fi
 # ---------------------------------------------------------------------------
 QS_TOKEN="${1:-${QS_TOKEN:-}}"
 if command -v systemctl >/dev/null 2>&1 && { [ "$(id -u)" -eq 0 ] || [ -n "${SUDO}" ]; }; then
+  # The enrollment token is a bearer credential. Keep it OUT of the unit file and
+  # the process argument list (both world-readable); the daemon reads QS_TOKEN
+  # from a root-only EnvironmentFile instead.
+  EXEC="$INSTALL_DIR/quarkshield-scanner --daemon --server https://quarkshield.ai"
+  $SUDO mkdir -p /etc/quarkshield
+  $SUDO chmod 700 /etc/quarkshield
   if [ -n "$QS_TOKEN" ]; then
-    EXEC="$INSTALL_DIR/quarkshield-scanner --daemon --server https://quarkshield.ai --token $QS_TOKEN"
+    printf 'QS_TOKEN=%s\n' "$QS_TOKEN" | $SUDO tee /etc/quarkshield/env >/dev/null
   else
-    # No token on the command line — the daemon will read the enrollment config
-    # written by a prior `quarkshield-scanner` run for this user.
-    EXEC="$INSTALL_DIR/quarkshield-scanner --daemon --server https://quarkshield.ai"
+    $SUDO touch /etc/quarkshield/env
   fi
+  $SUDO chmod 600 /etc/quarkshield/env
   echo "🛠️  Installing persistent daemon (systemd service quarkshield)..."
   $SUDO tee /etc/systemd/system/quarkshield.service >/dev/null << EOF
 [Unit]
@@ -90,11 +95,20 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# systemd sets no HOME without User=; give the daemon a dedicated state dir so its
+# enrollment/config/scan records live in /var/lib/quarkshield (not "/.quarkshield").
+StateDirectory=quarkshield
+StateDirectoryMode=0700
+Environment=HOME=/var/lib/quarkshield
+EnvironmentFile=-/etc/quarkshield/env
 ExecStart=$EXEC
 Restart=always
 RestartSec=30
 StandardOutput=journal
 StandardError=journal
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -104,8 +118,8 @@ EOF
     echo "✓ Daemon enabled & started (journalctl -u quarkshield -f to watch)." || \
     echo "⚠️ Service installed but not started — enroll first, then: $SUDO systemctl restart quarkshield"
   if [ -z "$QS_TOKEN" ]; then
-    echo "   ℹ️  No token provided. Enroll once (quarkshield-scanner --token <TOKEN> --quick --register),"
-    echo "      then: $SUDO systemctl restart quarkshield"
+    echo "   ℹ️  No token provided. Add it later with:"
+    echo "      echo 'QS_TOKEN=<TOKEN>' | $SUDO tee /etc/quarkshield/env >/dev/null && $SUDO systemctl restart quarkshield"
   fi
 else
   echo "ℹ️  systemd not available or not root — skipping persistent-daemon install."

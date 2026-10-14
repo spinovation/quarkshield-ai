@@ -6,7 +6,7 @@ WORKDIR /app/ui
 
 # Install dependencies
 COPY ui/package*.json ./
-RUN npm install
+RUN npm ci --no-audit --no-fund
 
 # Copy source and compile
 COPY ui/ ./
@@ -20,7 +20,7 @@ WORKDIR /app/server
 
 # Install dependencies
 COPY server/package*.json ./
-RUN npm install
+RUN npm ci --no-audit --no-fund
 
 # Copy source and compile
 COPY server/ ./
@@ -31,7 +31,10 @@ RUN npm run build
 # ========================================================
 FROM node:22-alpine AS runner
 RUN apk add --no-cache bash curl ca-certificates openssl git
-RUN mkdir -p /app/certs && openssl req -x509 -newkey rsa:2048 -nodes -keyout /app/certs/key.pem -out /app/certs/cert.pem -days 3650 -subj "/CN=quarkshield.ai"
+# The origin TLS key is generated at CONTAINER START (into a volume-backed dir), not
+# baked into the image: a key in an image layer is shared by every container built
+# from it and by anyone who can pull the image.
+RUN mkdir -p /app/certs && chown -R node:node /app
 
 WORKDIR /app
 ENV NODE_ENV=production
@@ -42,7 +45,7 @@ ENV SSL_KEY_PATH=/app/certs/key.pem
 
 # Install production server dependencies
 COPY server/package*.json ./server/
-RUN cd server && npm install --omit=dev
+RUN cd server && npm ci --omit=dev --no-audit --no-fund
 
 # Copy compiled server code & database schema
 COPY --from=server-builder /app/server/dist ./server/dist
@@ -57,6 +60,12 @@ COPY agent/binaries ./agent/binaries
 # Copy enterprise & super admin documentation
 COPY docs ./docs
 
-EXPOSE 5050
+COPY --chown=node:node docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh && chown -R node:node /app
 
+EXPOSE 5050
+# Run unprivileged.
+USER node
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["node", "server/dist/index.js"]

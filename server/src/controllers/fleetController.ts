@@ -3,8 +3,9 @@ import pool from '../config/db';
 import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
-import { canAccessTenant } from '../middleware/auth';
+import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
+import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTargets';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
 // Requires the query to alias fleet_machines as m and LEFT JOIN fleet_tokens as t.
@@ -47,8 +48,11 @@ export const getFleetTokens = async (req: Request, res: Response) => {
     `;
     const params: any[] = [];
     if (tenant) {
-      params.push(`%${tenant}%`);
-      query += ` WHERE (LOWER(COALESCE(t.tenant_name, '')) LIKE LOWER($1) OR LOWER(t.name) LIKE LOWER($1))`;
+      // SECURITY: EXACT tenant match only. A `%tenant%` substring (plus the old
+      // `OR t.name LIKE`) leaked other tenants' secret enrollment tokens to any tenant
+      // whose slug was a substring of theirs.
+      params.push(tenant);
+      query += ` WHERE LOWER(COALESCE(t.tenant_name, '')) = LOWER($1)`;
     }
     query += `
       GROUP BY t.id, t.name, t.token, t.status, t.last_sync, t.created_at
@@ -72,19 +76,23 @@ export const createFleetToken = async (req: Request, res: Response) => {
     const id = crypto.randomUUID();
     const token = `pqc_agent_${crypto.randomBytes(20).toString('hex')}`;
 
-    let assignedTenant = (tenantName || '').trim();
+    // SECURITY: never trust body `tenantName` for a non-super session — resolveWriteTenant
+    // pins it to the session's own tenant, so a tenant cannot mint an active enrollment
+    // token scoped to another tenant (which would poison that tenant's fleet/seat count).
+    let assignedTenant = resolveWriteTenant(req, tenantName).trim();
     let assignedLicense = (licenseKey || '').trim();
 
     if (!assignedTenant) {
       const effective = getEffectiveTenant(req);
       if (effective) {
-        assignedTenant = effective.toUpperCase();
+        assignedTenant = effective;
       } else if (name.toLowerCase().includes('spinovation') || name.toLowerCase() === 'engg') {
         assignedTenant = 'SPINOVATIONCORP';
       } else {
-        assignedTenant = name.trim().toUpperCase();
+        assignedTenant = name.trim();
       }
     }
+    assignedTenant = assignedTenant.toUpperCase();
 
     if (!assignedLicense) {
       try {
@@ -99,9 +107,9 @@ export const createFleetToken = async (req: Request, res: Response) => {
         // ignore
       }
       if (!assignedLicense) {
-        assignedLicense = assignedTenant === 'SPINOVATIONCORP'
-          ? 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8'
-          : `QS-TENANT-${assignedTenant.toUpperCase()}-ACTIVE`;
+        // No real license for this tenant: record a non-credential placeholder. (A
+        // hardcoded real key used to be substituted here and was accepted by ingest.)
+        assignedLicense = `QS-TENANT-${assignedTenant.toUpperCase()}-ACTIVE`;
       }
     }
 
@@ -173,14 +181,16 @@ export const getFleetMachines = async (req: Request, res: Response) => {
         t.id as "tokenId",
         t.name as "groupName",
         COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name, 'Default Fleet') as "tenantName",
-        COALESCE(NULLIF(m.license_key, ''), NULLIF(t.license_key, ''), 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8') as "licenseKey"
+        COALESCE(NULLIF(m.license_key, ''), NULLIF(t.license_key, ''), '') as "licenseKey"
       FROM fleet_machines m
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
     `;
     const params: any[] = [];
     if (tenant) {
-      params.push(`%${tenant}%`);
-      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) LIKE LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) LIKE LOWER($1) OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))`;
+      // SECURITY: EXACT tenant match (was `%tenant%` substring → cross-tenant machine leak).
+      // The spinovation/engg branch is the operator's own org alias, gated to that session only.
+      params.push(tenant);
+      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) = LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) = LOWER($1) OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))`;
     }
     query += ` ORDER BY m.last_seen DESC;`;
     const result = await pool.query(query, params);
@@ -233,7 +243,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         COALESCE(m.hostname, a.source_ref, 'Remote Asset') as hostname,
         m.os, m.arch,
         COALESCE(a.tenant_name, m.tenant_name, t.tenant_name, t.name, 'Default Fleet') as "tenantName",
-        COALESCE(m.license_key, t.license_key, 'QS-CORP-DEMOCLIENT-6AF00609-C7486296') as "licenseKey"
+        COALESCE(m.license_key, t.license_key, '') as "licenseKey"
       FROM assets a
       LEFT JOIN fleet_machines m ON a.machine_id = m.id
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
@@ -247,8 +257,10 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
     }
 
     if (effectiveTenant) {
-      values.push(`%${effectiveTenant}%`);
-      conditions.push(`(COALESCE(a.tenant_name, m.tenant_name, '') ILIKE $${values.length} OR t.name ILIKE $${values.length})`);
+      // SECURITY: EXACT tenant match (was `%tenant%` ILIKE → cross-tenant CBOM/asset leak);
+      // dropped the `t.name ILIKE` arm. spinovation/engg alias stays gated to that session.
+      values.push(effectiveTenant);
+      conditions.push(`(LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($${values.length}) OR (LOWER($${values.length}) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) LIKE '%spinovation%'))`);
     }
 
     if (source && source !== 'all') {
@@ -437,7 +449,11 @@ export const getInstallerScript = async (req: Request, res: Response) => {
   const host = req.get('host') || 'localhost:5050';
   const proto = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const serverUrl = `${proto}://${host}`;
-  const queryToken = (req.query.token as string || req.query.t as string || req.query.license as string || req.query.l as string || req.query.key as string || '').trim();
+  // SECURITY: this value is interpolated into a shell script served to `curl | sudo bash`.
+  // Strip to the token charset so no shell metacharacter (;, $, `, ", space, newline…) can
+  // survive — otherwise ?token=... is a root remote-code-execution vector.
+  const queryToken = (req.query.token as string || req.query.t as string || req.query.license as string || req.query.l as string || req.query.key as string || '')
+    .trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 128);
 
   const script = `#!/bin/sh
 # QuarkShield.ai Post-Quantum Cryptography Fleet Scanner - Automated Installer
@@ -551,7 +567,10 @@ export const getPowerShellInstallerScript = async (req: Request, res: Response) 
   const host = req.get('host') || 'localhost:5050';
   const proto = req.protocol === 'https' || req.get('x-forwarded-proto') === 'https' ? 'https' : 'http';
   const serverUrl = `${proto}://${host}`;
-  const queryToken = (req.query.token as string || req.query.t as string || '').trim();
+  // SECURITY: interpolated into a PowerShell script — strip to the token charset so no
+  // PowerShell metacharacter ($, `, ", $( … ), newline) can survive (RCE prevention).
+  const queryToken = (req.query.token as string || req.query.t as string || '')
+    .trim().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 128);
 
   const script = `# QuarkShield.ai Windows PowerShell 1-Click Installer
 param(
@@ -673,6 +692,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Malformed payload: expected hostname.' });
     }
     const safeAssets = Array.isArray(assets) ? assets : [];
+    const MAX_ASSETS_PER_SYNC = 20000;
+    if (safeAssets.length > MAX_ASSETS_PER_SYNC) {
+      return res.status(413).json({ error: `Too many assets in one sync (${safeAssets.length} > ${MAX_ASSETS_PER_SYNC}).` });
+    }
 
     // Tenant canonicalization (BILL-1): the fleet TOKEN is the sole authority on which
     // tenant a device belongs to. We must NEVER trust req.body.tenant_name — a client
@@ -760,6 +783,14 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     } else {
       const hashInput = cleanHwUUID ? `${assignedTenant}-${cleanHwUUID}` : `${assignedTenant}-${cleanHost}`;
       machineId = 'mach-' + crypto.createHash('sha256').update(hashInput).digest('hex').substring(0, 20);
+      // The id is derived from tenant+device with a '-' separator, so two different
+      // (tenant, device) pairs can collide. Never let a new enrollment take over a row
+      // that belongs to another tenant (the upsert below would otherwise re-home it and
+      // the asset purge would wipe the victim's inventory).
+      const owner = await pool.query('SELECT tenant_name FROM fleet_machines WHERE id = $1', [machineId]);
+      if (owner.rowCount && String(owner.rows[0].tenant_name || '').toLowerCase() !== assignedTenant.toLowerCase()) {
+        machineId = 'mach-' + crypto.createHash('sha256').update(`${assignedTenant}\u0000${cleanHwUUID || cleanHost}\u0000v2`).digest('hex').substring(0, 20);
+      }
     }
     
     let vulnerableCount = 0;
@@ -916,7 +947,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         last_seen = CURRENT_TIMESTAMP,
         last_sync = CURRENT_TIMESTAMP,
         tenant_name = COALESCE(NULLIF(EXCLUDED.tenant_name, ''), fleet_machines.tenant_name, $14),
-        license_key = COALESCE(NULLIF(EXCLUDED.license_key, ''), fleet_machines.license_key, $15);
+        license_key = COALESCE(NULLIF(EXCLUDED.license_key, ''), fleet_machines.license_key, $15)
+      WHERE REPLACE(LOWER(COALESCE(fleet_machines.tenant_name, '')), ' ', '') IN ('', REPLACE(LOWER(EXCLUDED.tenant_name), ' ', ''));
     `;
     await pool.query(upsertMachineQuery, [
       machineId,
@@ -956,8 +988,14 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     for (const r of prevAssetsRes.rows) prevMap.set(fp(r.name, r.algorithm, r.path || ''), r.is_vulnerable);
     const hadBaseline = prevMap.size > 0; // don't emit "added" drift for the first-ever scan
 
-    // Purge previous scan findings for this machine to keep ONLY the latest sync data
-    await pool.query('DELETE FROM assets WHERE machine_id = $1', [machineId]);
+    // Purge previous scan findings for this machine to keep ONLY the latest sync data.
+    // Done in ONE transaction with the inserts so a concurrent sync (agent retry +
+    // scheduled pull) cannot interleave and leave a half inventory.
+    const txn = await pool.connect();
+    try {
+    await txn.query('BEGIN');
+    await txn.query('SELECT 1 FROM fleet_machines WHERE id = $1 FOR UPDATE', [machineId]);
+    await txn.query('DELETE FROM assets WHERE machine_id = $1', [machineId]);
 
     const assetQuery = `
       INSERT INTO assets (
@@ -986,12 +1024,19 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     `;
 
     for (const a of processedAssets) {
-      await pool.query(assetQuery, [
+      await txn.query(assetQuery, [
         a.id, a.type, a.name, a.algorithm, a.key_size, a.hash_algorithm,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.machine_id,
         a.path, assignedTenant, 'endpoint_deploy', cleanHost
       ]);
+    }
+    await txn.query('COMMIT');
+    } catch (txErr) {
+      await txn.query('ROLLBACK').catch(() => {});
+      throw txErr;
+    } finally {
+      txn.release();
     }
 
     // Ingest Software BOM components into tenant's sbom_components catalog
@@ -1140,6 +1185,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       console.warn('Could not record daily snapshot:', snapErr);
     }
 
+    // Tenant resolved from the fleet token, for the Threat & Risk Graph rebuild hook.
+    res.locals.tenant = assignedTenant;
     res.status(201).json({
       success: true,
       tokenName: tokenRow.name,
@@ -1192,7 +1239,8 @@ export const getFleetDrift = async (req: Request, res: Response) => {
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const params: any[] = [];
     let where = '';
-    if (tenant) { params.push(`%${tenant}%`); where += `${params.length === 1 ? ' WHERE' : ' AND'} LOWER(COALESCE(tenant_name,'')) LIKE LOWER($${params.length})`; }
+    // SECURITY: EXACT tenant match (was `%tenant%` → cross-tenant drift-history leak).
+    if (tenant) { params.push(tenant); where += `${params.length === 1 ? ' WHERE' : ' AND'} (LOWER(COALESCE(tenant_name,'')) = LOWER($${params.length}) OR (LOWER($${params.length}) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(tenant_name,'')) LIKE '%spinovation%'))`; }
     if (machineId) { params.push(machineId); where += `${params.length === 1 ? ' WHERE' : ' AND'} machine_id = $${params.length}`; }
     params.push(limit);
     const result = await pool.query(
@@ -1278,6 +1326,242 @@ export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error queuing bulk pull command:', err);
     res.status(500).json({ error: 'Failed to queue bulk pull.' });
+  }
+};
+
+// ==========================================
+// FLEET PROBE (on-demand TLS endpoint probing for the Threat & Risk Graph)
+// ==========================================
+// An admin triggers the agent's TLS endpoint prober against a tenant-scoped list
+// of host:port targets. The agent runs ProbeEndpoint per target and uploads the
+// resulting `network_probe` findings in its next telemetry sync; topology R3/R2
+// then draw connects_to / serves arrows. See agent/FLEET-PROBE-PLAN.md.
+
+// Max probe commands a single machine may have queued/dispatched within the window
+// (per-machine rate limit — stops a compromised console turning the fleet into a
+// distributed scanner by spamming probe commands).
+const PROBE_RATE_WINDOW_MIN = 10;
+const PROBE_RATE_MAX_PER_WINDOW = 5;
+
+// Tenant kill switch: refuse to enqueue if the tenant has remote probing disabled.
+// Absent policy row = enabled (default on). Separate from the per-host agent flag.
+const probeEnabledForTenant = async (tenant: string): Promise<boolean> => {
+  const r = await pool.query(
+    'SELECT probe_enabled FROM tenant_probe_policy WHERE LOWER(tenant_name) = LOWER($1)',
+    [tenant]
+  );
+  if (r.rowCount === 0) return true;
+  return r.rows[0].probe_enabled !== false;
+};
+
+// Count recent probe commands for a machine (rate-limit gate). Counts pending +
+// dispatched within the window; completed older commands don't count against it.
+const recentProbeCount = async (machineId: string): Promise<number> => {
+  const r = await pool.query(
+    `SELECT COUNT(*)::int AS n FROM fleet_commands
+      WHERE machine_id = $1 AND command = 'probe'
+        AND created_at > NOW() - ($2 || ' minutes')::interval`,
+    [machineId, String(PROBE_RATE_WINDOW_MIN)]
+  );
+  return r.rows[0]?.n ?? 0;
+};
+
+const recordProbeAudit = async (
+  actor: string,
+  scope: string,
+  tenant: string,
+  targets: string[],
+  machineCount: number,
+  ip?: string
+): Promise<void> => {
+  try {
+    await pool.query(
+      `INSERT INTO audit_logs (id, action, actor, details, ip_address)
+       VALUES ($1, 'fleet_probe_enqueue', $2, $3, $4)`,
+      [
+        'aud-' + crypto.randomBytes(8).toString('hex'),
+        actor || 'unknown',
+        JSON.stringify({ scope, tenant, machineCount, targetCount: targets.length, targets }),
+        ip || null,
+      ]
+    );
+  } catch (e) {
+    console.warn('Could not record probe audit log:', e);
+  }
+};
+
+// Enqueue a single-machine probe command. Validates ownership + rate limit; the
+// caller has already validated targets. Returns the new command id.
+const enqueueProbeForMachine = async (
+  machineId: string,
+  targets: string[],
+  issuedBy: string,
+  scope: 'machine' | 'group' | 'all' = 'machine'
+): Promise<string> => {
+  const commandId = 'cmd-' + crypto.randomBytes(8).toString('hex');
+  await pool.query(
+    `INSERT INTO fleet_commands (id, machine_id, command, status, args, issued_by, scope)
+     VALUES ($1, $2, 'probe', 'pending', $3::jsonb, $4, $5)`,
+    [commandId, machineId, JSON.stringify({ targets }), issuedBy, scope]
+  );
+  return commandId;
+};
+
+// POST /api/fleet/machines/:machineId/probe  { targets: string[] }
+export const enqueueProbeCommand = async (req: Request, res: Response) => {
+  try {
+    const { machineId } = req.params;
+    const owner = await pool.query(
+      `SELECT COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name) AS tenant
+         FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE m.id = $1`,
+      [machineId]
+    );
+    // SECURITY: a 404 (not 403) for a machine the caller can't see avoids
+    // confirming the existence of another tenant's machine id.
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant)) {
+      return res.status(404).json({ error: 'Fleet machine not found.' });
+    }
+    const tenant = owner.rows[0].tenant;
+
+    if (!(await probeEnabledForTenant(tenant))) {
+      return res.status(403).json({ error: 'Remote endpoint probing is disabled for this tenant.' });
+    }
+
+    const v = validateProbeTargets(req.body?.targets);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+
+    if ((await recentProbeCount(machineId)) >= PROBE_RATE_MAX_PER_WINDOW) {
+      return res.status(429).json({
+        error: `Probe rate limit reached for this endpoint (max ${PROBE_RATE_MAX_PER_WINDOW} per ${PROBE_RATE_WINDOW_MIN} min). Try again shortly.`,
+      });
+    }
+
+    const commandId = await enqueueProbeForMachine(machineId, v.targets, req.user?.email || '');
+    await recordProbeAudit(req.user?.email || '', 'machine', tenant, v.targets, 1, req.ip);
+
+    res.json({
+      success: true,
+      commandId,
+      machineId,
+      targets: v.targets,
+      message: `Probe of ${v.targets.length} target(s) queued for this endpoint.`,
+    });
+  } catch (err: any) {
+    console.error('Error queuing probe command:', err);
+    res.status(500).json({ error: 'Failed to queue probe command.' });
+  }
+};
+
+// Reusable core: enqueue a probe for every tenant machine matching an optional
+// group scope, honoring the per-machine rate limit (machines over the limit are
+// skipped, not failed). Returns the count queued. Targets are pre-validated.
+export const enqueueProbesForScope = async (
+  tenant: string,
+  targets: string[],
+  issuedBy: string,
+  opts: { group?: string | null }
+): Promise<{ queued: number; skipped: number }> => {
+  const group = (opts.group || '').toString().trim() || null;
+  const params: any[] = [tenant];
+  let groupClause = '';
+  if (group) {
+    params.push(group);
+    groupClause = ` AND LOWER(${EFFECTIVE_GROUP}) = LOWER($${params.length})`;
+  }
+  const machines = await pool.query(
+    `SELECT m.id
+       FROM fleet_machines m
+       LEFT JOIN fleet_tokens t ON m.token_id = t.id
+      WHERE (LOWER(m.tenant_name) = LOWER($1)
+          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+          OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+        ${groupClause}`,
+    params
+  );
+  if (machines.rowCount === 0) return { queued: 0, skipped: 0 };
+
+  const scope = group ? 'group' : 'all';
+  let queued = 0;
+  let skipped = 0;
+  for (const row of machines.rows) {
+    if ((await recentProbeCount(row.id)) >= PROBE_RATE_MAX_PER_WINDOW) {
+      skipped++;
+      continue;
+    }
+    await enqueueProbeForMachine(row.id, targets, issuedBy, scope);
+    queued++;
+  }
+  return { queued, skipped };
+};
+
+// POST /api/fleet/probe-bulk  { group?: string, targets: string[] }
+export const enqueueBulkProbeCommand = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved for bulk probe.' });
+    }
+    if (!(await probeEnabledForTenant(tenant))) {
+      return res.status(403).json({ error: 'Remote endpoint probing is disabled for this tenant.' });
+    }
+    const v = validateProbeTargets(req.body?.targets);
+    if (!v.ok) return res.status(400).json({ error: v.error });
+
+    const group = (req.body?.group || '').toString().trim() || null;
+    const { queued, skipped } = await enqueueProbesForScope(tenant, v.targets, req.user?.email || '', { group });
+    if (queued > 0) {
+      await recordProbeAudit(req.user?.email || '', group ? 'group' : 'all', tenant, v.targets, queued, req.ip);
+    }
+    res.json({
+      success: true,
+      queued,
+      skipped,
+      group,
+      targets: v.targets,
+      message: queued === 0
+        ? (skipped > 0 ? 'All matching endpoints are rate-limited; try again shortly.' : 'No matching endpoints to probe.')
+        : `Probe of ${v.targets.length} target(s) queued for ${queued} endpoint(s)${group ? ' in group ' + group : ''}${skipped > 0 ? ` (${skipped} rate-limited)` : ''}.`,
+    });
+  } catch (err: any) {
+    console.error('Error queuing bulk probe command:', err);
+    res.status(500).json({ error: 'Failed to queue bulk probe.' });
+  }
+};
+
+// GET /api/fleet/probe-policy — current tenant kill-switch state.
+export const getProbePolicy = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    res.json({ tenant, probeEnabled: await probeEnabledForTenant(tenant), maxTargetsPerCommand: MAX_TARGETS_PER_COMMAND });
+  } catch (err: any) {
+    console.error('Error reading probe policy:', err);
+    res.status(500).json({ error: 'Failed to read probe policy.' });
+  }
+};
+
+// PUT /api/fleet/probe-policy  { enabled: boolean } — tenant admin kill switch.
+export const setProbePolicy = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved.' });
+    }
+    const enabled = req.body?.enabled !== false;
+    await pool.query(
+      `INSERT INTO tenant_probe_policy (tenant_name, probe_enabled, updated_by, updated_at)
+       VALUES ($1, $2, $3, NOW())
+       ON CONFLICT (tenant_name) DO UPDATE SET probe_enabled = EXCLUDED.probe_enabled,
+         updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [tenant, enabled, req.user?.email || '']
+    );
+    res.json({ success: true, tenant, probeEnabled: enabled });
+  } catch (err: any) {
+    console.error('Error updating probe policy:', err);
+    res.status(500).json({ error: 'Failed to update probe policy.' });
   }
 };
 
@@ -1540,7 +1824,10 @@ export const agentFetchCommands = async (req: Request, res: Response) => {
     const m = await pool.query(
       `SELECT id FROM fleet_machines
        WHERE LOWER(tenant_name) = LOWER($1)
-         AND ((hardware_uuid IS NOT NULL AND hardware_uuid <> '' AND hardware_uuid = $2) OR LOWER(hostname) = LOWER($3))
+         AND (
+           ($2 <> '' AND hardware_uuid = $2)
+           OR ($2 = '' AND (hardware_uuid IS NULL OR hardware_uuid = '') AND LOWER(hostname) = LOWER($3))
+         )
        ORDER BY last_seen DESC LIMIT 1`,
       [tenant, hwUuid, host]
     );
@@ -1548,13 +1835,15 @@ export const agentFetchCommands = async (req: Request, res: Response) => {
     const machineId = m.rows[0].id;
 
     const cmds = await pool.query(
-      "SELECT id, command, details FROM fleet_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC",
+      "SELECT id, command, details, COALESCE(args, '{}'::jsonb) AS args FROM fleet_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC",
       [machineId]
     );
     if (cmds.rowCount && cmds.rowCount > 0) {
       const ids = cmds.rows.map(c => c.id);
       await pool.query("UPDATE fleet_commands SET status = 'dispatched' WHERE id = ANY($1)", [ids]);
     }
+    // Each command carries its type (`command`) plus typed `args` (e.g. probe
+    // targets). Older agents that read only `command` keep working unchanged.
     res.json({ machineId, commands: cmds.rows });
   } catch (err: any) {
     console.error('Error fetching agent commands:', err);

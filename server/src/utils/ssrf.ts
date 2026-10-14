@@ -46,6 +46,28 @@ const isBlockedIp = (ip: string): boolean => {
 };
 
 /**
+ * Resolve a hostname ONCE, verify every address is public, and return one address
+ * to connect to. Connecting to the returned IP (with the hostname passed as SNI)
+ * closes the DNS-rebinding window between the check and the connection: the
+ * network stack never resolves the name a second time.
+ */
+export const resolvePublicHost = async (host: string): Promise<string> => {
+  const clean = (host || '').trim().toLowerCase();
+  await assertPublicHost(clean);
+  if (net.isIP(clean)) return clean;
+  const addrs = await new Promise<dns.LookupAddress[]>((resolve, reject) => {
+    dns.lookup(clean, { all: true }, (err, addresses) => {
+      if (err) reject(new Error('Host could not be resolved'));
+      else resolve(addresses);
+    });
+  });
+  const ok = addrs.filter(a => !isBlockedIp(a.address));
+  if (!ok.length) throw new Error('Host resolves to a non-public address');
+  // Prefer IPv4 for the widest compatibility.
+  return (ok.find(a => a.family === 4) || ok[0]).address;
+};
+
+/**
  * Resolve a hostname and throw if it (or any of its addresses) is non-public.
  * If the host is an IP literal it is checked directly.
  */
