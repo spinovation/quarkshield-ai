@@ -1383,10 +1383,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
             </p>
             <div className="sov-grid">
               {[
-                { tier: 'US Government', name: 'GovCloud Instance', fee: '$36,000', per: '$625', driver: 'FedRAMP · CNSA 2.0 · in-boundary', feats: ['AWS GovCloud · dedicated single-tenant', 'OSCAL SSP & POA&M evidence included', 'Offline / SCIF QS Copilot AI', 'FedRAMP authorization on roadmap — deploy in-boundary today'] },
-                { tier: 'EMEA', name: 'EU Sovereign Instance', fee: '$24,000', per: '$550', driver: 'GDPR · EU data residency', feats: ['EU region · dedicated single-tenant', 'OSCAL / control evidence included', 'Continuous CBOM & drift detection', 'Data never leaves the region'] },
-                { tier: 'APAC', name: 'APAC Sovereign Instance', fee: '$24,000', per: '$530', driver: 'APAC data residency', feats: ['APAC region · dedicated single-tenant', 'OSCAL / control evidence included', 'Continuous CBOM & drift detection', 'Data never leaves the region'] },
-                { tier: 'India', name: 'India Sovereign Instance', fee: '$15,000', per: '$360', driver: 'DPDP Act · India residency', feats: ['India region · dedicated single-tenant', 'OSCAL / control evidence included', 'Local-market pricing', 'Data never leaves the region'] },
+                { tier: 'US Government', name: 'GovCloud Instance', fee: '$36,000', per: '$625', min: '100', driver: 'FedRAMP · CNSA 2.0 · in-boundary', feats: ['AWS GovCloud · dedicated single-tenant', 'OSCAL SSP & POA&M evidence included', 'Offline / SCIF QS Copilot AI', 'FedRAMP authorization on roadmap — deploy in-boundary today'] },
+                { tier: 'EMEA', name: 'EU Sovereign Instance', fee: '$24,000', per: '$550', min: '50', driver: 'GDPR · EU data residency', feats: ['EU region · dedicated single-tenant', 'OSCAL / control evidence included', 'Continuous CBOM & drift detection', 'Data never leaves the region'] },
+                { tier: 'APAC', name: 'APAC Sovereign Instance', fee: '$24,000', per: '$530', min: '50', driver: 'APAC data residency', feats: ['APAC region · dedicated single-tenant', 'OSCAL / control evidence included', 'Continuous CBOM & drift detection', 'Data never leaves the region'] },
+                { tier: 'India', name: 'India Sovereign Instance', fee: '$15,000', per: '$360', min: '50', driver: 'DPDP Act · India residency', feats: ['India region · dedicated single-tenant', 'OSCAL / control evidence included', 'Local-market pricing', 'Data never leaves the region'] },
               ].map((s) => (
                 <div className="price-card" key={s.tier}>
                   <span className="pc-tier">{s.tier}</span>
@@ -1396,7 +1396,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                     <span className="per">/yr instance</span>
                   </div>
                   <div className="pc-sub">+ {s.per} / endpoint / yr · billed annually</div>
-                  <div className="pc-seats">{s.driver}</div>
+                  <div className="pc-seats">Minimum {s.min} endpoints<span className="pc-driver">{s.driver}</span></div>
                   <ul className="pc-feats">
                     {s.feats.map((f, i) => (
                       <li key={i}>
