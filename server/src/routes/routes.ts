@@ -59,6 +59,7 @@ import {
   generateLicense,
   getLicenses,
   revokeLicense,
+  reactivateLicense,
   verifyLicenseKey,
   sendLicenseEmail,
   sendNextStepsEmail,
@@ -259,6 +260,7 @@ router.get('/admin/system-health', requireSuperAdmin, getSystemHealth);
 router.post('/admin/licenses/generate', requirePlatformAdmin, generateLicense);
 router.get('/admin/licenses', requireSuperAdmin, getLicenses);
 router.delete('/admin/licenses/:id', requirePlatformAdmin, revokeLicense);
+router.post('/admin/licenses/:id/reactivate', requirePlatformAdmin, reactivateLicense);
 router.post('/admin/licenses/send-email', requirePlatformAdmin, sendLicenseEmail);
 router.post('/admin/clients/send-next-steps-email', requirePlatformAdmin, sendNextStepsEmail);
 router.get('/admin/settings/mail', requireSuperAdmin, getMailSettings);

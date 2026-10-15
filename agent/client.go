@@ -99,6 +99,11 @@ func SaveEnrollmentConfig(cfg EnrollmentConfig) error {
 	return os.WriteFile(getEnrollmentConfigPath(), data, 0600)
 }
 
+// AgentReleaseVersion is the single source of truth for the agent/GUI version.
+// It is shown in the Post-Quantum Guard header chip (served via /api/status) and
+// reported to QuarkShield Central in fleet telemetry (FleetPayload.AgentVersion).
+const AgentReleaseVersion = "2.3.0"
+
 // FleetPayload represents the JSON body sent to QuarkShield.AI /api/scan/agent/ingest
 type FleetPayload struct {
 	Hostname     string        `json:"hostname"`
@@ -148,7 +153,7 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 		OS:           osName,
 		Arch:         archName,
 		IP:           ip,
-		AgentVersion: "2.2.1",
+		AgentVersion: AgentReleaseVersion,
 		Token:        token,
 		LicenseKey:   licenseKey,
 		TenantName:   tenantName,

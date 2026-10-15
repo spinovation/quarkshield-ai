@@ -145,9 +145,10 @@ export const getClients = async (req: Request, res: Response) => {
         app_port as "appPort", 
         db_port as "dbPort", 
         status, 
-        subscription_tier as "subscriptionTier", 
-        mca_limit as "mcaLimit", 
-        user_count as "userCount", 
+        subscription_tier as "subscriptionTier",
+        mca_limit as "mcaLimit",
+        plan_addons as "planAddons",
+        user_count as "userCount",
         asset_count as "assetCount", 
         created_at as "createdAt",
         contact_name as "contactName",
@@ -1166,14 +1167,146 @@ export const getLicenses = async (req: Request, res: Response) => {
   }
 };
 
+/** Look up a license plus the best tenant-admin notification address/name. */
+const lookupLicenseForNotice = async (id: string) => {
+  const r = await pool.query(
+    `SELECT l.license_key, l.tenant_name, l.seats, l.tier, l.duration_days, l.expires_at, l.status,
+            COALESCE(NULLIF(l.contact_email, ''), c.admin_email, '') AS notify_email,
+            COALESCE(NULLIF(l.contact_name, ''), c.contact_name, c.display_name, l.tenant_name) AS notify_name
+       FROM admin_licenses l
+       LEFT JOIN admin_clients c
+         ON (LOWER(c.name) = LOWER(l.tenant_name)
+             OR (l.customer_id IS NOT NULL AND c.customer_id = l.customer_id))
+      WHERE l.id = $1 OR l.license_key = $1
+      LIMIT 1`,
+    [id]
+  );
+  return r.rows[0] || null;
+};
+
 export const revokeLicense = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    await pool.query('UPDATE admin_licenses SET status = $1 WHERE id = $2 OR license_key = $2', ['revoked', id]);
-    res.json({ success: true, message: 'License revoked successfully.' });
+    // Resolve details (and the tenant-admin address) BEFORE mutating, for the notification.
+    const lic = await lookupLicenseForNotice(id);
+    const upd = await pool.query(
+      `UPDATE admin_licenses SET status = 'revoked' WHERE id = $1 OR license_key = $1`,
+      [id]
+    );
+    if (!upd.rowCount) return res.status(404).json({ error: 'License not found.' });
+
+    const expiresAt = lic?.expires_at ? new Date(lic.expires_at) : null;
+    const revokedBeforeExpiry = !!(expiresAt && expiresAt.getTime() > Date.now());
+    const today = new Date().toISOString().split('T')[0];
+    const expStr = expiresAt ? expiresAt.toISOString().split('T')[0] : 'N/A';
+
+    // Best-effort notification to the tenant admin (never blocks the revoke).
+    let emailed = false;
+    let emailError: string | null = null;
+    if (lic?.notify_email) {
+      const org = lic.tenant_name || 'your organization';
+      const subject = `QuarkShield license revoked for ${org}`;
+      const text =
+        `Hello ${lic.notify_name || 'Administrator'},\n\n` +
+        `A QuarkShield license key for ${org} was revoked by a platform administrator on ${today}.\n\n` +
+        `License key: ${lic.license_key}\nTier: ${String(lic.tier || '').toUpperCase()}\nSeats: ${lic.seats || 'N/A'}\n` +
+        `Original expiration: ${expStr}${revokedBeforeExpiry ? ' (revoked before expiry)' : ''}\n\n` +
+        `Endpoints using this key will lose central fleet authorization. If this was done in error, ` +
+        `contact your QuarkShield account team — the license can be reactivated.\n\n— QuarkShield Licensing`;
+      const html =
+        `<p>Hello ${lic.notify_name || 'Administrator'},</p>` +
+        `<p>A QuarkShield license key for <strong>${org}</strong> was <strong>revoked</strong> by a platform administrator on ${today}.</p>` +
+        `<ul><li>License key: <code>${lic.license_key}</code></li><li>Tier: ${String(lic.tier || '').toUpperCase()}</li>` +
+        `<li>Seats: ${lic.seats || 'N/A'}</li><li>Original expiration: ${expStr}` +
+        `${revokedBeforeExpiry ? ' <strong>(revoked before expiry)</strong>' : ''}</li></ul>` +
+        `<p>Endpoints using this key will lose central fleet authorization. If this was done in error, ` +
+        `contact your QuarkShield account team — the license can be reactivated.</p><p>— QuarkShield Licensing</p>`;
+      const sent = await sendSupportEmail({ to: lic.notify_email, subject, html, text });
+      emailed = sent.success;
+      emailError = sent.success ? null : sent.error || 'send failed';
+    }
+
+    res.json({
+      success: true,
+      message: 'License revoked successfully.',
+      tenant: lic?.tenant_name || null,
+      expiresAt: expiresAt ? expiresAt.toISOString() : null,
+      revokedBeforeExpiry,
+      emailed,
+      emailError,
+    });
   } catch (err: any) {
     console.error('Error revoking license:', err);
     res.status(500).json({ error: 'Failed to revoke license.' });
+  }
+};
+
+/**
+ * Reactivate (un-revoke) a license. If it had already passed its expiry, the expiry is
+ * pushed out by the license's original duration from today so the key is genuinely usable
+ * again. The tenant admin is notified (best effort).
+ */
+export const reactivateLicense = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const lic = await lookupLicenseForNotice(id);
+    if (!lic) return res.status(404).json({ error: 'License not found.' });
+
+    const prevExpiry = lic.expires_at ? new Date(lic.expires_at) : null;
+    const isExpired = !!(prevExpiry && prevExpiry.getTime() < Date.now());
+    const upd = isExpired
+      ? await pool.query(
+          `UPDATE admin_licenses
+              SET status = 'active',
+                  expires_at = NOW() + (COALESCE(duration_days, 365) || ' days')::interval
+            WHERE id = $1 OR license_key = $1
+            RETURNING expires_at`,
+          [id]
+        )
+      : await pool.query(
+          `UPDATE admin_licenses SET status = 'active'
+            WHERE id = $1 OR license_key = $1
+            RETURNING expires_at`,
+          [id]
+        );
+    const newExpiry = upd.rows[0]?.expires_at ? new Date(upd.rows[0].expires_at) : prevExpiry;
+    const expStr = newExpiry ? newExpiry.toISOString().split('T')[0] : 'N/A';
+
+    let emailed = false;
+    let emailError: string | null = null;
+    if (lic.notify_email) {
+      const org = lic.tenant_name || 'your organization';
+      const subject = `QuarkShield license reactivated for ${org}`;
+      const text =
+        `Hello ${lic.notify_name || 'Administrator'},\n\n` +
+        `Good news — a QuarkShield license key for ${org} has been reactivated.\n\n` +
+        `License key: ${lic.license_key}\nTier: ${String(lic.tier || '').toUpperCase()}\nSeats: ${lic.seats || 'N/A'}\n` +
+        `Expiration: ${expStr}${isExpired ? ' (extended on reactivation)' : ''}\n\n` +
+        `Enrolled endpoints will regain central fleet authorization automatically.\n\n— QuarkShield Licensing`;
+      const html =
+        `<p>Hello ${lic.notify_name || 'Administrator'},</p>` +
+        `<p>A QuarkShield license key for <strong>${org}</strong> has been <strong>reactivated</strong>.</p>` +
+        `<ul><li>License key: <code>${lic.license_key}</code></li><li>Tier: ${String(lic.tier || '').toUpperCase()}</li>` +
+        `<li>Seats: ${lic.seats || 'N/A'}</li><li>Expiration: ${expStr}` +
+        `${isExpired ? ' <strong>(extended on reactivation)</strong>' : ''}</li></ul>` +
+        `<p>Enrolled endpoints will regain central fleet authorization automatically.</p><p>— QuarkShield Licensing</p>`;
+      const sent = await sendSupportEmail({ to: lic.notify_email, subject, html, text });
+      emailed = sent.success;
+      emailError = sent.success ? null : sent.error || 'send failed';
+    }
+
+    res.json({
+      success: true,
+      message: 'License reactivated.',
+      tenant: lic.tenant_name || null,
+      expiresAt: newExpiry ? newExpiry.toISOString() : null,
+      extended: isExpired,
+      emailed,
+      emailError,
+    });
+  } catch (err: any) {
+    console.error('Error reactivating license:', err);
+    res.status(500).json({ error: 'Failed to reactivate license.' });
   }
 };
 

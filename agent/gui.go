@@ -305,6 +305,7 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 		hwUUID := GetHardwareUUID()
 
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"version":         AgentReleaseVersion,
 			"hostname":        hostname,
 			"computerName":    compName,
 			"hardwareUuid":    hwUUID,

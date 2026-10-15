@@ -15,6 +15,14 @@ GO_LDFLAGS="-s -w -X main.LicenseSigningSecret=${LICENSE_SIGNING_SECRET}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 AGENT_DIR="$SCRIPT_DIR/agent"
 
+# Release version: single source of truth = the AgentReleaseVersion constant in
+# agent/client.go (shown in the GUI header chip + reported in telemetry). An
+# explicit APP_VERSION env var overrides it; only falls back to 1.0.0 if neither.
+APP_VERSION="${APP_VERSION:-$(grep -oE 'AgentReleaseVersion = "[0-9.]+"' "$AGENT_DIR/client.go" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)}"
+APP_VERSION="${APP_VERSION:-1.0.0}"
+export APP_VERSION
+echo "   • Release version: ${APP_VERSION}"
+
 echo "======================================================================"
 echo " 🛡️ Starting QuarkShield Master Cross-Platform Build & Sign Pipeline"
 echo "======================================================================"
