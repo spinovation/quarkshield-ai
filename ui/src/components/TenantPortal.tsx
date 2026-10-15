@@ -4033,52 +4033,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         <ShieldCheck size={14} color="#c084fc" /> Export Attested CBOM (CDXA)
                       </button>
 
-                      {/* Export Executive Report (PDF) */}
-                      <button
-                        onClick={() => downloadExecutiveReport('pdf')}
-                        disabled={isGeneratingReport}
-                        title="Download white-labeled Executive C-Suite Post-Quantum Audit Report (PDF)"
-                        style={{
-                          background: 'rgba(239, 68, 68, 0.12)',
-                          border: '1px solid rgba(239, 68, 68, 0.35)',
-                          color: '#f87171',
-                          padding: '0.45rem 0.85rem',
-                          borderRadius: '6px',
-                          fontSize: '0.78rem',
-                          fontWeight: 600,
-                          cursor: isGeneratingReport ? 'wait' : 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'PQC Roadmap PDF'}
-                      </button>
-
-                      {/* Export Executive Report (DOCX) */}
-                      <button
-                        onClick={() => downloadExecutiveReport('docx')}
-                        disabled={isGeneratingReport}
-                        title="Download editable Microsoft Word Executive Audit Report (DOCX)"
-                        style={{
-                          background: 'rgba(59, 130, 246, 0.12)',
-                          border: '1px solid rgba(59, 130, 246, 0.35)',
-                          color: '#60a5fa',
-                          padding: '0.45rem 0.85rem',
-                          borderRadius: '6px',
-                          fontSize: '0.78rem',
-                          fontWeight: 600,
-                          cursor: isGeneratingReport ? 'wait' : 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          transition: 'all 0.15s ease'
-                        }}
-                      >
-                        <FileText size={13} /> {isGeneratingReport ? 'Generating...' : 'PQC Roadmap DOCX'}
-                      </button>
-
+                      {/* PDF/DOCX roadmap exports removed per owner (HTML roadmap is canonical; print-to-PDF from the browser if a file is needed). */}
                       {/* View PQC Roadmap Report (HTML, opens in new tab) */}
                       <button
                         onClick={() => downloadExecutiveReport('html')}
