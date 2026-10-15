@@ -464,6 +464,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   // Tenant Portal Forgot Password State
   const [showTenantForgotPasswordModal, setShowTenantForgotPasswordModal] = useState<boolean>(false);
   const [showGuideModal, setShowGuideModal] = useState<boolean>(false);
+  const [guideTopic, setGuideTopic] = useState<'overview' | 'cbom' | 'compliance' | 'threat' | 'integrations' | 'copilot' | 'settings' | 'risk'>('overview');
   const [tenantForgotEmail, setTenantForgotEmail] = useState<string>('');
   const [tenantForgotLoading, setTenantForgotLoading] = useState<boolean>(false);
   const [tenantForgotSuccess, setTenantForgotSuccess] = useState<string | null>(null);
@@ -3044,6 +3045,86 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                   <button onClick={() => setShowGuideModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.1rem' }}>✕</button>
                 </div>
                 <div style={{ padding: '1.2rem 1.4rem', color: '#cbd5e1', fontSize: '0.88rem', lineHeight: 1.65 }}>
+                  {/* Topic selector — one per left-frame item */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '1rem' }}>
+                    {([['overview', 'Fleet Overview'], ['cbom', 'Cryptographic BOM'], ['compliance', 'Compliance (OSCAL)'], ['threat', 'Threat & Risk Graph'], ['integrations', 'Integrations & Gateways'], ['copilot', 'PQC Copilot'], ['settings', 'Settings'], ['risk', 'Risk Ratings & Roadmap']] as const).map(([id, label]) => (
+                      <button key={id} onClick={() => setGuideTopic(id)} style={{
+                        padding: '0.3rem 0.7rem', borderRadius: '999px', fontSize: '0.76rem', fontWeight: 600, cursor: 'pointer',
+                        border: guideTopic === id ? '1px solid rgba(56,189,248,0.5)' : '1px solid rgba(255,255,255,0.1)',
+                        background: guideTopic === id ? 'rgba(56,189,248,0.15)' : 'transparent',
+                        color: guideTopic === id ? '#38bdf8' : '#94a3b8'
+                      }}>{label}</button>
+                    ))}
+                  </div>
+
+                  {guideTopic === 'overview' && (<div>
+                    <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Fleet Overview</h3>
+                    <p>Your home dashboard for the enrolled estate. Shows <strong>Enrolled Workstations</strong> (agents reporting), <strong>Seat Allocation</strong> (used / licensed), <strong>Discovered Cryptographic Assets</strong>, and your <strong>Quantum Risk Rating</strong>.</p>
+                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
+                      <li>Enroll a host with the one-line installer (<code>curl … | sudo bash -s -- --token …</code>) — read-only, outbound-only HTTPS.</li>
+                      <li><strong>Pull Telemetry / Scheduled Pulls</strong> refresh a host's inventory (the agent must be running or installed as a daemon).</li>
+                      <li>Organize endpoints into <strong>Groups</strong> and filter the table by group.</li>
+                    </ul>
+                  </div>)}
+
+                  {guideTopic === 'cbom' && (<div>
+                    <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Cryptographic BOM (CBOM)</h3>
+                    <p>Your complete cryptographic inventory in <strong>CycloneDX 1.6</strong> — every key, certificate, algorithm and OS package discovered across endpoints, git repos, PKI and proxies.</p>
+                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
+                      <li><strong>Export Standard CBOM</strong> or <strong>Attested CBOM (CDXA)</strong> — ML-DSA-65-signed for tamper-evident supply-chain attestation.</li>
+                      <li><strong>Drift</strong> and <strong>SBOM</strong> sub-tabs track how posture changes over time and the OS software bill of materials.</li>
+                      <li><strong>View PQC Roadmap</strong> opens the executive roadmap report (purpose breakdown, size impact, phased plan).</li>
+                    </ul>
+                  </div>)}
+
+                  {guideTopic === 'compliance' && (<div>
+                    <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Compliance (OSCAL)</h3>
+                    <p>Map crypto posture to NIST controls as authorization-boundary <strong>Projects</strong>.</p>
+                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
+                      <li>Create a project and pick a standard — <strong>NIST 800-53 r5</strong> or <strong>800-171 r2 / r3</strong>.</li>
+                      <li>QuarkShield seeds the quantum-relevant controls (SC-8/12/13/17, IA-5/7, SI-2…) and auto-assesses them from your CBOM.</li>
+                      <li>Set each control's status / owner / % / target date (the corrective-action grid), then export <strong>OSCAL SSP + POA&amp;M</strong>.</li>
+                      <li>Identifying a risk is not a compliance determination — control effectiveness needs RMF assessment evidence.</li>
+                    </ul>
+                  </div>)}
+
+                  {guideTopic === 'threat' && (<div>
+                    <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Threat &amp; Risk Graph <span style={{ fontSize: '0.72rem', color: '#64748b' }}>(Risk Assurance add-on)</span></h3>
+                    <p>End-to-end threat model built from your assets, SBOM, cryptography and attack paths, mapped to NIST controls + STRIDE / MITRE ATT&amp;CK.</p>
+                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
+                      <li><strong>Architecture / Threat / Data-Flow</strong> views of the environment.</li>
+                      <li><strong>Asset Risk Detail</strong> → <em>"What breaks?"</em> shows a key's dependents (blast radius) + PQC migration size impact.</li>
+                      <li><strong>Threat Scenarios</strong> and <strong>Attack Paths</strong> rank exposures; <strong>Probe Endpoints</strong> maps live connectivity arrows.</li>
+                      <li>Residual Risk + Quantum Risk Rating — see the <strong>Risk Ratings &amp; Roadmap</strong> tab for the exact formulas.</li>
+                    </ul>
+                  </div>)}
+
+                  {guideTopic === 'integrations' && (<div>
+                    <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Integrations &amp; Gateways</h3>
+                    <p>Bring in cryptography from sources beyond endpoints (re-scanning here also re-classifies asset <em>purpose</em>).</p>
+                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
+                      <li><strong>Git</strong> — scan repositories for committed keys, certs and crypto usage in code.</li>
+                      <li><strong>Enterprise PKI &amp; Vaults</strong> — connect AWS KMS / Azure Key Vault / HashiCorp Vault / AD CS to inventory managed keys &amp; certificates.</li>
+                      <li><strong>PQC Proxies</strong> — deploy hybrid-TLS gateways in front of backends that cannot be upgraded.</li>
+                    </ul>
+                  </div>)}
+
+                  {guideTopic === 'copilot' && (<div>
+                    <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>PQC Copilot</h3>
+                    <p>An AI assistant for post-quantum questions — ask about your inventory, a specific finding, migration strategy, or the NIST standards. Supports multiple chat sessions and file attachments for context.</p>
+                  </div>)}
+
+                  {guideTopic === 'settings' && (<div>
+                    <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Settings</h3>
+                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
+                      <li><strong>Profile</strong> — your account details and security.</li>
+                      <li><strong>Team &amp; 2FA</strong> — invite users, set roles, and enforce two-factor authentication.</li>
+                      <li><strong>License</strong> — your tier, seat usage and license key.</li>
+                      <li><strong>Groups</strong> — organize endpoints into named groups for filtering and scheduled pulls.</li>
+                    </ul>
+                  </div>)}
+
+                  {guideTopic === 'risk' && (<div>
                   <p style={{ marginTop: 0, color: '#94a3b8' }}>QuarkShield reports two <strong>different</strong> risk measures. They answer different questions, so they will not always line up.</p>
 
                   <h3 style={{ color: '#fff', fontSize: '0.98rem', marginBottom: '0.3rem' }}>1 · PQC Roadmap grade (A–F) — quantum readiness</h3>
@@ -3079,6 +3160,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     <li><strong>Remediation &amp; Roadmap</strong> — concrete fixes mapped to NIST FIPS 203/204/205 and the CNSA 2.0 / OMB phases.</li>
                   </ul>
                   <p style={{ margin: '0.7rem 0 0 0', color: '#64748b', fontSize: '0.8rem' }}>Open the full roadmap from <strong>Cryptographic BOM → View PQC Roadmap</strong>.</p>
+                  </div>)}
                 </div>
               </div>
             </div>
