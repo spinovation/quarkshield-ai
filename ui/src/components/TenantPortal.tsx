@@ -18,6 +18,7 @@ import {
   Copy,
   Check,
   LogOut,
+  BookOpen,
   RefreshCw,
   Server,
   Layers,
@@ -462,6 +463,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
   // Tenant Portal Forgot Password State
   const [showTenantForgotPasswordModal, setShowTenantForgotPasswordModal] = useState<boolean>(false);
+  const [showGuideModal, setShowGuideModal] = useState<boolean>(false);
   const [tenantForgotEmail, setTenantForgotEmail] = useState<string>('');
   const [tenantForgotLoading, setTenantForgotLoading] = useState<boolean>(false);
   const [tenantForgotSuccess, setTenantForgotSuccess] = useState<string | null>(null);
@@ -3007,6 +3009,80 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
         {/* Account / profile footer — subscription scale moved up into the header banner */}
         <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '0.65rem', paddingTop: '1rem' }}>
+          {/* Guide — risk rating & PQC roadmap reference (above the user profile) */}
+          <button
+            onClick={() => setShowGuideModal(true)}
+            title="How risk ratings are calculated + what each PQC Roadmap section means"
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.65rem',
+              padding: '0.6rem 0.75rem', borderRadius: '6px',
+              background: 'transparent', border: '1px solid transparent',
+              color: 'var(--text-secondary, #94a3b8)', fontSize: '0.84rem', fontWeight: 500,
+              textAlign: 'left', cursor: 'pointer', width: '100%', transition: 'all 0.15s ease'
+            }}
+            onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.05)'; }}
+            onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
+          >
+            <BookOpen size={17} color="var(--text-muted, #64748b)" style={{ flexShrink: 0 }} />
+            <span>Guide</span>
+          </button>
+
+          {/* Guide modal: risk-rating & PQC roadmap reference */}
+          {showGuideModal && (
+            <div
+              onClick={() => setShowGuideModal(false)}
+              style={{ position: 'fixed', inset: 0, background: 'rgba(2,6,15,0.72)', zIndex: 10000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}
+            >
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{ background: '#0b1220', border: '1px solid rgba(56,189,248,0.25)', borderRadius: '12px', width: 'min(820px, 94vw)', maxHeight: '86vh', overflowY: 'auto', boxShadow: '0 24px 70px rgba(0,0,0,0.6)' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.1rem 1.4rem', borderBottom: '1px solid rgba(255,255,255,0.08)', position: 'sticky', top: 0, background: '#0b1220', zIndex: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', color: '#fff', fontWeight: 700, fontSize: '1.05rem' }}>
+                    <BookOpen size={18} color="var(--accent-cyan, #38bdf8)" /> QuarkShield Guide — Risk Ratings & PQC Roadmap
+                  </div>
+                  <button onClick={() => setShowGuideModal(false)} style={{ background: 'transparent', border: 'none', color: '#94a3b8', cursor: 'pointer', fontSize: '1.1rem' }}>✕</button>
+                </div>
+                <div style={{ padding: '1.2rem 1.4rem', color: '#cbd5e1', fontSize: '0.88rem', lineHeight: 1.65 }}>
+                  <p style={{ marginTop: 0, color: '#94a3b8' }}>QuarkShield reports two <strong>different</strong> risk measures. They answer different questions, so they will not always line up.</p>
+
+                  <h3 style={{ color: '#fff', fontSize: '0.98rem', marginBottom: '0.3rem' }}>1 · PQC Roadmap grade (A–F) — quantum readiness</h3>
+                  <p style={{ margin: '0 0 0.4rem 0' }}>A single letter for how exposed your environment is to the quantum transition:</p>
+                  <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '0.7rem 0.9rem', fontFamily: 'monospace', fontSize: '0.82rem', color: '#e2e8f0' }}>
+                    blended = round( vulnPct × 0.7 + avgHostRisk × 0.3 )
+                  </div>
+                  <ul style={{ margin: '0.5rem 0 0.4rem 1.1rem', padding: 0 }}>
+                    <li><strong>vulnPct (70%)</strong> — % of crypto assets that are quantum-vulnerable (Shor-breakable: RSA, ECDSA, ECDH, DH).</li>
+                    <li><strong>avgHostRisk (30%)</strong> — average per-host risk score (CVEs, config, exposure).</li>
+                  </ul>
+                  <p style={{ margin: '0.3rem 0' }}>Grade bands: <code style={{ color: '#f87171' }}>F ≥ 65</code> · <code>D+ ≥ 50</code> · <code>C ≥ 35</code> · <code>B+ ≥ 15</code> · <code>A− &gt; 0</code> · <code style={{ color: '#4ade80' }}>A = 0</code>. It is vulnerability-dominant by design — when most of your crypto is Shor-breakable, readiness is failing.</p>
+
+                  <h3 style={{ color: '#fff', fontSize: '0.98rem', margin: '1rem 0 0.3rem 0' }}>2 · Threat &amp; Risk Graph — residual risk &amp; Quantum Risk Rating</h3>
+                  <p style={{ margin: '0 0 0.4rem 0' }}>Scored <em>per threat</em>, not per algorithm:</p>
+                  <ul style={{ margin: '0 0 0.4rem 1.1rem', padding: 0 }}>
+                    <li><strong>Inherent = Likelihood × Impact</strong> (each 1–4 → 1–16).</li>
+                    <li><strong>Likelihood (1–4)</strong> — plausibility, raised by exploitation intel: CISA <strong>KEV</strong> (known-exploited) + FIRST <strong>EPSS</strong> (exploit probability).</li>
+                    <li><strong>Impact (1–4)</strong> = max(asset criticality, data class): public 1 · internal 2 · sensitive 3 · CUI 4.</li>
+                    <li><strong>Level:</strong> ≥12 critical · ≥6 high · ≥3 medium · else low.</li>
+                    <li><strong>Residual risk</strong> drops <em>only</em> as remediations are marked done/verified. Config presence is never credited as an effective control (that needs RMF evidence) — so a fresh environment shows “High · no remediation credited yet”.</li>
+                  </ul>
+                  <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '8px', padding: '0.7rem 0.9rem', fontFamily: 'monospace', fontSize: '0.82rem', color: '#e2e8f0' }}>
+                    Quantum Risk Rating (0–100) = round( 100 × (0.6 × worst + 0.4 × avg&nbsp;of&nbsp;top&nbsp;10) / 16 )
+                  </div>
+
+                  <h3 style={{ color: '#fff', fontSize: '0.98rem', margin: '1rem 0 0.3rem 0' }}>3 · PQC Roadmap — what each section means</h3>
+                  <ul style={{ margin: '0 0 0.2rem 1.1rem', padding: 0 }}>
+                    <li><strong>Executive summary / Mosca verdict</strong> — X (secrecy lifetime) + Y (migration time) &gt; Z (time to a quantum computer) ⇒ act now.</li>
+                    <li><strong>Cryptographic Purpose Breakdown</strong> — what the crypto is <em>used for</em>: key establishment = immediate Harvest-Now-Decrypt-Later (→ ML-KEM); signing/certs/CA/SSH = planned forgery risk (→ ML-DSA/SLH-DSA). Populates on scan (legacy assets show “Unclassified” until re-scanned).</li>
+                    <li><strong>Migration Size Impact — “What Breaks”</strong> — PQC keys/signatures are much larger (ML-DSA-65 sig 3309 B, SLH-DSA 7856 B); checked against firmware slots, smartcard APDU, cert chains, MTU → breaks / tight / ok. Sizes are exact; limits are nominal (not per-device measured).</li>
+                    <li><strong>Top Migration Priorities</strong> — highest residual-risk assets first, each with its size impact.</li>
+                    <li><strong>Remediation &amp; Roadmap</strong> — concrete fixes mapped to NIST FIPS 203/204/205 and the CNSA 2.0 / OMB phases.</li>
+                  </ul>
+                  <p style={{ margin: '0.7rem 0 0 0', color: '#64748b', fontSize: '0.8rem' }}>Open the full roadmap from <strong>Cryptographic BOM → View PQC Roadmap</strong>.</p>
+                </div>
+              </div>
+            </div>
+          )}
           {/* Bottom User Profile Bar (Customer ID / Customer Name) */}
           <div style={{
             display: 'flex',
