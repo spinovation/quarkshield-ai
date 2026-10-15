@@ -3059,69 +3059,51 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
                   {guideTopic === 'overview' && (<div>
                     <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Fleet Overview</h3>
-                    <p>Your home dashboard for the enrolled estate. Shows <strong>Enrolled Workstations</strong> (agents reporting), <strong>Seat Allocation</strong> (used / licensed), <strong>Discovered Cryptographic Assets</strong>, and your <strong>Quantum Risk Rating</strong>.</p>
-                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
-                      <li>Enroll a host with the one-line installer (<code>curl … | sudo bash -s -- --token …</code>) — read-only, outbound-only HTTPS.</li>
-                      <li><strong>Pull Telemetry / Scheduled Pulls</strong> refresh a host's inventory (the agent must be running or installed as a daemon).</li>
-                      <li>Organize endpoints into <strong>Groups</strong> and filter the table by group.</li>
-                    </ul>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>Purpose · </span>See your enrolled estate's quantum-readiness at a glance — who's reporting, how many seats you're using, how much cryptography was discovered, and your overall risk.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>How to use · </span>Enroll a host with the one-line installer (<code>curl … | sudo bash -s -- --token …</code>, read-only + outbound-only HTTPS). Refresh a host with <strong>Pull Telemetry</strong> or a daily <strong>Scheduled Pull</strong> (the agent must be running or installed as a daemon). Put endpoints in <strong>Groups</strong> and filter the table.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>What you'll see · </span>Cards for Enrolled Workstations (online/offline), Seat Allocation (used/licensed), Discovered Cryptographic Assets and Quantum Risk Rating; a per-machine table with group, IP/location and last-seen.</p>
                   </div>)}
 
                   {guideTopic === 'cbom' && (<div>
                     <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Cryptographic BOM (CBOM)</h3>
-                    <p>Your complete cryptographic inventory in <strong>CycloneDX 1.6</strong> — every key, certificate, algorithm and OS package discovered across endpoints, git repos, PKI and proxies.</p>
-                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
-                      <li><strong>Export Standard CBOM</strong> or <strong>Attested CBOM (CDXA)</strong> — ML-DSA-65-signed for tamper-evident supply-chain attestation.</li>
-                      <li><strong>Drift</strong> and <strong>SBOM</strong> sub-tabs track how posture changes over time and the OS software bill of materials.</li>
-                      <li><strong>View PQC Roadmap</strong> opens the executive roadmap report (purpose breakdown, size impact, phased plan).</li>
-                    </ul>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>Purpose · </span>Your authoritative, exportable inventory of <em>all</em> cryptography — every key, certificate, algorithm and OS package found across endpoints, git repos, PKI and proxies. The "what crypto do I have, and where" source of truth, in CycloneDX 1.6.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>How to use · </span>Browse and search the inventory; <strong>Export Standard CBOM</strong> or <strong>Attested CBOM (CDXA)</strong> (ML-DSA-65-signed, tamper-evident); check the <strong>Drift</strong> and <strong>SBOM</strong> sub-tabs; click <strong>View PQC Roadmap</strong> for the executive report.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>What you'll see · </span>A sortable asset list (algorithm, key size, vulnerable?, path/source); a downloadable CycloneDX JSON; and the PQC Roadmap opening in a new tab.</p>
                   </div>)}
 
                   {guideTopic === 'compliance' && (<div>
                     <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Compliance (OSCAL)</h3>
-                    <p>Map crypto posture to NIST controls as authorization-boundary <strong>Projects</strong>.</p>
-                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
-                      <li>Create a project and pick a standard — <strong>NIST 800-53 r5</strong> or <strong>800-171 r2 / r3</strong>.</li>
-                      <li>QuarkShield seeds the quantum-relevant controls (SC-8/12/13/17, IA-5/7, SI-2…) and auto-assesses them from your CBOM.</li>
-                      <li>Set each control's status / owner / % / target date (the corrective-action grid), then export <strong>OSCAL SSP + POA&amp;M</strong>.</li>
-                      <li>Identifying a risk is not a compliance determination — control effectiveness needs RMF assessment evidence.</li>
-                    </ul>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>Purpose · </span>Turn crypto posture into audit-ready compliance evidence mapped to NIST controls, scoped as authorization-boundary <strong>Projects</strong>.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>How to use · </span>Create a Project and pick a standard (<strong>800-53 r5</strong> or <strong>800-171 r2 / r3</strong>). QuarkShield seeds the quantum-relevant controls (SC-8/12/13/17, IA-5/7, SI-2…) and auto-assesses them from your CBOM. Set each control's status / owner / % / target in the corrective-action grid.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>What you'll see · </span>A pre-scored control set, an editable corrective-action grid, and downloadable <strong>OSCAL SSP + POA&amp;M</strong>. (Note: identifying a risk is not a compliance determination — control effectiveness needs RMF assessment evidence.)</p>
                   </div>)}
 
                   {guideTopic === 'threat' && (<div>
                     <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Threat &amp; Risk Graph <span style={{ fontSize: '0.72rem', color: '#64748b' }}>(Risk Assurance add-on)</span></h3>
-                    <p>End-to-end threat model built from your assets, SBOM, cryptography and attack paths, mapped to NIST controls + STRIDE / MITRE ATT&amp;CK.</p>
-                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
-                      <li><strong>Architecture / Threat / Data-Flow</strong> views of the environment.</li>
-                      <li><strong>Asset Risk Detail</strong> → <em>"What breaks?"</em> shows a key's dependents (blast radius) + PQC migration size impact.</li>
-                      <li><strong>Threat Scenarios</strong> and <strong>Attack Paths</strong> rank exposures; <strong>Probe Endpoints</strong> maps live connectivity arrows.</li>
-                      <li>Residual Risk + Quantum Risk Rating — see the <strong>Risk Ratings &amp; Roadmap</strong> tab for the exact formulas.</li>
-                    </ul>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>Purpose · </span>A full threat model connecting your assets, cryptography, SBOM and attack paths to NIST controls + STRIDE / MITRE ATT&amp;CK — to answer "what's my real exposure, and what breaks if I rotate this key."</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>How to use · </span>Switch <strong>Architecture / Threat / Data-Flow</strong> views; open <strong>Asset Risk Detail → "What breaks?"</strong> on a key; review <strong>Threat Scenarios</strong> / <strong>Attack Paths</strong>; run <strong>Probe Endpoints</strong> to map live connectivity.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>What you'll see · </span>An architecture graph with connectivity arrows; per-asset blast-radius + PQC migration size impact; ranked threat scenarios; and Residual Risk + Quantum Risk Rating tiles (formulas on the <strong>Risk Ratings &amp; Roadmap</strong> tab).</p>
                   </div>)}
 
                   {guideTopic === 'integrations' && (<div>
                     <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Integrations &amp; Gateways</h3>
-                    <p>Bring in cryptography from sources beyond endpoints (re-scanning here also re-classifies asset <em>purpose</em>).</p>
-                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
-                      <li><strong>Git</strong> — scan repositories for committed keys, certs and crypto usage in code.</li>
-                      <li><strong>Enterprise PKI &amp; Vaults</strong> — connect AWS KMS / Azure Key Vault / HashiCorp Vault / AD CS to inventory managed keys &amp; certificates.</li>
-                      <li><strong>PQC Proxies</strong> — deploy hybrid-TLS gateways in front of backends that cannot be upgraded.</li>
-                    </ul>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>Purpose · </span>Extend discovery beyond endpoints — find cryptography in code repos and managed key stores, and deploy PQC gateways in front of systems you can't upgrade.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>How to use · </span><strong>Git</strong>: add and scan repositories. <strong>Enterprise PKI &amp; Vaults</strong>: connect AWS KMS / Azure Key Vault / HashiCorp Vault / AD CS, then <strong>Sync</strong>. <strong>PQC Proxies</strong>: deploy a hybrid-TLS gateway. (Re-scanning / syncing here re-classifies those assets' <em>purpose</em>.)</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>What you'll see · </span>Repo, PKI-synced and proxy assets flowing into your CBOM and Threat Graph (with purpose set), and hybrid-TLS gateways protecting legacy backends.</p>
                   </div>)}
 
                   {guideTopic === 'copilot' && (<div>
                     <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>PQC Copilot</h3>
-                    <p>An AI assistant for post-quantum questions — ask about your inventory, a specific finding, migration strategy, or the NIST standards. Supports multiple chat sessions and file attachments for context.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>Purpose · </span>An AI assistant that interprets your findings and helps plan migration — so you don't have to dig through raw inventory.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>How to use · </span>Ask questions in plain language ("what's my biggest HNDL exposure?", "how do I migrate this RSA cert?"); attach files for context; keep several sessions.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>What you'll see · </span>Context-aware answers grounded in your inventory, specific findings, migration strategy and the NIST standards.</p>
                   </div>)}
 
                   {guideTopic === 'settings' && (<div>
                     <h3 style={{ color: '#fff', fontSize: '0.98rem', marginTop: 0 }}>Settings</h3>
-                    <ul style={{ margin: '0 0 0 1.1rem', padding: 0 }}>
-                      <li><strong>Profile</strong> — your account details and security.</li>
-                      <li><strong>Team &amp; 2FA</strong> — invite users, set roles, and enforce two-factor authentication.</li>
-                      <li><strong>License</strong> — your tier, seat usage and license key.</li>
-                      <li><strong>Groups</strong> — organize endpoints into named groups for filtering and scheduled pulls.</li>
-                    </ul>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>Purpose · </span>Manage your account, team, license and endpoint groups.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>How to use · </span><strong>Profile</strong> — account details + security. <strong>Team &amp; 2FA</strong> — invite users, set roles, enforce two-factor. <strong>License</strong> — view tier / seats / key. <strong>Groups</strong> — create named endpoint groups.</p>
+                    <p><span style={{ color: '#38bdf8', fontWeight: 700 }}>What you'll see · </span>Updated profile &amp; security, invited users with roles, your current license status, and groups usable in table filters and scheduled pulls.</p>
                   </div>)}
 
                   {guideTopic === 'risk' && (<div>
