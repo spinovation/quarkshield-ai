@@ -12,7 +12,9 @@ type Urgency = 'immediate_hndl' | 'forgery_planned' | 'hardening' | 'review';
 
 interface PurposeBreakdown { purpose: string; label: string; count: number; urgency: Urgency; urgencyLabel: string; standard: string; }
 interface MigrationFriction { signingAssets: number; kexAssets: number; firmwareOrRootAssets: number; headline: string; detail: string; }
-interface Priority { rank: number; title: string; severity: string; exposure: string; rationale: string; purposeLabel?: string; }
+interface SizeImpactFinding { constraint_label: string; limit_bytes: number; size_after: number; severity: string; rationale: string; remediation: string; }
+interface SizeImpact { from_algo: string; to_algo: string; size_before: number; size_after: number; blowup: number | null; findings: SizeImpactFinding[]; note: string; }
+interface Priority { rank: number; title: string; severity: string; exposure: string; rationale: string; purposeLabel?: string; sizeImpact?: SizeImpact; }
 interface Remediation { finding: string; replacement: string; standard: string; effort: string; how: string; }
 interface RoadmapPhase { phase: string; window: string; mandate: string; status: string; actions: string[]; }
 interface RoadmapReport {
@@ -27,6 +29,7 @@ const URGENCY_COLOR: Record<Urgency, string> = {
   immediate_hndl: '#f87171', forgery_planned: '#fbbf24', hardening: '#60a5fa', review: '#94a3b8',
 };
 const SEV_COLOR: Record<string, string> = { critical: '#f87171', high: '#fb923c', medium: '#fbbf24', low: '#94a3b8' };
+const IMPACT_SEV_COLOR: Record<string, string> = { blocker: '#f87171', degraded: '#fb923c', advisory: '#fbbf24' };
 
 export interface PqcRoadmapModalProps {
   tenantFilter: string;                       // 'all' = fleet-wide (collective)
@@ -41,6 +44,7 @@ const PqcRoadmapModal: React.FC<PqcRoadmapModalProps> = ({ tenantFilter, onClose
   const [report, setReport] = useState<RoadmapReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [expandedPriority, setExpandedPriority] = useState<number | null>(null);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -161,15 +165,42 @@ const PqcRoadmapModal: React.FC<PqcRoadmapModalProps> = ({ tenantFilter, onClose
               {/* Top priorities */}
               <div style={h2}>Top Migration Priorities</div>
               {report.priorities.length === 0 ? <div style={{ color: '#94a3b8' }}>No quantum-vulnerable assets identified.</div> :
-                report.priorities.map(p => (
+                report.priorities.map(p => {
+                  const si = p.sizeImpact;
+                  const open = expandedPriority === p.rank;
+                  const hasImpact = !!si && (si.findings.length > 0 || (si.blowup ?? 0) > 1);
+                  return (
                   <div key={p.rank} style={{ ...card(), borderLeft: `3px solid ${SEV_COLOR[p.severity] || '#94a3b8'}`, marginBottom: '0.5rem' }}>
-                    <div style={{ fontWeight: 700, color: '#e2e8f0' }}>
-                      <span style={{ fontSize: '0.64rem', fontWeight: 800, textTransform: 'uppercase', padding: '1px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: SEV_COLOR[p.severity] || '#94a3b8', marginRight: 8 }}>{p.severity}</span>
-                      P{p.rank} · {p.title}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', alignItems: 'baseline' }}>
+                      <div style={{ fontWeight: 700, color: '#e2e8f0' }}>
+                        <span style={{ fontSize: '0.64rem', fontWeight: 800, textTransform: 'uppercase', padding: '1px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.08)', color: SEV_COLOR[p.severity] || '#94a3b8', marginRight: 8 }}>{p.severity}</span>
+                        P{p.rank} · {p.title}
+                      </div>
+                      {hasImpact && (
+                        <button onClick={() => setExpandedPriority(open ? null : p.rank)} style={{ background: 'transparent', border: 'none', color: '#67e8f9', cursor: 'pointer', fontSize: '0.74rem', whiteSpace: 'nowrap' }}>
+                          {open ? 'Hide' : 'What breaks? →'}
+                        </button>
+                      )}
                     </div>
                     <div style={{ color: '#94a3b8', fontSize: '0.78rem', marginTop: '0.25rem' }}>{p.rationale}</div>
+                    {open && si && (
+                      <div style={{ marginTop: '0.6rem', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '0.6rem' }}>
+                        <div style={{ fontSize: '0.78rem', color: '#e2e8f0', fontWeight: 600 }}>
+                          {si.from_algo.toUpperCase()} → {si.to_algo.toUpperCase()}{si.blowup ? ` · ${si.blowup}× larger` : ''} ({si.size_before || '?'} B → {si.size_after} B)
+                        </div>
+                        {si.findings.length === 0 ? <div style={{ color: '#64748b', fontSize: '0.76rem', marginTop: 4 }}>No fixed-size constraints flagged for this migration.</div> :
+                          si.findings.map((f, i) => (
+                            <div key={i} style={{ fontSize: '0.76rem', borderLeft: `3px solid ${IMPACT_SEV_COLOR[f.severity] || '#94a3b8'}`, paddingLeft: 8, marginTop: 6 }}>
+                              <div><span style={{ fontSize: '0.62rem', fontWeight: 800, textTransform: 'uppercase', color: IMPACT_SEV_COLOR[f.severity], marginRight: 6 }}>{f.severity}</span><strong style={{ color: '#e2e8f0' }}>{f.constraint_label}</strong> <span style={{ color: '#64748b' }}>· {f.size_after} B vs {f.limit_bytes} B nominal</span></div>
+                              <div style={{ color: '#94a3b8', marginTop: 2 }}>{f.rationale}</div>
+                              <div style={{ color: '#94a3b8', marginTop: 2, fontStyle: 'italic' }}>Fix: {f.remediation}</div>
+                            </div>
+                          ))}
+                        <div style={{ color: '#64748b', fontSize: '0.7rem', marginTop: 6 }}>{si.note}</div>
+                      </div>
+                    )}
                   </div>
-                ))}
+                );})}
 
               {/* Remediation */}
               {report.remediation.length > 0 && (

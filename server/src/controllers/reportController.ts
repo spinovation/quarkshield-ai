@@ -278,7 +278,11 @@ ${r.migrationFriction && (r.migrationFriction.signingAssets || r.migrationFricti
 <div class="verdict warn"><div>${esc(r.migrationFriction.headline)}</div><div class="d">${esc(r.migrationFriction.detail)}</div></div>` : ''}
 
 <h2>Top Migration Priorities</h2>
-${r.priorities.length ? r.priorities.map(p => `<div class="pri ${p.severity}"><div class="t"><span class="sev">${esc(p.severity)}</span>P${p.rank} · ${esc(p.title)}</div><div class="r">${esc(p.rationale)}</div></div>`).join('') : '<p>No quantum-vulnerable assets identified.</p>'}
+${r.priorities.length ? r.priorities.map(p => {
+  const si = p.sizeImpact;
+  const impact = si && si.findings.length ? `<div style="margin-top:8px;border-top:1px dashed var(--line);padding-top:8px"><div style="font-size:12px;font-weight:600;color:var(--navy)">What breaks if migrated: ${esc(si.from_algo.toUpperCase())} → ${esc(si.to_algo.toUpperCase())}${si.blowup ? ` · ${si.blowup}× larger` : ''} (${si.size_before || '?'} B → ${si.size_after} B)</div>${si.findings.map(f => `<div style="font-size:12px;color:var(--slate);margin-top:4px"><strong style="color:${f.severity === 'blocker' ? '#b91c1c' : f.severity === 'degraded' ? '#c2410c' : '#a16207'}">${esc(f.severity.toUpperCase())}</strong> · <strong>${esc(f.constraint_label)}</strong> — ${esc(f.rationale)} <em>Fix: ${esc(f.remediation)}</em></div>`).join('')}</div>` : '';
+  return `<div class="pri ${p.severity}"><div class="t"><span class="sev">${esc(p.severity)}</span>P${p.rank} · ${esc(p.title)}</div><div class="r">${esc(p.rationale)}</div>${impact}</div>`;
+}).join('') : '<p>No quantum-vulnerable assets identified.</p>'}
 
 <h2>Remediation Recommendations</h2>
 <table><thead><tr><th>Finding</th><th>Replacement</th><th>Standard</th><th>Effort</th></tr></thead><tbody>

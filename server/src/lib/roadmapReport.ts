@@ -1,4 +1,6 @@
 import pool from '../config/db';
+import { assessSizeImpact, SizeImpact } from './threatGraph/sizeImpact';
+import { CryptoPurpose } from './threatGraph/types';
 
 /**
  * PQC Executive Roadmap Report engine.
@@ -27,6 +29,7 @@ export interface Priority {
   rationale: string;
   purpose?: string;         // dominant CryptoPurpose for this algorithm group (CBOM purpose, P1)
   purposeLabel?: string;    // human label for the dominant purpose
+  sizeImpact?: SizeImpact;  // "what breaks" size analysis for migrating this exposure (P2)
 }
 
 /** Threat urgency a cryptographic PURPOSE implies (decouples HNDL from forgery). */
@@ -234,6 +237,8 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
       rationale: `${x.count} ${x.algorithm} asset${x.count === 1 ? '' : 's'} on ${SOURCE_LABEL[x.src] || 'assets'}${x.shorBreakable ? ', breakable by Shor’s algorithm on a CRQC (Harvest-Now-Decrypt-Later risk today)' : ''}.${purposeNote}`,
       purpose: x.purpose,
       purposeLabel: meta.label,
+      // Per-exposure "what breaks" size analysis (deterministic; no topology needed).
+      sizeImpact: assessSizeImpact({ algorithm: x.algorithm, purpose: (x.purpose || 'unknown') as CryptoPurpose }),
     };
   });
 

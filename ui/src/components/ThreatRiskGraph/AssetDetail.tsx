@@ -55,11 +55,90 @@ const ContextEditor: React.FC<{ api: ThreatApi; asset: any; override: any; onSav
   );
 };
 
+const SEV_COLOR: Record<string, string> = { blocker: LEVEL_META.critical.color, degraded: LEVEL_META.high.color, advisory: LEVEL_META.medium.color };
+
+/**
+ * Crypto usage/dependency map (P1b/P2): for ONE crypto finding, show what depends
+ * on it (reverse-dependency blast radius) and whether the PQC replacement fits the
+ * systems that depend on it (size impact). Both are lazy-loaded from the graph APIs.
+ */
+const CryptoDependencyPanel: React.FC<{ api: ThreatApi; cryptoId: string; onSelect: (id: string) => void }> = ({ api, cryptoId, onSelect }) => {
+  const [blast, setBlast] = useState<any | null>(null);
+  const [impact, setImpact] = useState<any | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let live = true;
+    setLoading(true); setError(null); setBlast(null); setImpact(null);
+    Promise.all([api.cryptoBlastRadius(cryptoId), api.cryptoSizeImpact(cryptoId)])
+      .then(([b, i]) => { if (live) { setBlast(b); setImpact(i); } })
+      .catch(e => { if (live) setError(e.message); })
+      .finally(() => { if (live) setLoading(false); });
+    return () => { live = false; };
+  }, [api, cryptoId]);
+
+  if (loading) return <div style={{ padding: '0.6rem' }}><Loader2 size={14} className="spin" /> <span style={muted}>Mapping dependencies…</span></div>;
+  if (error) return <div style={{ padding: '0.6rem', color: LEVEL_META.critical.color }}>{error}</div>;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.8rem', padding: '0.6rem 0.2rem' }}>
+      {/* What depends on this key (reverse dependency) */}
+      <div>
+        <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }}>
+          What depends on this key — {blast?.consumer_count || 0} would break if rotated
+        </div>
+        {(!blast || blast.affected_count === 0) ? <Empty>No dependent assets found in the inferred topology.</Empty> : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            {blast.affected.map((e: any, i: number) => (
+              <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', fontSize: '0.78rem', padding: '0.2rem 0' }}>
+                {e.relies_on_host_key
+                  ? <Chip color={LEVEL_META.high.color}>breaks on rotation</Chip>
+                  : <Chip>upstream</Chip>}
+                <LinkButton onClick={() => onSelect(e.asset_id)}>{e.asset_name}</LinkButton>
+                <span style={muted}>{e.relationship}</span>
+                <Chip title={JSON.stringify(e.evidence)}>{e.rule_id}</Chip>
+                <Chip>{e.confidence}</Chip>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* What breaks on migration (size impact) */}
+      {impact && (
+        <div>
+          <div style={{ fontSize: '0.8rem', fontWeight: 600, marginBottom: 4 }}>
+            What breaks on migration — {String(impact.from_algo).toUpperCase()} → {String(impact.to_algo).toUpperCase()}
+            {impact.blowup ? ` · ${impact.blowup}× larger` : ''} ({impact.size_before || '?'} B → {impact.size_after} B)
+          </div>
+          {impact.findings.length === 0 ? <Empty>No size constraints flagged for this migration.</Empty> : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {impact.findings.map((f: any, i: number) => (
+                <div key={i} style={{ fontSize: '0.78rem', borderLeft: `3px solid ${SEV_COLOR[f.severity] || muted.color}`, paddingLeft: 8 }}>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <Chip color={SEV_COLOR[f.severity]}>{f.severity}</Chip>
+                    <strong style={{ fontWeight: 600 }}>{f.constraint_label}</strong>
+                    <span style={muted}>{f.size_after} B vs {f.limit_bytes} B nominal</span>
+                  </div>
+                  <div style={{ ...muted, marginTop: 2 }}>{f.rationale}</div>
+                  <div style={{ ...muted, marginTop: 2, fontStyle: 'italic' }}>Fix: {f.remediation}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={{ ...muted, marginTop: 6, fontSize: '0.72rem' }}>{impact.note}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const AssetDetail: React.FC<Props> = ({ api, selectedId, onSelect, onOpenScenario, onOpenPath, onFocusGraph, onChanged }) => {
   const [list, setList] = useState<any[] | null>(null);
   const [detail, setDetail] = useState<any | null>(null);
   const [q, setQ] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [expandedCrypto, setExpandedCrypto] = useState<string | null>(null);
 
   const loadList = useCallback(() => {
     api.assets().then(setList).catch(e => setError(e.message));
@@ -206,10 +285,11 @@ export const AssetDetail: React.FC<Props> = ({ api, selectedId, onSelect, onOpen
               {detail.crypto.length === 0 ? <Empty>No cryptographic findings on this asset.</Empty> : (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={tableStyle}>
-                    <thead><tr><th style={th}>Finding</th><th style={th}>Purpose</th><th style={th}>Exposure</th><th style={th}>Recommendation</th></tr></thead>
+                    <thead><tr><th style={th}>Finding</th><th style={th}>Purpose</th><th style={th}>Exposure</th><th style={th}>Recommendation</th><th style={th}>Dependencies</th></tr></thead>
                     <tbody>
                       {detail.crypto.map((c: any) => (
-                        <tr key={c.id}>
+                        <React.Fragment key={c.id}>
+                        <tr>
                           <td style={td}>{c.name}<div style={muted}>{c.algorithm}{c.key_size ? ` · ${c.key_size}-bit` : ''}</div></td>
                           <td style={td}>{c.purpose_label}</td>
                           <td style={td}>
@@ -221,7 +301,20 @@ export const AssetDetail: React.FC<Props> = ({ api, selectedId, onSelect, onOpen
                             </div>
                           </td>
                           <td style={{ ...td, ...muted }}>{c.recommendation}</td>
+                          <td style={td}>
+                            <LinkButton onClick={() => setExpandedCrypto(expandedCrypto === c.id ? null : c.id)}>
+                              {expandedCrypto === c.id ? 'Hide' : 'What breaks? →'}
+                            </LinkButton>
+                          </td>
                         </tr>
+                        {expandedCrypto === c.id && (
+                          <tr>
+                            <td style={{ ...td, background: 'rgba(0,242,254,0.04)' }} colSpan={5}>
+                              <CryptoDependencyPanel api={api} cryptoId={c.id} onSelect={onSelect} />
+                            </td>
+                          </tr>
+                        )}
+                        </React.Fragment>
                       ))}
                     </tbody>
                   </table>

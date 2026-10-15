@@ -48,6 +48,9 @@ export const makeApi = (tenant?: string) => {
       return request<any>('GET', `/graph${qs ? `?${qs}` : ''}`);
     },
     relationship: (id: string) => request<any>('GET', `/relationships/${encodeURIComponent(id)}`),
+    // Crypto usage/dependency map (dependency-map P1b/P2):
+    cryptoBlastRadius: (id: string) => request<any>('GET', `/crypto/${encodeURIComponent(id)}/blast-radius`),
+    cryptoSizeImpact: (id: string, target?: string) => request<any>('GET', `/crypto/${encodeURIComponent(id)}/size-impact${target ? `?target=${encodeURIComponent(target)}` : ''}`),
     scenarios: () => request<any[]>('GET', '/scenarios'),
     scenario: (id: string) => request<any>('GET', `/scenarios/${encodeURIComponent(id)}`),
     assets: () => request<any[]>('GET', '/assets'),
