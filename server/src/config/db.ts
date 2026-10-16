@@ -16,8 +16,45 @@ const pool = new Pool({
   database: process.env.DB_DATABASE || 'quarkshield_scanner',
   password: process.env.DB_PASSWORD || 'postgres',
   port: Number(process.env.DB_PORT) || 5432,
-  connectionTimeoutMillis: 2000,
+  // 2s was too aggressive right after a container recreation (the console opened its
+  // pool before Postgres had finished accepting connections, so the first requests
+  // 520'd). 5s rides out that warmup window.
+  connectionTimeoutMillis: 5000,
+  // Keep TCP alive so a connection dropped by the OS/NAT is detected, and recycle idle
+  // connections so a stale socket (e.g. to a just-recreated DB container) is not reused.
+  keepAlive: true,
+  keepAliveInitialDelayMillis: 10000,
+  idleTimeoutMillis: 30000,
 });
+
+// A backend error on an IDLE pooled client surfaces as an 'error' event on the pool.
+// Without a listener, Node treats it as unhandled and crashes the whole process — which
+// is exactly how a transient DB blip became a 520 across every request. Log and drop the
+// dead client; the pool opens a fresh one on the next query.
+pool.on('error', (err) => {
+  console.warn('[db pool] idle client error (recovered):', err.message);
+});
+
+// Write-safe single retry: ONLY when a query fails to acquire a connection (connect-phase
+// pool errors), which guarantees the statement never reached Postgres — so retrying can
+// never double a write. A mid-query drop is NOT retried here.
+const CONNECT_PHASE_ERROR = /Connection terminated due to connection timeout|timeout exceeded when trying to connect/i;
+const RETRY_DELAY_MS = 300;
+const originalQuery = pool.query.bind(pool);
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(pool as any).query = async (...args: any[]): Promise<any> => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return await (originalQuery as any)(...args);
+  } catch (err) {
+    if (CONNECT_PHASE_ERROR.test(String((err as Error)?.message || ''))) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return await (originalQuery as any)(...args);
+    }
+    throw err;
+  }
+};
 
 /**
  * Split a SQL script into individual statements on top-level semicolons.
