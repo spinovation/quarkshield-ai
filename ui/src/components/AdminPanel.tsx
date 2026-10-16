@@ -454,6 +454,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [generatingQsgOrg, setGeneratingQsgOrg] = useState<string | null>(null);
   // Shows a freshly minted QSG token ONCE (plaintext is never retrievable again).
   const [qsgTokenModal, setQsgTokenModal] = useState<{ tenant: string; name: string; token: string } | null>(null);
+  const [emailingQsgToken, setEmailingQsgToken] = useState(false);
+  const [qsgEmailMsg, setQsgEmailMsg] = useState<string | null>(null);
   const [emailSendingKey, setEmailSendingKey] = useState<string | null>(null);
   const [emailSuccessMsg, setEmailSuccessMsg] = useState<string | null>(null);
   const [expandedLicenseOrgs, setExpandedLicenseOrgs] = useState<Record<string, boolean>>({});
@@ -1069,6 +1071,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       alert(`Could not generate QSG token: ${err?.message || 'server unavailable'}`);
     } finally {
       setGeneratingQsgOrg(null);
+    }
+  };
+
+  // Email the just-minted QSG token to the customer (only possible now — it is hash-only
+  // at rest and cannot be re-sent later). The server falls back to the tenant's admin_email.
+  const handleEmailQsgToken = async (tenant: string, tokenValue: string, contactEmail?: string) => {
+    setEmailingQsgToken(true);
+    setQsgEmailMsg(null);
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch(`/api/admin/clients/${encodeURIComponent(tenant)}/service-tokens/email`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(contactEmail ? { token: tokenValue, contactEmail } : { token: tokenValue })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.ok) {
+        setQsgEmailMsg(`Sent to ${data.recipient}`);
+      } else if (res.status === 400 && /recipient email/i.test(data?.error || '')) {
+        // No email on record — ask the admin, then retry once.
+        const input = window.prompt(`Enter recipient email for the ${tenant} QSG token (from Support@quarkshield.ai):`, '');
+        if (input && input.trim()) {
+          await handleEmailQsgToken(tenant, tokenValue, input.trim());
+          return;
+        }
+      } else {
+        setQsgEmailMsg(data?.error || `Failed to send (server returned ${res.status}).`);
+      }
+    } catch (err: any) {
+      setQsgEmailMsg(`Could not send: ${err?.message || 'server unavailable'}`);
+    } finally {
+      setEmailingQsgToken(false);
     }
   };
 
@@ -7274,6 +7308,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
             }}>
               {qsgTokenModal.token}
             </div>
+            {qsgEmailMsg && (
+              <p style={{ margin: '0 0 0.5rem', fontSize: '0.78rem', color: qsgEmailMsg.startsWith('Sent') ? '#4ade80' : '#f87171' }}>
+                {qsgEmailMsg}
+              </p>
+            )}
             <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
               <button
                 onClick={() => { try { navigator.clipboard.writeText(qsgTokenModal.token); } catch { /* ignore */ } }}
@@ -7286,7 +7325,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                 Copy
               </button>
               <button
-                onClick={() => setQsgTokenModal(null)}
+                onClick={() => handleEmailQsgToken(qsgTokenModal.tenant, qsgTokenModal.token)}
+                disabled={emailingQsgToken}
+                title="Email this token to the customer (only possible now — it is not recoverable later)"
+                style={{
+                  background: 'rgba(168, 85, 247, 0.15)', border: '1px solid rgba(168, 85, 247, 0.4)',
+                  color: '#c084fc', borderRadius: '6px', padding: '0.4rem 0.9rem', fontSize: '0.8rem',
+                  fontWeight: 600, cursor: emailingQsgToken ? 'wait' : 'pointer', display: 'inline-flex',
+                  alignItems: 'center', gap: '0.35rem'
+                }}
+              >
+                <Mail size={13} /> {emailingQsgToken ? 'Sending…' : 'Email to customer'}
+              </button>
+              <button
+                onClick={() => { setQsgTokenModal(null); setQsgEmailMsg(null); }}
                 style={{
                   background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-normal)',
                   color: 'var(--text-secondary)', borderRadius: '6px', padding: '0.4rem 0.9rem',
