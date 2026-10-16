@@ -22,6 +22,12 @@ export const safeEqual = (a: string, b: string): boolean => {
  */
 
 export const SESSION_COOKIE = 'qs_session';
+// The console (apex) session lives in a SEPARATE, host-only cookie so a tenant-portal
+// login on a *.quarkshield.ai subdomain (which writes the shared, domain-wide qs_session)
+// cannot overwrite the platform-admin session. extractToken prefers this cookie, so on the
+// apex the console session always wins. It is host-only (no Domain attribute) → it is never
+// sent to, or writable by, subdomains, so it never leaks the admin session to a tenant host.
+export const CONSOLE_SESSION_COOKIE = 'qs_console';
 // Session lifetime. 12h was too short and caused frequent mid-use expiry (the recurring
 // ?session=expired). 7 days with the httpOnly cookie is a reasonable tenant-portal TTL.
 const DEFAULT_TTL = '7d';
@@ -199,12 +205,33 @@ export const clearSessionCookie = (res: Response): void => {
   res.clearCookie(SESSION_COOKIE, { domain, path: '/' });
 };
 
+/** Set the host-only console session cookie (platform admins / operators). No Domain
+ *  attribute → scoped to the exact host that served login (the apex), so a subdomain
+ *  tenant login cannot read or overwrite it. */
+export const setConsoleSessionCookie = (res: Response, token: string): void => {
+  res.cookie(CONSOLE_SESSION_COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    maxAge: SESSION_MAX_AGE_MS,
+    path: '/',
+  });
+};
+
+export const clearConsoleSessionCookie = (res: Response): void => {
+  res.clearCookie(CONSOLE_SESSION_COOKIE, { path: '/' });
+};
+
 const extractToken = (req: Request): string | null => {
   const auth = req.headers.authorization;
   if (auth && auth.startsWith('Bearer ')) {
     const t = auth.slice(7).trim();
     if (t && t !== 'null' && t !== 'undefined') return t;
   }
+  // The host-only console cookie wins over the shared qs_session so that, on the apex,
+  // a tenant login that overwrote qs_session cannot hijack the platform-admin console.
+  const consoleToken = (req as any).cookies?.[CONSOLE_SESSION_COOKIE];
+  if (consoleToken) return consoleToken;
   const cookieToken = (req as any).cookies?.[SESSION_COOKIE];
   if (cookieToken) return cookieToken;
   return null;

@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
-import { signSession, setSessionCookie, clearSessionCookie, isSuperRole, isPlatformAdmin, sanitizeTenantRole, revokeUserSessions, forgetUserState, localTenantEntitlement, RISK_ASSURANCE_ADDON } from '../middleware/auth';
+import { signSession, setSessionCookie, clearSessionCookie, setConsoleSessionCookie, clearConsoleSessionCookie, isSuperRole, isPlatformAdmin, sanitizeTenantRole, revokeUserSessions, forgetUserState, localTenantEntitlement, RISK_ASSURANCE_ADDON } from '../middleware/auth';
 
 /** Escape untrusted text for inclusion in HTML email bodies. */
 const escapeHtml = (v: unknown): string => String(v ?? '')
@@ -2906,6 +2906,9 @@ export const unifiedLogin = async (req: Request, res: Response) => {
       const roleLabel = u.role === 'secops_lead' ? 'SecOps Lead' : u.role === 'support_engineer' ? 'Support Engineer' : superRole ? 'Super Admin' : 'Operator';
       const token = signSession({ sub: u.id, email: u.email, role: u.role, accountType: superRole ? 'superadmin' : 'operator', tenant: null });
       setSessionCookie(res, token);
+      // Also pin the console session to its own host-only cookie so a later tenant login
+      // on a subdomain can't overwrite it (extractToken prefers the console cookie).
+      setConsoleSessionCookie(res, token);
       await pool.query('UPDATE admin_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [u.id]).catch(() => {});
       return res.json({
         success: true,
@@ -2973,6 +2976,7 @@ export const unifiedLogin = async (req: Request, res: Response) => {
       if (policyRequires2fa && !tu.two_factor_enabled) {
         const pendingToken = signSession({ sub: tu.id, email: tu.email, role: tu.role || 'secops', accountType: 'tenant', tenant: tu.tenant_name, pending2fa: true });
         setSessionCookie(res, pendingToken);
+        clearConsoleSessionCookie(res); // a tenant login must not inherit a stale console session
         return res.json({
           success: true,
           token: pendingToken,
@@ -2989,6 +2993,7 @@ export const unifiedLogin = async (req: Request, res: Response) => {
 
       const token = signSession({ sub: tu.id, email: tu.email, role: tu.role || 'secops', accountType: 'tenant', tenant: tu.tenant_name });
       setSessionCookie(res, token);
+      clearConsoleSessionCookie(res); // a tenant login must not inherit a stale console session
       await pool.query('UPDATE tenant_users SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [tu.id]).catch(() => {});
       return res.json({
         success: true,
@@ -3024,6 +3029,7 @@ export const logout = async (req: Request, res: Response) => {
     await revokeUserSessions(req.user.accountType === 'tenant' ? 'tenant_users' : 'admin_users', req.user.sub);
   }
   clearSessionCookie(res);
+  clearConsoleSessionCookie(res);
   return res.json({ success: true });
 };
 
@@ -3204,7 +3210,11 @@ export const changePassword = async (req: Request, res: Response) => {
     // Every other session for this account is now invalid; re-issue this one so the
     // caller stays signed in.
     const { sub, email, role, accountType, tenant } = req.user;
-    setSessionCookie(res, signSession({ sub, email, role, accountType, tenant }));
+    const reissued = signSession({ sub, email, role, accountType, tenant });
+    setSessionCookie(res, reissued);
+    // Keep the host-only console cookie in sync with the account type.
+    if (accountType === 'superadmin' || accountType === 'operator') setConsoleSessionCookie(res, reissued);
+    else clearConsoleSessionCookie(res);
 
     res.json({
       success: true,
