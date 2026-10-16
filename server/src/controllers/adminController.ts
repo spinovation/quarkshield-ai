@@ -238,7 +238,7 @@ export const updateSubscription = async (req: Request, res: Response) => {
  * Grant or revoke a plan add-on (e.g. 'risk_assurance' = Threat & Risk Graph, Continuous
  * Monitoring, RMF) on a client and its active licenses. Body: { addon, enabled }.
  */
-const KNOWN_ADDONS = new Set(['risk_assurance']);
+const KNOWN_ADDONS = new Set(['risk_assurance', 'qsg_posture']);
 export const updateClientAddons = async (req: Request, res: Response) => {
   const { name } = req.params;
   const addon = String(req.body?.addon || '').toLowerCase();

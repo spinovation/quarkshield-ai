@@ -450,6 +450,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [reactivatingId, setReactivatingId] = useState<string | null>(null);
   const [togglingAddonOrg, setTogglingAddonOrg] = useState<string | null>(null);
+  const [togglingQsgOrg, setTogglingQsgOrg] = useState<string | null>(null);
+  const [generatingQsgOrg, setGeneratingQsgOrg] = useState<string | null>(null);
+  // Shows a freshly minted QSG token ONCE (plaintext is never retrievable again).
+  const [qsgTokenModal, setQsgTokenModal] = useState<{ tenant: string; name: string; token: string } | null>(null);
   const [emailSendingKey, setEmailSendingKey] = useState<string | null>(null);
   const [emailSuccessMsg, setEmailSuccessMsg] = useState<string | null>(null);
   const [expandedLicenseOrgs, setExpandedLicenseOrgs] = useState<Record<string, boolean>>({});
@@ -1014,6 +1018,57 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       alert(`Could not update add-on: ${err?.message || 'server unavailable'}`);
     } finally {
       setTogglingAddonOrg(null);
+    }
+  };
+
+  // Enable/disable the QSG posture add-on (external control-plane read access) for a tenant.
+  const handleToggleQsg = async (orgName: string, enable: boolean) => {
+    setTogglingQsgOrg(orgName.toUpperCase());
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch(`/api/admin/clients/${encodeURIComponent(orgName)}/addons`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ addon: 'qsg_posture', enabled: enable })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        const addons: string[] = (data.addons || []).map((a: string) => String(a).toLowerCase());
+        setClients(prev => prev.map(c =>
+          (c.name.toLowerCase() === orgName.toLowerCase()
+            || c.name.replace(/-/g, '').toLowerCase() === orgName.replace(/-/g, '').toLowerCase())
+            ? { ...c, planAddons: addons }
+            : c));
+      } else {
+        alert(data?.error || 'Failed to update QSG add-on.');
+      }
+    } catch (err: any) {
+      alert(`Could not update add-on: ${err?.message || 'server unavailable'}`);
+    } finally {
+      setTogglingQsgOrg(null);
+    }
+  };
+
+  // Mint a read-only posture service token for QSG (shown once). License-gated server-side.
+  const handleGenerateQsgToken = async (orgName: string) => {
+    setGeneratingQsgOrg(orgName.toUpperCase());
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch(`/api/admin/clients/${encodeURIComponent(orgName)}/service-tokens`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'qsg-control', scopes: ['posture:read'], expiresInDays: 365 })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.token) {
+        setQsgTokenModal({ tenant: orgName, name: data.name || 'qsg-control', token: data.token });
+      } else {
+        alert(data?.error || `Failed to generate QSG token (server returned ${res.status}).`);
+      }
+    } catch (err: any) {
+      alert(`Could not generate QSG token: ${err?.message || 'server unavailable'}`);
+    } finally {
+      setGeneratingQsgOrg(null);
     }
   };
 
@@ -4729,6 +4784,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                     <th style={{ padding: '0.75rem' }}>Total Seats</th>
                     <th style={{ padding: '0.75rem' }}>Status</th>
                     <th style={{ padding: '0.75rem', textAlign: 'center' }}>Threat Model</th>
+                    <th style={{ padding: '0.75rem', textAlign: 'center' }}>QSG</th>
                     <th style={{ padding: '0.75rem', textAlign: 'right' }}>Actions</th>
                   </tr>
                 </thead>
@@ -4746,6 +4802,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                     const tmEligible = enterpriseClass.includes(String(group.tier || '').toLowerCase())
                       || enterpriseClass.includes(String(orgClient?.subscriptionTier || '').toLowerCase());
                     const tmBusy = togglingAddonOrg === group.orgKey;
+
+                    // QSG posture add-on (external control-plane read access). Available to any
+                    // licensed tenant — no Enterprise gate — and independent of Threat Model.
+                    const qsgEnabled = (orgClient?.planAddons || []).map(a => String(a).toLowerCase()).includes('qsg_posture');
+                    const qsgBusy = togglingQsgOrg === group.orgKey;
+                    const qsgGenBusy = generatingQsgOrg === group.orgKey;
 
                     return (
                       <React.Fragment key={group.orgKey}>
@@ -4981,6 +5043,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                               {tmBusy ? '…' : tmEnabled ? 'Enabled' : 'Disabled'}
                             </button>
                           </td>
+                          <td style={{ padding: '0.75rem', textAlign: 'center' }} onClick={(e) => e.stopPropagation()}>
+                            <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: '0.3rem' }}>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (qsgBusy) return;
+                                  handleToggleQsg(group.tenantName, !qsgEnabled);
+                                }}
+                                disabled={qsgBusy}
+                                title={
+                                  qsgEnabled
+                                    ? 'QSG posture read access is ENABLED for this tenant — click to disable'
+                                    : 'Click to enable external control-plane (QSG) read access for this tenant'
+                                }
+                                style={{
+                                  background: qsgEnabled ? 'rgba(34, 197, 94, 0.15)' : 'rgba(255, 255, 255, 0.05)',
+                                  border: qsgEnabled ? '1px solid rgba(34, 197, 94, 0.4)' : '1px solid var(--border-normal)',
+                                  color: qsgEnabled ? '#4ade80' : 'var(--text-secondary)',
+                                  borderRadius: '999px',
+                                  padding: '0.25rem 0.6rem',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 600,
+                                  cursor: qsgBusy ? 'wait' : 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.35rem'
+                                }}
+                              >
+                                <span style={{
+                                  width: '7px', height: '7px', borderRadius: '50%',
+                                  background: qsgEnabled ? '#4ade80' : 'var(--text-muted)'
+                                }} />
+                                {qsgBusy ? '…' : qsgEnabled ? 'Enabled' : 'Disabled'}
+                              </button>
+                              {qsgEnabled && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (qsgGenBusy) return;
+                                    handleGenerateQsgToken(group.tenantName);
+                                  }}
+                                  disabled={qsgGenBusy}
+                                  title="Generate a read-only posture token for QSG (shown once)"
+                                  style={{
+                                    background: 'rgba(56, 189, 248, 0.1)',
+                                    border: '1px solid rgba(56, 189, 248, 0.3)',
+                                    color: '#38bdf8',
+                                    borderRadius: '4px',
+                                    padding: '0.15rem 0.5rem',
+                                    fontSize: '0.68rem',
+                                    fontWeight: 600,
+                                    cursor: qsgGenBusy ? 'wait' : 'pointer',
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  {qsgGenBusy ? 'Generating…' : 'Generate token'}
+                                </button>
+                              )}
+                            </div>
+                          </td>
                           <td style={{ padding: '0.75rem', textAlign: 'right' }}>
                             <button
                               onClick={(e) => {
@@ -5019,7 +5141,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                         {/* Collapsible Sub-Licenses Child View */}
                         {isExpanded && (
                           <tr style={{ background: 'rgba(0, 0, 0, 0.3)', borderBottom: '1px solid var(--border-normal)' }}>
-                            <td colSpan={10} style={{ padding: '0.5rem 1.25rem 1.25rem 2.5rem' }}>
+                            <td colSpan={11} style={{ padding: '0.5rem 1.25rem 1.25rem 2.5rem' }}>
                               <div style={{
                                 background: 'rgba(255, 255, 255, 0.02)',
                                 border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -5437,7 +5559,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
                   {filteredLicenseGroups.length === 0 && (
                     <tr>
-                      <td colSpan={9} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
+                      <td colSpan={11} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-muted)' }}>
                         {licenseFilter ? 'No organizations or sub-licenses matching your search.' : 'No partner or corporate licenses issued yet. Use the form above to issue a new license key.'}
                       </td>
                     </tr>
@@ -7117,6 +7239,63 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* QSG posture token — shown exactly once after minting. */}
+      {qsgTokenModal && (
+        <div
+          onClick={() => setQsgTokenModal(null)}
+          style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '1rem'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: 'var(--bg-elevated, #0f172a)', border: '1px solid var(--border-normal)',
+              borderRadius: '10px', padding: '1.5rem', maxWidth: '560px', width: '100%',
+              boxShadow: '0 10px 40px rgba(0,0,0,0.5)'
+            }}
+          >
+            <h3 style={{ margin: '0 0 0.5rem', color: 'var(--text-primary)', fontSize: '1.05rem' }}>
+              QSG posture token for {qsgTokenModal.tenant}
+            </h3>
+            <p style={{ margin: '0 0 0.75rem', color: '#fbbf24', fontSize: '0.8rem' }}>
+              Copy this now — it will not be shown again. Set it as the QSG_PLATFORM_TOKEN
+              environment variable for qsg-control (not in the config file).
+            </p>
+            <div style={{
+              fontFamily: 'monospace', fontSize: '0.8rem', wordBreak: 'break-all',
+              background: 'rgba(0,0,0,0.4)', border: '1px solid var(--border-normal)',
+              borderRadius: '6px', padding: '0.75rem', color: '#4ade80', marginBottom: '1rem'
+            }}>
+              {qsgTokenModal.token}
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button
+                onClick={() => { try { navigator.clipboard.writeText(qsgTokenModal.token); } catch { /* ignore */ } }}
+                style={{
+                  background: 'rgba(56, 189, 248, 0.15)', border: '1px solid rgba(56, 189, 248, 0.4)',
+                  color: '#38bdf8', borderRadius: '6px', padding: '0.4rem 0.9rem', fontSize: '0.8rem',
+                  fontWeight: 600, cursor: 'pointer'
+                }}
+              >
+                Copy
+              </button>
+              <button
+                onClick={() => setQsgTokenModal(null)}
+                style={{
+                  background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-normal)',
+                  color: 'var(--text-secondary)', borderRadius: '6px', padding: '0.4rem 0.9rem',
+                  fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer'
+                }}
+              >
+                Done
+              </button>
+            </div>
           </div>
         </div>
       )}

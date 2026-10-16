@@ -370,6 +370,10 @@ export interface EntitlementRecord {
 /** Add-on that unlocks Threat & Risk Graph, Continuous Monitoring and RMF. */
 export const RISK_ASSURANCE_ADDON = 'risk_assurance';
 
+/** Add-on that lets an external control plane (QSG) read the tenant's crypto posture
+ *  via a read-only service token. License-gated per tenant from the License Panel. */
+export const QSG_ADDON = 'qsg_posture';
+
 /**
  * Risk Assurance is sold per tenant per month, ONLY to Enterprise-class tenants
  * (enterprise subscription, or corporate/corp/partner enterprise license keys). It is

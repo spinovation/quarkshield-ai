@@ -95,6 +95,23 @@ export const allowServiceToken = (requiredScope: string) =>
       return;
     }
 
+    // License gate: the token's tenant must hold the QSG posture add-on. Turning the
+    // QSG toggle off in the License Panel stops reads within the entitlement cache TTL,
+    // even for an already-minted token. Fails closed on a DB error.
+    try {
+      // Lazy require keeps this module importable without the DB config (unit tests).
+      const authMod = require('./auth');
+      const ent = await authMod.localTenantEntitlement(row.tenant_name);
+      const held: string[] = Array.isArray(ent?.addons) ? ent.addons : [];
+      if (!held.includes(authMod.QSG_ADDON)) {
+        res.status(403).json({ error: 'QSG posture access is not enabled for this tenant’s license.' });
+        return;
+      }
+    } catch {
+      res.status(500).json({ error: 'Service token entitlement check failed.' });
+      return;
+    }
+
     // Per-token rate limit.
     const now = Date.now();
     const hits = (rlHits.get(row.id) || []).filter((t) => now - t < RL_WINDOW_MS);

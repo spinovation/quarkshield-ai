@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth, requireSuperAdmin, requirePlatformAdmin, requireTenantAccess, requireTenantAdmin, requireIntegrationsEntitlement, requireRiskAssuranceEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole, safeEqual, RISK_ASSURANCE_ADDON } from '../middleware/auth';
 import { allowServiceToken } from '../middleware/serviceToken';
-import { listServiceTokens, createServiceToken, revokeServiceToken } from '../controllers/serviceTokenController';
+import { listServiceTokens, createServiceToken, revokeServiceToken, adminListServiceTokens, adminCreateServiceToken, adminRevokeServiceToken } from '../controllers/serviceTokenController';
 import {
   getThreatOverview, getThreatGraph, getRelationshipEvidence, getCryptoBlastRadius, getCryptoSizeImpact, listThreatScenarios, getThreatScenario,
   listRiskAssets, getAssetRiskDetail, updateRemediation, overrideAssetContext, rebuildThreatGraph,
@@ -247,6 +247,11 @@ router.post('/admin/clients/deploy-inline', requirePlatformAdmin, deployInlineCl
 router.post('/admin/clients/:name/subscription', requirePlatformAdmin, updateSubscription);
 router.post('/admin/clients/:name/plan', requirePlatformAdmin, updateClientPlan);
 router.post('/admin/clients/:name/addons', requirePlatformAdmin, updateClientAddons);
+// QSG posture service tokens, managed by a platform admin from the License Panel.
+// Minting is gated on the tenant holding the qsg_posture add-on (see controller).
+router.get('/admin/clients/:name/service-tokens', requirePlatformAdmin, adminListServiceTokens);
+router.post('/admin/clients/:name/service-tokens', requirePlatformAdmin, adminCreateServiceToken);
+router.delete('/admin/clients/:name/service-tokens/:id', requirePlatformAdmin, adminRevokeServiceToken);
 router.post('/admin/clients', requirePlatformAdmin, createClient);
 router.delete('/admin/clients/:id', requirePlatformAdmin, deleteClient);
 router.delete('/admin/clients/:name', requirePlatformAdmin, deleteClient);
