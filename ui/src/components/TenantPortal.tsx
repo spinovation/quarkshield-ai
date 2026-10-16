@@ -1346,6 +1346,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       .catch(() => setHasRiskAssurance(false));
   }, [isAuthenticated, isSupportMirror]);
 
+  // If the Risk Assurance add-on is off (or gets disabled), the Threat & Risk Graph tab
+  // disappears from the nav; make sure a persisted/deep-linked 'threat' tab doesn't leave
+  // the user on a blank pane — send them back to the overview.
+  useEffect(() => {
+    if (!hasRiskAssurance && activeTab === 'threat') setActiveTab('overview');
+  }, [hasRiskAssurance, activeTab]);
+
   useEffect(() => {
     // Load only once signed in: an anonymous fetch 401s and would latch "session expired",
     // which then showed right after a successful login.
