@@ -1,5 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { requireAuth, requireSuperAdmin, requirePlatformAdmin, requireTenantAccess, requireTenantAdmin, requireIntegrationsEntitlement, requireRiskAssuranceEntitlement, getTenantEntitlement, localTenantEntitlement, isSuperRole, safeEqual, RISK_ASSURANCE_ADDON } from '../middleware/auth';
+import { allowServiceToken } from '../middleware/serviceToken';
+import { listServiceTokens, createServiceToken, revokeServiceToken } from '../controllers/serviceTokenController';
 import {
   getThreatOverview, getThreatGraph, getRelationshipEvidence, getCryptoBlastRadius, getCryptoSizeImpact, listThreatScenarios, getThreatScenario,
   listRiskAssets, getAssetRiskDetail, updateRemediation, overrideAssetContext, rebuildThreatGraph,
@@ -225,8 +227,16 @@ router.delete('/fleet/pull-schedules/:id', requireAuth, requireTenantAccess, del
 router.patch('/fleet/pull-schedules/:id', requireAuth, requireTenantAccess, togglePullSchedule);
 router.get('/tenant/:tenant/daily-snapshots', requireAuth, requireTenantAccess, getTenantDailySnapshots);
 router.get('/fleet/drift', requireAuth, requireTenantAccess, getFleetDrift);
-router.get('/fleet/cbom', requireAuth, requireTenantAccess, getFleetCBOM);
+// posture:read service tokens (QSG platform integration) may read fleet CBOM without a
+// user session. allowServiceToken() binds the tenant from the token and falls through to
+// the normal user-session chain when no qsg_svc_ bearer is present.
+router.get('/fleet/cbom', allowServiceToken('posture:read'), requireAuth, requireTenantAccess, getFleetCBOM);
 router.get('/cbom/fleet', getPublicFleetPosture);
+
+// Tenant-admin CRUD for read-only posture service tokens (shown in full once, at create).
+router.get('/service-tokens', requireAuth, requireTenantAccess, requireTenantAdmin, listServiceTokens);
+router.post('/service-tokens', requireAuth, requireTenantAccess, requireTenantAdmin, createServiceToken);
+router.delete('/service-tokens/:id', requireAuth, requireTenantAccess, requireTenantAdmin, revokeServiceToken);
 
 // ==========================================
 // ADMIN PANEL ROUTES (super admin only)
@@ -357,7 +367,7 @@ router.get('/threat-graph/crypto/:id/blast-radius', ...tg, getCryptoBlastRadius)
 router.get('/threat-graph/crypto/:id/size-impact', ...tg, getCryptoSizeImpact);
 router.get('/threat-graph/scenarios', ...tg, listThreatScenarios);
 router.get('/threat-graph/scenarios/:id', ...tg, getThreatScenario);
-router.get('/threat-graph/assets', ...tg, listRiskAssets);
+router.get('/threat-graph/assets', allowServiceToken('posture:read'), ...tg, listRiskAssets);
 router.get('/threat-graph/assets/:id', ...tg, getAssetRiskDetail);
 router.put('/threat-graph/assets/:id/context', ...tg, overrideAssetContext);
 router.patch('/threat-graph/remediations/:id', ...tg, updateRemediation);

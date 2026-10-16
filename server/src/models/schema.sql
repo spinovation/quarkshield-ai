@@ -270,6 +270,25 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Read-only machine-to-machine posture tokens (QSG platform-integration spec).
+-- A tenant admin mints a token (shown once); only its SHA-256 hash is stored. The
+-- token is BOUND to one tenant and carries explicit scopes (today: posture:read).
+-- Used as `Authorization: Bearer qsg_svc_<secret>` on the posture endpoints only.
+CREATE TABLE IF NOT EXISTS service_tokens (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_name VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  token_hash CHAR(64) NOT NULL UNIQUE,          -- SHA-256 hex of the plaintext token
+  scopes TEXT[] NOT NULL DEFAULT '{posture:read}',
+  created_by VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  expires_at TIMESTAMP WITH TIME ZONE,
+  last_used_at TIMESTAMP WITH TIME ZONE,
+  revoked BOOLEAN NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS idx_service_tokens_hash ON service_tokens(token_hash);
+CREATE INDEX IF NOT EXISTS idx_service_tokens_tenant ON service_tokens(LOWER(tenant_name));
+
 CREATE TABLE IF NOT EXISTS admin_licenses (
   id VARCHAR(100) PRIMARY KEY,
   license_key VARCHAR(255) UNIQUE NOT NULL,
