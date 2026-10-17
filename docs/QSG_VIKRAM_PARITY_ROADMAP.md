@@ -134,12 +134,12 @@ Each phase lists deliverables, dependencies, and — critically — the **claims
 
 ---
 
-## 7. QuarkShield platform (control‑plane) work — corrected against QSG's actual implementation
+## 7. QuarkShield platform work — corrected against QSG's actual implementation
 
-QSG is the **data plane**; QuarkShield is the **control plane**. Correcting an earlier draft with QSG's code review: **qsg‑control already re‑signs the posture it ingests into its own signed, versioned, expiring, anti‑rollback bundle for the gateways, and already runs its own policy plane** (`/v1/policy/validate`, quorum‑approved proposals, signed policy + PROTECT profiles). So several items below are *enhancements and ownership decisions*, not missing primitives.
+**Plane ownership:** QuarkShield is the **posture source** that feeds **`qsg-control`** — QSG's *own* control plane, which handles enrollment, policy, the posture bundles it re‑signs, and audit. QSG's gateways are the **data plane**. (QuarkShield is not "the control plane" for QSG.) Correcting an earlier draft with QSG's code review: **qsg‑control already re‑signs the posture it ingests into its own signed, versioned, expiring, anti‑rollback bundle for the gateways, and already runs its own policy plane** (`/v1/policy/validate`, quorum‑approved proposals, signed policy + PROTECT profiles). So several items below are *enhancements and ownership decisions*, not missing primitives — and most require a change on **both** sides (platform exposes it; QSG consumes it).
 
 1. **Platform‑signed posture bundle — enhancement, not a gap.** qsg‑control signs posture for gateways today, so the platform is **not** feeding gateways an unsigned CBOM. A *platform*-signed, scoped, versioned bundle would add **end‑to‑end provenance** (control plane → gateway) and requires a QSG change to verify it. Decide whether end‑to‑end provenance is worth the work.
-2. **Per‑asset + delta posture API** (`/v1/posture/{asset}`, verify) so large tenants aren't force‑fed the whole fleet. *(Still the right lever for egress cost.)*
+2. **Per‑asset + delta posture API** (`/v1/posture/{asset}`, verify) so large tenants aren't force‑fed the whole fleet. *(Still the right lever for egress cost.)* **Needs a QSG change too** — today's sync is a **full pull**, so QSG must add delta/per‑asset consumption (the same applies to the scoped/delta identifier feed below).
 3. **Policy authority decision — not a second policy plane.** QSG already has one. A QuarkShield policy surface should **feed QSG by submitting proposals**, not be a competing authority. **Owner decision required: which side is authoritative** for policy.
 4. **Richer posture fields** policy needs: confidence (incl. UNKNOWN), evidence_source/timestamp, crypto_role, business_criticality, pqc_state tri‑state.
 5. **Evidence‑ingest endpoints** for gateway events (the *optional* CBOM‑export direction, gateway→CBOM).
