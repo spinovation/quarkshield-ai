@@ -198,13 +198,12 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
       // listed. The -latest aliases auto-track Google's current model so this list does
       // not rot again; the -lite fallbacks cost fewer input tokens, which matters on the
       // free tier (a 429 on the primary should fall to a cheaper model, not a dead one).
-      const geminiCandidateModels = [
+      const geminiCandidateModels = Array.from(new Set([
         process.env.GEMINI_MODEL,
-        'gemini-2.5-flash',
+        'gemini-3.8-flash',
         'gemini-flash-latest',
-        'gemini-2.5-flash-lite',
         'gemini-flash-lite-latest'
-      ].filter(Boolean) as string[];
+      ].filter(Boolean) as string[]));
 
       // Sanitize past history so roles strictly alternate and avoid duplicate user turn at the end
       const contents: any[] = [];
@@ -247,6 +246,7 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
       }
       contents.push({ role: 'user', parts: userParts });
 
+      let rateLimited = false;
       for (const model of geminiCandidateModels) {
         console.log(`AI Controller: Querying Gemini API (model: ${model})...`);
         const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
@@ -275,12 +275,24 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
           } else {
             const errText = await geminiRes.text();
             console.warn(`Gemini API query (${model}) returned non-OK status: ${geminiRes.status} ${geminiRes.statusText}. Response body: ${errText}`);
+            // A 429 is a quota/rate limit that is SHARED across every model on the
+            // free tier, so trying the remaining candidates just resends the whole
+            // (large) prompt again and burns more of the same quota — guaranteeing more
+            // 429s. Stop immediately and tell the user, instead of 5x-amplifying usage.
+            if (geminiRes.status === 429) { rateLimited = true; clearTimeout(timeoutId); break; }
           }
         } catch (fetchErr: any) {
           console.warn(`Error or timeout querying Gemini API (${model}):`, fetchErr.message);
         } finally {
           clearTimeout(timeoutId);
         }
+      }
+      if (rateLimited && !anthropicKey) {
+        return res.json({
+          text: "⚠️ **The PQC Copilot is rate-limited right now.**\n\nThe configured Gemini API key has hit its **free-tier quota** (250,000 input tokens/minute). Please wait about a minute and ask again.\n\nFor uninterrupted use, enable **billing** on the Gemini key (Google AI Studio → your project) — the paid tier has far higher limits. You can swap in a billing-enabled key anytime under **Admin & License Panel → API Keys**.",
+          code: '',
+          language: ''
+        });
       }
       console.warn('All configured Gemini models failed. Checking for Anthropic Claude fallback...');
     }
