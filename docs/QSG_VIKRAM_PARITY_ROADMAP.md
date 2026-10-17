@@ -56,7 +56,7 @@ Legend: ✅ BUILT (tested) · ⚠️ PARTIAL · ❌ NONE · ➕ QSG beyond Vikra
 | L3 IPsec tunnels | IKE/ESP, 1024 SAs, mesh | strongSwan 6.1/XFRM; make‑before‑break, NAT‑T, no‑cleartext nftables guard, per‑SA evidence | ✅ (mesh = pairwise; **1024 SAs untested**) |
 | **L2 MACsec** | ✅ | — | ❌ **gap** |
 | PQ TLS front door | — | rustls/aws‑lc‑rs TLS 1.3; ML‑DSA‑65 certs; EST/ACME; optional FIPS build | ➕ BUILT |
-| PSK ingestion | native PSK | **RFC 8784 PPK** mixed on top of ML‑KEM, rotatable | ✅ (PPK) |
+| PSK ingestion | native PSK | **RFC 8784 PPK** mixed on top of ML‑KEM, rotatable (plain‑PSK IKE auth not offered) | ⚠️ PPK only |
 | **QKD ingestion** | ✅ | — (path: feed QKD keys as PPK) | ❌ **gap** |
 | IKE authentication | — | ECDSA today; **ML‑DSA‑in‑IKE blocked on upstream strongSwan** | ⚠️ not yet PQ |
 | TRNG (SP 800‑90B) | HW | OS CSPRNG + lib DRBG; no SP 800‑90B assessment | ⚠️ software‑inherent |
@@ -65,7 +65,7 @@ Legend: ✅ BUILT (tested) · ⚠️ PARTIAL · ❌ NONE · ➕ QSG beyond Vikra
 | Tamper / CIK / zeroise | HW | OIDC SSO+MFA + quorum (no CIK); no tamper/erase | ❌ software‑inherent |
 | Crypto agility | field‑replace cores | signed profiles + allowlist + make‑before‑break | ➕ BUILT |
 | Sovereign algorithms | supported | — (needs a provider/module) | ❌ |
-| Posture‑aware enforcement | — | allow/protect/restrict/block by crypto posture | ➕➕ QSG superset |
+| Posture‑aware enforcement | — | **ALLOW / PROTECT / RESTRICT / QUARANTINE / BLOCK** by crypto posture (ALERT/AUDIT are annotations; unresolved posture → `on_unknown`, default **BLOCK**) | ➕➕ QSG superset |
 | Throughput | 1 Gbps wire‑speed | **never measured**; Linux/Docker x86_64 only | ⚠️ unverified |
 | Deployment | shipping appliance | Linux (Debian trixie); **not deployed anywhere; cloud/AWS untested** | ❌ pre‑release |
 
@@ -97,13 +97,17 @@ Each phase lists deliverables, dependencies, and — critically — the **claims
 
 ### Phase 0 — Prove it runs (now)
 - **Deliverables:** stand up one `qsg-control` + gateway on an **AWS EC2 (VPC/segment boundary — the recommended cloud model)**; complete a live posture pull from the QuarkShield control plane for a real tenant (Spinovation); demonstrate a Mode B PQ IPsec tunnel between two gateways with packet‑capture proof of no cleartext.
+- **Notes / operational prerequisites:**
+  - The no‑cleartext **capture proof already exists in the Docker E2E**; on AWS it must be **repeated on real instances**.
+  - **AWS security groups** must allow **UDP 500 and 4500**, plus **ESP (IP protocol 50)** unless the tunnel uses UDP encapsulation.
+  - Gateways need asset **identifiers to match traffic** → an **operator identity map is required unless the CBOM carries IP/FQDN/cert‑fingerprint enrichment** (see §7).
 - **Dependencies:** none external. Token minted by the owner; set directly on the host.
 - **Claims allowed:** "post‑quantum hybrid (ML‑KEM) IPsec tunnel, demonstrated in software." **Not** "quantum‑safe," **not** "FIPS‑validated."
 
 ### Phase 1 — Encryptor feature parity (software)
 - **Deliverables:**
   1. **QKD ingestion** (ETSI GS QKD 014 → PPK) — closes the QKD gap cheaply.
-  2. **Throughput/load testing** (10K/100K/1M flows) with published numbers vs Vikram's 1 Gbps reference.
+  2. **Performance testing — two distinct measures:** (a) **bulk throughput (Gbps)** for Mode B (kernel XFRM) and Mode A, compared to Vikram's 1 Gbps reference; and (b) **concurrent‑flow scale** (10K / 100K / 1M flows) for the *decision path* — this is flow count, not bandwidth.
   3. **Cloud/VM/bare‑metal deployment** hardening beyond Docker; packaged installers + SBOM.
   4. **SA‑scale testing** toward 1,024 SAs; multipoint topologies.
 - **Dependencies:** QKD device/emulator for test.
@@ -130,18 +134,21 @@ Each phase lists deliverables, dependencies, and — critically — the **claims
 
 ---
 
-## 7. QuarkShield platform (control‑plane) work implied
+## 7. QuarkShield platform (control‑plane) work — corrected against QSG's actual implementation
 
-QSG is the **data plane**; QuarkShield is the **control plane**. The current `GET /api/fleet/cbom` posture token is a working *interim* read surface, but the gateway design centers on a **signed, scoped, versioned posture + policy bundle** (not a full CBOM dump). Platform work to be design‑conformant (also the answer to large‑customer egress cost):
+QSG is the **data plane**; QuarkShield is the **control plane**. Correcting an earlier draft with QSG's code review: **qsg‑control already re‑signs the posture it ingests into its own signed, versioned, expiring, anti‑rollback bundle for the gateways, and already runs its own policy plane** (`/v1/policy/validate`, quorum‑approved proposals, signed policy + PROTECT profiles). So several items below are *enhancements and ownership decisions*, not missing primitives.
 
-1. **Signed/scoped/versioned posture bundle** (expiry/max‑staleness, anti‑rollback, signature key id, tenant/gateway scope) — replaces the unsigned CBOM read; *scoped bundles, not full 7k‑asset dumps.*
-2. **Per‑asset + delta posture API** (`/v1/posture/{asset}`, verify) so large tenants aren't force‑fed the whole fleet.
-3. **Policy plane** (`/v1/policy/validate`, `/v1/policy/publish`; signed, dual‑approved) + declarative policy schema and signed PROTECT profiles.
+1. **Platform‑signed posture bundle — enhancement, not a gap.** qsg‑control signs posture for gateways today, so the platform is **not** feeding gateways an unsigned CBOM. A *platform*-signed, scoped, versioned bundle would add **end‑to‑end provenance** (control plane → gateway) and requires a QSG change to verify it. Decide whether end‑to‑end provenance is worth the work.
+2. **Per‑asset + delta posture API** (`/v1/posture/{asset}`, verify) so large tenants aren't force‑fed the whole fleet. *(Still the right lever for egress cost.)*
+3. **Policy authority decision — not a second policy plane.** QSG already has one. A QuarkShield policy surface should **feed QSG by submitting proposals**, not be a competing authority. **Owner decision required: which side is authoritative** for policy.
 4. **Richer posture fields** policy needs: confidence (incl. UNKNOWN), evidence_source/timestamp, crypto_role, business_criticality, pqc_state tri‑state.
 5. **Evidence‑ingest endpoints** for gateway events (the *optional* CBOM‑export direction, gateway→CBOM).
-6. **Credential separation** (read‑posture vs export identities) + **mTLS** on the gateway channel.
+6. **mTLS on the platform↔qsg‑control link.** The **gateway↔qsg‑control channel is already mTLS**; the open item is the **platform→qsg‑control** link (Bearer over HTTPS today) plus credential separation (read‑posture vs export).
 
-> **Do NOT** add per‑endpoint `ipAddress`/`fqdn`/`certFingerprint` enrichment into the bulk CBOM. The gateway resolves IP→asset **locally** and matches by asset_id/tag; IP from the control plane, if offered, is an optional *correlation hint* via a scoped/delta feed — which also protects egress cost.
+### Asset identity / enrichment — corrected (this reverses an earlier draft)
+Gateways match posture to traffic by **destination IP/CIDR, FQDN/SNI, and certificate fingerprint** — QSG has **no local IP→asset resolution and does not match by `asset_id`** today. Those identifiers come from **either CBOM enrichment or an operator‑maintained identity map on qsg‑control.** Therefore:
+- **Skipping bulk enrichment is a valid owner decision** (it protects large‑customer egress cost), **but then one of two things is required:** (a) the **operator identity map becomes mandatory** (hand‑maintained host→IP/FQDN/cert map on qsg‑control), **or** (b) the **platform offers a scoped/delta identifier feed** (IP/CIDR, FQDN, cert‑fingerprint for *in‑scope* assets only, deltas not full dumps) **and QSG adds support for it.**
+- **Recommended:** the **scoped/delta identifier feed** — gives gateways exactly the match keys they need without a 7k‑row bulk CBOM push and without forcing a hand‑maintained map. This is the balanced answer to the egress‑cost concern.
 
 ---
 
