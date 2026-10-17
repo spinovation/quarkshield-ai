@@ -81,24 +81,46 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
     const sessionTenant = (req.user?.tenant || '').toString();
     const scopeTenant = isSuper ? ((req.query.tenant as string) || sessionTenant || '') : sessionTenant;
 
-    // Fetch active assets context to feed into the model prompt (tenant-scoped).
+    // Build a COMPACT inventory context. Dumping every asset as pretty-printed JSON made
+    // the prompt enormous for large fleets (e.g. 7k+ assets => hundreds of thousands of
+    // tokens => ~60s per answer and huge cost). Instead send aggregate counts, an algorithm
+    // breakdown, and a small sample of the most critical/vulnerable assets. The model can
+    // ask the user to narrow down for host-level detail.
+    const ASSET_SAMPLE = 40;
+    const whereTenant = scopeTenant ? 'WHERE LOWER(tenant_name) = LOWER($1)' : '';
+    const tenantParams = scopeTenant ? [scopeTenant] : [];
+    const riskRank = "CASE LOWER(COALESCE(risk_level,'')) WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END";
     let assetsContext = '';
     try {
-      const assetsRes = scopeTenant
-        ? await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status, description, compliance_violations FROM assets WHERE LOWER(tenant_name) = LOWER($1)', [scopeTenant])
-        : await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status, description, compliance_violations FROM assets');
-      if (assetsRes.rows.length > 0) {
-        assetsContext = "Here is the list of active Cryptographic Assets currently registered in the user's QuarkShield dashboard/CMDB:\n" +
-          JSON.stringify(assetsRes.rows.map(r => ({
-            name: r.name,
-            algorithm: r.algorithm,
-            keySize: r.key_size,
-            isVulnerable: r.is_vulnerable,
-            riskLevel: r.risk_level,
-            status: r.status,
-            description: r.description,
-            complianceViolations: r.compliance_violations || []
-          })), null, 2);
+      const summary = await pool.query(
+        `SELECT COUNT(*)::int AS total,
+                COUNT(*) FILTER (WHERE is_vulnerable)::int AS vulnerable,
+                COUNT(*) FILTER (WHERE LOWER(COALESCE(risk_level,''))='critical')::int AS critical,
+                COUNT(*) FILTER (WHERE LOWER(COALESCE(risk_level,''))='high')::int AS high
+           FROM assets ${whereTenant}`, tenantParams);
+      const total = summary.rows[0]?.total || 0;
+      if (total > 0) {
+        const s = summary.rows[0];
+        const byAlgo = await pool.query(
+          `SELECT COALESCE(algorithm,'unknown') AS algorithm, COUNT(*)::int AS n,
+                  COUNT(*) FILTER (WHERE is_vulnerable)::int AS vuln
+             FROM assets ${whereTenant}
+            GROUP BY COALESCE(algorithm,'unknown') ORDER BY n DESC LIMIT 15`, tenantParams);
+        const sample = await pool.query(
+          `SELECT name, algorithm, key_size, risk_level, status
+             FROM assets ${whereTenant}
+            ORDER BY is_vulnerable DESC, ${riskRank} DESC
+            LIMIT ${ASSET_SAMPLE}`, tenantParams);
+        const algoLines = byAlgo.rows.map(r => `${r.algorithm}: ${r.n}${r.vuln ? ` (${r.vuln} vulnerable)` : ''}`).join('; ');
+        const sampleJson = JSON.stringify(sample.rows.map(r => ({
+          name: r.name, algorithm: r.algorithm, keySize: r.key_size, riskLevel: r.risk_level, status: r.status
+        })));
+        assetsContext =
+          `LIVE CRYPTO INVENTORY SUMMARY for this tenant (from the QuarkShield CMDB):\n` +
+          `- Total assets: ${total}; Vulnerable: ${s.vulnerable}; Critical risk: ${s.critical}; High risk: ${s.high}.\n` +
+          `- Algorithm breakdown (top 15): ${algoLines}.\n` +
+          `Most critical/vulnerable assets (sample of up to ${ASSET_SAMPLE} of ${total}; NOT the full list):\n${sampleJson}\n` +
+          `If the user asks about a specific host, algorithm or risk level, use these numbers and tell them to filter the CBOM / Fleet views for the complete per-asset detail.`;
       } else {
         assetsContext = "The user currently has no Cryptographic Assets registered in their QuarkShield dashboard/CMDB.";
       }
