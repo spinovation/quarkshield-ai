@@ -257,7 +257,15 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
           const geminiRes = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ contents }),
+            // thinkingBudget:0 disables the model's internal reasoning pass, which is what
+            // made a single answer take ~30s on the large Copilot prompt (Gemini 2.5+/3.x
+            // "think" by default). The Copilot is a Q&A advisor, not a reasoning task, so
+            // this trades negligible quality for a ~3-10x speedup; maxOutputTokens caps a
+            // runaway answer. Both are tunable if deeper answers are wanted later.
+            body: JSON.stringify({
+              contents,
+              generationConfig: { maxOutputTokens: 4096, thinkingConfig: { thinkingBudget: 0 } }
+            }),
             signal: controller.signal
           });
 
