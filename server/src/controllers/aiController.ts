@@ -109,6 +109,23 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
     let geminiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : '';
     let anthropicKey = process.env.ANTHROPIC_API_KEY ? process.env.ANTHROPIC_API_KEY.trim() : '';
 
+    // Platform-wide key saved via the admin "Copilot / AI API Key" settings (SYSTEM scope).
+    // Used when the env var is unset, so a key saved in the console survives restarts without
+    // needing .env access. A tenant-specific BYO key (below) still overrides it.
+    if (!geminiKey || !anthropicKey) {
+      try {
+        const sysRes = await pool.query(
+          "SELECT key, value FROM tenant_settings WHERE LOWER(tenant_name) = 'system' AND key IN ('GEMINI_API_KEY', 'ANTHROPIC_API_KEY')"
+        );
+        for (const row of sysRes.rows) {
+          if (row.key === 'GEMINI_API_KEY' && !geminiKey && row.value && row.value.trim()) geminiKey = row.value.trim();
+          if (row.key === 'ANTHROPIC_API_KEY' && !anthropicKey && row.value && row.value.trim()) anthropicKey = row.value.trim();
+        }
+      } catch (sysErr) {
+        console.warn('Failed to read SYSTEM AI key from tenant_settings:', sysErr);
+      }
+    }
+
     // Fetch tenant-specific API keys from tenant_settings, scoped to THIS tenant only.
     // SECURITY: the previous query had no tenant filter and no ORDER BY, so the last
     // row won — any tenant's Copilot could borrow another tenant's BYO API key. Only a

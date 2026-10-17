@@ -67,6 +67,8 @@ import {
   sendNextStepsEmail,
   getMailSettings,
   updateMailSettings,
+  getAiSettings,
+  updateAiSettings,
   getTenantUsers,
   createTenantUser,
   updateTenantUser,
@@ -281,6 +283,9 @@ router.post('/admin/licenses/send-email', requirePlatformAdmin, sendLicenseEmail
 router.post('/admin/clients/send-next-steps-email', requirePlatformAdmin, sendNextStepsEmail);
 router.get('/admin/settings/mail', requireSuperAdmin, getMailSettings);
 router.post('/admin/settings/mail', requirePlatformAdmin, updateMailSettings);
+// Copilot / AI backend key — persisted in DB + .env like the Resend key so it survives restarts.
+router.get('/admin/settings/ai', requireSuperAdmin, getAiSettings);
+router.post('/admin/settings/ai', requirePlatformAdmin, updateAiSettings);
 
 router.post('/admin/onboard-partner', requirePlatformAdmin, onboardPartnerTenant);
 router.post('/admin/onboard-user', requirePlatformAdmin, onboardUser);

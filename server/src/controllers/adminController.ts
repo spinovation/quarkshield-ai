@@ -2045,12 +2045,137 @@ export const updateMailSettings = async (req: Request, res: Response) => {
     res.json({
       success: true,
       valid: keyValid,
-      message: keyValid 
-        ? 'Resend API key validated and saved successfully!' 
+      message: keyValid
+        ? 'Resend API key validated and saved successfully!'
         : `Key saved, but Resend validation test reported: ${testMessage || 'Warning'}`
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to save mail settings: ' + err.message });
+  }
+};
+
+// =====================================================================================
+// AI / Copilot API KEY SETTINGS
+// -------------------------------------------------------------------------------------
+// The PQC Copilot needs a Gemini (or Anthropic) key. Historically there was NO way to
+// persist one: it lived only in process.env, so every container restart/deploy wiped it
+// (the user re-added it ~10x). These endpoints persist it exactly like the Resend key —
+// DB (tenant_settings, SYSTEM scope) + process.env + surgical .env sync — so it survives
+// restarts. The Copilot reads it from env, then falls back to the SYSTEM-scoped DB row.
+// =====================================================================================
+
+/** Surgically set a single KEY=value line in .env (replace if present, else append). */
+const syncEnvKey = async (keyName: string, value: string): Promise<void> => {
+  try {
+    const fs = await import('fs');
+    const path = await import('path');
+    const envPaths = [
+      path.resolve(process.cwd(), '.env'),
+      '/app/.env',
+      '/opt/desktop-pqc-scanner/.env',
+    ];
+    for (const envPath of envPaths) {
+      if (fs.existsSync(envPath)) {
+        let envContent = fs.readFileSync(envPath, 'utf8');
+        const line = `${keyName}=${value}`;
+        // Replace an active line, or uncomment+set a commented one, else append.
+        if (new RegExp(`^${keyName}=.*$`, 'm').test(envContent)) {
+          envContent = envContent.replace(new RegExp(`^${keyName}=.*$`, 'm'), line);
+        } else if (new RegExp(`^#\\s*${keyName}=.*$`, 'm').test(envContent)) {
+          envContent = envContent.replace(new RegExp(`^#\\s*${keyName}=.*$`, 'm'), line);
+        } else {
+          envContent += `\n${line}\n`;
+        }
+        fs.writeFileSync(envPath, envContent, 'utf8');
+        console.log(`[AI Settings] Synchronized ${keyName} to ${envPath}`);
+        break;
+      }
+    }
+  } catch (fsErr: any) {
+    console.warn(`Notice: Could not write ${keyName} to .env:`, fsErr.message);
+  }
+};
+
+export const getAiSettings = async (_req: Request, res: Response) => {
+  try {
+    const read = async (envName: string): Promise<string> => {
+      let v = (process.env[envName] || '').trim();
+      if (!v) {
+        const r = await pool.query(
+          "SELECT value FROM tenant_settings WHERE key = $1 AND LOWER(tenant_name) = 'system' LIMIT 1",
+          [envName]
+        );
+        if (r.rows.length && r.rows[0].value) v = String(r.rows[0].value).trim();
+      }
+      return v;
+    };
+    const gemini = await read('GEMINI_API_KEY');
+    const anthropic = await read('ANTHROPIC_API_KEY');
+    const mask = (k: string) => (k && k.length > 10 ? k.substring(0, 6) + '••••••••' + k.slice(-4) : '');
+    res.json({
+      success: true,
+      geminiConfigured: Boolean(gemini && gemini.length > 10),
+      geminiMasked: mask(gemini),
+      anthropicConfigured: Boolean(anthropic && anthropic.length > 10),
+      anthropicMasked: mask(anthropic),
+      geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to retrieve AI settings: ' + err.message });
+  }
+};
+
+export const updateAiSettings = async (req: Request, res: Response) => {
+  try {
+    const provider = String(req.body?.provider || 'gemini').toLowerCase();
+    const apiKey = String(req.body?.apiKey || '').trim();
+    if (provider !== 'gemini' && provider !== 'anthropic') {
+      return res.status(400).json({ error: "provider must be 'gemini' or 'anthropic'." });
+    }
+    if (!apiKey) {
+      return res.status(400).json({ error: 'An API key is required.' });
+    }
+    const envName = provider === 'gemini' ? 'GEMINI_API_KEY' : 'ANTHROPIC_API_KEY';
+
+    // Live validation so a bad key is caught at save time (like the Resend check).
+    let keyValid = false;
+    let testMessage = '';
+    try {
+      if (provider === 'gemini') {
+        const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`);
+        keyValid = r.ok;
+        if (!r.ok) testMessage = `Gemini returned ${r.status} ${r.statusText}`;
+      } else {
+        const r = await fetch('https://api.anthropic.com/v1/models', {
+          headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        });
+        keyValid = r.ok;
+        if (!r.ok) testMessage = `Anthropic returned ${r.status} ${r.statusText}`;
+      }
+    } catch (e: any) {
+      testMessage = e.message;
+    }
+
+    // Persist: DB (SYSTEM scope) + live process.env + .env so it survives restarts.
+    await pool.query(
+      `INSERT INTO tenant_settings (tenant_name, key, value, updated_at)
+       VALUES ('SYSTEM', $1, $2, NOW())
+       ON CONFLICT (tenant_name, key) DO UPDATE SET value = $2, updated_at = NOW()`,
+      [envName, apiKey]
+    );
+    process.env[envName] = apiKey;
+    await syncEnvKey(envName, apiKey);
+
+    res.json({
+      success: true,
+      valid: keyValid,
+      provider,
+      message: keyValid
+        ? `${provider === 'gemini' ? 'Gemini' : 'Anthropic'} API key validated and saved. The PQC Copilot is now live.`
+        : `Key saved, but the validation test reported: ${testMessage || 'could not verify'}. It will still be used.`,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to save AI settings: ' + err.message });
   }
 };
 

@@ -165,7 +165,7 @@ interface UserInfo {
 interface AdminPanelProps {
   currentUserEmail?: string;
   onLogout?: () => void;
-  initialSubTab?: 'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics' | 'platform_sbom';
+  initialSubTab?: 'onboarding' | 'registry' | 'licenses' | 'api_keys' | 'users' | 'analytics' | 'platform_sbom';
   onMirrorTenant?: (tenantSlug: string) => void;
 }
 
@@ -176,7 +176,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [activeSubTab, setActiveSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'users' | 'analytics' | 'platform_sbom'>(initialSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<'onboarding' | 'registry' | 'licenses' | 'api_keys' | 'users' | 'analytics' | 'platform_sbom'>(initialSubTab);
 
   // Platform Operators (Super Admin User Registry) State
   // Operators are loaded from the API only. They are never persisted to web storage
@@ -224,6 +224,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
   useEffect(() => {
     fetchOperators();
+    fetchMailSettings();
+    fetchAiSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Selected Tenant for Diagnostic Support Mirror in Registry Tab
@@ -468,6 +471,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
   const [showMailConfig, setShowMailConfig] = useState(false);
   const [savingMailSettings, setSavingMailSettings] = useState(false);
   const [mailSaveMsg, setMailSaveMsg] = useState<string | null>(null);
+
+  // Copilot / AI API Key State (Gemini backend for the PQC Copilot)
+  const [aiSettings, setAiSettings] = useState<{ geminiConfigured: boolean; geminiMasked: string; geminiModel: string } | null>(null);
+  const [geminiInputKey, setGeminiInputKey] = useState('');
+  const [showAiConfig, setShowAiConfig] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [savingAiSettings, setSavingAiSettings] = useState(false);
+  const [aiSaveMsg, setAiSaveMsg] = useState<string | null>(null);
 
   // Stripe Custom Deals / Payment Links
   const [showStripeDealModal, setShowStripeDealModal] = useState(false);
@@ -1153,6 +1164,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       alert('Error updating mail settings: ' + err.message);
     } finally {
       setSavingMailSettings(false);
+    }
+  };
+
+  const fetchAiSettings = async () => {
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch('/api/admin/settings/ai', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (res.ok) setAiSettings(await res.json());
+    } catch (e) {
+      console.warn('Could not fetch AI settings:', e);
+    }
+  };
+
+  const handleSaveAiSettings = async () => {
+    if (!geminiInputKey.trim()) {
+      alert('Please enter a Gemini API key (starts with AIza...).');
+      return;
+    }
+    setSavingAiSettings(true);
+    setAiSaveMsg(null);
+    try {
+      const token = sessionStorage.getItem('quarkshield_token') || localStorage.getItem('quarkshield_token');
+      const res = await fetch('/api/admin/settings/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ provider: 'gemini', apiKey: geminiInputKey.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setAiSaveMsg(data.message || 'Gemini API key saved.');
+        setGeminiInputKey('');
+        fetchAiSettings();
+        setTimeout(() => setAiSaveMsg(null), 8000);
+      } else {
+        alert(data.error || 'Failed to save AI settings');
+      }
+    } catch (err: any) {
+      alert('Error updating AI settings: ' + err.message);
+    } finally {
+      setSavingAiSettings(false);
     }
   };
 
@@ -1943,6 +1994,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
               {licenses.length}
             </span>
           )}
+        </button>
+
+        <button
+          onClick={() => setActiveSubTab('api_keys')}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: activeSubTab === 'api_keys' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+            borderBottom: activeSubTab === 'api_keys' ? '2px solid var(--accent-cyan)' : '2px solid transparent',
+            padding: '0.5rem 0.25rem',
+            cursor: 'pointer',
+            fontWeight: activeSubTab === 'api_keys' ? 600 : 500,
+            fontSize: '0.92rem',
+            transition: 'all 0.2s',
+            outline: 'none',
+            whiteSpace: 'nowrap',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.4rem'
+          }}
+        >
+          <Cpu size={16} />
+          <span>API Keys</span>
         </button>
 
         <button
@@ -3779,86 +3853,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       )}
 
       {/* Partner & Corporate Licenses Subtab */}
-      {activeSubTab === 'licenses' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1.5rem' }}>
-          {/* Metrics Grid */}
-          <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-            <div className="glass-panel metric-card">
-              <div className="metric-info">
-                <h3>Total Active Licenses</h3>
-                <div className="metric-value" style={{ color: 'var(--accent-cyan)' }}>
-                  {licenses.filter(l => l.status === 'active').length}
-                </div>
-                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
-                  Cryptographically Valid
-                </div>
-              </div>
-              <div className="metric-icon" style={{ color: 'var(--accent-cyan)' }}>
-                <Key size={24} />
-              </div>
-            </div>
-
-            <div className="glass-panel metric-card">
-              <div className="metric-info">
-                <h3>Partner Evaluations</h3>
-                <div className="metric-value" style={{ color: '#38bdf8' }}>
-                  {licenses.filter(l => l.tier === 'partner' && l.status === 'active').length}
-                </div>
-                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
-                  Extended Partner Trials
-                </div>
-              </div>
-              <div className="metric-icon" style={{ color: '#38bdf8' }}>
-                <Users size={24} />
-              </div>
-            </div>
-
-            <div className="glass-panel metric-card">
-              <div className="metric-info">
-                <h3>Corporate Fleet Deployments</h3>
-                <div className="metric-value" style={{ color: '#c084fc' }}>
-                  {licenses.filter(l => (l.tier === 'corporate' || l.tier === 'corp') && l.status === 'active').length}
-                </div>
-                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
-                  Production Enterprise Fleets
-                </div>
-              </div>
-              <div className="metric-icon" style={{ color: '#c084fc' }}>
-                <Building size={24} />
-              </div>
-            </div>
-
-            <div className="glass-panel metric-card">
-              <div className="metric-info">
-                <h3>Authorized Endpoint Seats</h3>
-                <div className="metric-value" style={{ color: 'var(--status-secure)' }}>
-                  {licenses.filter(l => l.status === 'active').reduce((sum, l) => sum + (l.seats || 0), 0).toLocaleString()}
-                </div>
-                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
-                  Workstations & Cloud VMs
-                </div>
-              </div>
-              <div className="metric-icon" style={{ color: 'var(--status-secure)' }}>
-                <ShieldCheck size={24} />
-              </div>
-            </div>
-
-            <div className="glass-panel metric-card" style={{ borderColor: pendingLicensingClients.length > 0 ? 'rgba(245, 158, 11, 0.4)' : undefined }}>
-              <div className="metric-info">
-                <h3>Pending Licensing</h3>
-                <div className="metric-value" style={{ color: pendingLicensingClients.length > 0 ? 'var(--status-warning)' : 'var(--text-secondary)' }}>
-                  {pendingLicensingClients.length}
-                </div>
-                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
-                  Awaiting License Issuance
-                </div>
-              </div>
-              <div className="metric-icon" style={{ color: pendingLicensingClients.length > 0 ? 'var(--status-warning)' : 'var(--text-secondary)' }}>
-                <Clock size={24} />
-              </div>
-            </div>
+      {activeSubTab === 'api_keys' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div>
+            <h2 style={{ fontSize: '1.15rem', fontWeight: 600, margin: '0 0 0.25rem', color: 'var(--text-primary)' }}>API Keys &amp; Integrations</h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>External service keys QuarkShield uses. Saved to the database and <code>.env</code> so they persist across restarts and deploys.</p>
           </div>
-
           {/* Resend Cloud Mailer Status & Configuration Card */}
           <div className="glass-panel" style={{
             padding: '1rem 1.25rem',
@@ -4009,6 +4009,192 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                 )}
               </div>
             )}
+          </div>
+
+          {/* PQC Copilot AI Key (Gemini) Status & Configuration Card */}
+          <div className="glass-panel" style={{
+            padding: '1rem 1.25rem',
+            borderRadius: '12px',
+            background: 'rgba(15, 23, 42, 0.65)',
+            border: '1px solid rgba(168, 85, 247, 0.25)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.75rem'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <div style={{
+                  width: 10, height: 10, borderRadius: '50%',
+                  background: aiSettings?.geminiConfigured ? '#4ade80' : '#f87171',
+                  boxShadow: aiSettings?.geminiConfigured ? '0 0 8px #4ade80' : '0 0 8px #f87171'
+                }} />
+                <span style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                  PQC Copilot AI Engine (Gemini)
+                </span>
+                <span style={{
+                  fontSize: '0.72rem', padding: '0.18rem 0.5rem', borderRadius: '4px', fontWeight: 600,
+                  background: aiSettings?.geminiConfigured ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                  color: aiSettings?.geminiConfigured ? '#4ade80' : '#f87171',
+                  border: `1px solid ${aiSettings?.geminiConfigured ? 'rgba(34, 197, 94, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`
+                }}>
+                  {aiSettings?.geminiConfigured ? 'COPILOT ACTIVE' : 'API KEY REQUIRED'}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                {aiSettings?.geminiConfigured && (
+                  <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                    Key: {aiSettings.geminiMasked} • Model: {aiSettings.geminiModel}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowAiConfig(prev => !prev)}
+                  className="btn-secondary"
+                  style={{ padding: '0.35rem 0.75rem', fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}
+                >
+                  <Cpu size={13} />
+                  {showAiConfig ? 'Hide AI Settings' : (aiSettings?.geminiConfigured ? 'Edit Gemini Key' : 'Configure Gemini API Key')}
+                </button>
+              </div>
+            </div>
+
+            {showAiConfig && (
+              <div style={{
+                background: 'rgba(0, 0, 0, 0.35)', padding: '1rem', borderRadius: '8px',
+                border: '1px solid rgba(255, 255, 255, 0.08)', display: 'flex', flexDirection: 'column', gap: '0.75rem'
+              }}>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                  The PQC Copilot answers Post-Quantum Cryptography questions using <strong style={{ color: '#c084fc' }}>Google Gemini</strong>. Paste a Gemini API key (from <strong>aistudio.google.com</strong>). It is validated, then stored in the database and <code>.env</code> so it persists across restarts and deploys.
+                </div>
+                <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <div style={{ position: 'relative', flex: 1, minWidth: '280px', display: 'flex', alignItems: 'center' }}>
+                    <input
+                      type={showGeminiKey ? 'text' : 'password'}
+                      placeholder="Enter Gemini API Key (AIza...)"
+                      value={geminiInputKey}
+                      onChange={(e) => setGeminiInputKey(e.target.value)}
+                      style={{
+                        width: '100%', padding: '0.5rem 2.4rem 0.5rem 0.75rem', background: 'rgba(255, 255, 255, 0.05)',
+                        border: '1px solid rgba(168, 85, 247, 0.3)', borderRadius: '6px', color: 'var(--text-primary)',
+                        fontSize: '0.85rem', fontFamily: 'monospace'
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowGeminiKey(!showGeminiKey)}
+                      title={showGeminiKey ? 'Hide API Key' : 'Show API Key'}
+                      style={{
+                        position: 'absolute', right: '0.6rem', background: 'transparent', border: 'none',
+                        color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', padding: '2px'
+                      }}
+                    >
+                      {showGeminiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSaveAiSettings}
+                    disabled={savingAiSettings || !geminiInputKey.trim()}
+                    className="btn-primary"
+                    style={{
+                      padding: '0.5rem 1rem', fontSize: '0.82rem', display: 'inline-flex', alignItems: 'center', gap: '0.4rem',
+                      background: 'linear-gradient(135deg, #9333ea 0%, #7e22ce 100%)', border: '1px solid #c084fc'
+                    }}
+                  >
+                    <Send size={14} />
+                    {savingAiSettings ? 'Validating...' : 'Save & Validate Key'}
+                  </button>
+                </div>
+                {aiSaveMsg && (
+                  <div style={{ fontSize: '0.82rem', color: '#4ade80', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    <Check size={14} /> {aiSaveMsg}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
+
+      {activeSubTab === 'licenses' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1.5rem' }}>
+          {/* Metrics Grid */}
+          <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+            <div className="glass-panel metric-card">
+              <div className="metric-info">
+                <h3>Total Active Licenses</h3>
+                <div className="metric-value" style={{ color: 'var(--accent-cyan)' }}>
+                  {licenses.filter(l => l.status === 'active').length}
+                </div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  Cryptographically Valid
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: 'var(--accent-cyan)' }}>
+                <Key size={24} />
+              </div>
+            </div>
+
+            <div className="glass-panel metric-card">
+              <div className="metric-info">
+                <h3>Partner Evaluations</h3>
+                <div className="metric-value" style={{ color: '#38bdf8' }}>
+                  {licenses.filter(l => l.tier === 'partner' && l.status === 'active').length}
+                </div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  Extended Partner Trials
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: '#38bdf8' }}>
+                <Users size={24} />
+              </div>
+            </div>
+
+            <div className="glass-panel metric-card">
+              <div className="metric-info">
+                <h3>Corporate Fleet Deployments</h3>
+                <div className="metric-value" style={{ color: '#c084fc' }}>
+                  {licenses.filter(l => (l.tier === 'corporate' || l.tier === 'corp') && l.status === 'active').length}
+                </div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  Production Enterprise Fleets
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: '#c084fc' }}>
+                <Building size={24} />
+              </div>
+            </div>
+
+            <div className="glass-panel metric-card">
+              <div className="metric-info">
+                <h3>Authorized Endpoint Seats</h3>
+                <div className="metric-value" style={{ color: 'var(--status-secure)' }}>
+                  {licenses.filter(l => l.status === 'active').reduce((sum, l) => sum + (l.seats || 0), 0).toLocaleString()}
+                </div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  Workstations & Cloud VMs
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: 'var(--status-secure)' }}>
+                <ShieldCheck size={24} />
+              </div>
+            </div>
+
+            <div className="glass-panel metric-card" style={{ borderColor: pendingLicensingClients.length > 0 ? 'rgba(245, 158, 11, 0.4)' : undefined }}>
+              <div className="metric-info">
+                <h3>Pending Licensing</h3>
+                <div className="metric-value" style={{ color: pendingLicensingClients.length > 0 ? 'var(--status-warning)' : 'var(--text-secondary)' }}>
+                  {pendingLicensingClients.length}
+                </div>
+                <div className="metric-trend" style={{ color: 'var(--text-secondary)' }}>
+                  Awaiting License Issuance
+                </div>
+              </div>
+              <div className="metric-icon" style={{ color: pendingLicensingClients.length > 0 ? 'var(--status-warning)' : 'var(--text-secondary)' }}>
+                <Clock size={24} />
+              </div>
+            </div>
           </div>
 
           {/* Pending Licensing Queue */}
