@@ -194,12 +194,16 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
 
     // 1. Attempt Google Gemini if key available
     if (geminiKey) {
+      // Valid as of 2026: the gemini-1.5/2.0 models were removed (404) and must not be
+      // listed. The -latest aliases auto-track Google's current model so this list does
+      // not rot again; the -lite fallbacks cost fewer input tokens, which matters on the
+      // free tier (a 429 on the primary should fall to a cheaper model, not a dead one).
       const geminiCandidateModels = [
         process.env.GEMINI_MODEL,
         'gemini-2.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro'
+        'gemini-flash-latest',
+        'gemini-2.5-flash-lite',
+        'gemini-flash-lite-latest'
       ].filter(Boolean) as string[];
 
       // Sanitize past history so roles strictly alternate and avoid duplicate user turn at the end
@@ -1438,8 +1442,8 @@ export const getAICorrelation = async (req: Request, res: Response) => {
     if (apiKey && apiKey.trim() !== '' && assets.length > 0) {
       const geminiCandidateModels = [
         process.env.GEMINI_MODEL,
-        'gemini-2.0-flash',
-        'gemini-1.5-flash'
+        'gemini-flash-latest',
+        'gemini-2.5-flash-lite'
       ].filter(Boolean) as string[];
 
       const systemInstruction = 
@@ -1765,8 +1769,8 @@ Please generate the structured 7-slide board presentation JSON following the exa
         if (apiKey && apiKey.trim() !== '') {
           const geminiCandidateModels = [
             process.env.GEMINI_MODEL,
-            'gemini-2.0-flash',
-            'gemini-1.5-flash'
+            'gemini-flash-latest',
+            'gemini-2.5-flash-lite'
           ].filter(Boolean) as string[];
 
           const contents = [{
@@ -2150,8 +2154,8 @@ Please generate the complete report following the exact system instructions and 
         if (apiKey && apiKey.trim() !== '') {
           const geminiCandidateModels = [
             process.env.GEMINI_MODEL,
-            'gemini-2.0-flash',
-            'gemini-1.5-flash'
+            'gemini-flash-latest',
+            'gemini-2.5-flash-lite'
           ].filter(Boolean) as string[];
 
           const contents = [{
