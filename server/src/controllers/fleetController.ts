@@ -919,6 +919,65 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       });
     }
 
+    // ---- Scanner-accuracy: collapse the OS / public CA trust-store explosion ----
+    // The agent enumerates every certificate inside the OS CA trust bundles
+    // (ca-bundle.crt, ca-certificates.crt, *-ca-bundle.pem ...) and every individual
+    // public root ("Linux Trust Store: <CA>"), producing hundreds of indistinguishable
+    // rows per host. These are PUBLIC trust anchors, not the tenant's own keys, so they
+    // inflated asset counts ~9x and skewed posture. Collapse each trust SOURCE to a single
+    // informational trust-anchor asset (with the cert count), keeping it visible without
+    // the noise. (Scanner follow-up: stop emitting the explosion at source.)
+    {
+      const COLLAPSE_MIN = 5; // only collapse real explosions, never a one-off private CA
+      const bundleKey = (a: any): string | null => {
+        if (!/cert/i.test(String(a.type || ''))) return null;
+        const n = String(a.name || ''); const p = String(a.path || '');
+        if (/(ca-bundle|ca-certificates|tls-ca-bundle|objsign-ca-bundle|email-ca-bundle|-ca-bundle\.pem|\bcacert)/i.test(`${n} ${p}`)) {
+          return `file:${(p || n).toLowerCase()}`;                 // collapse per bundle FILE
+        }
+        if (/^Linux Trust Store:/i.test(n) || /(\/etc\/ssl\/certs|\/etc\/pki\/|\/usr\/share\/ca-certificates)/i.test(p)) {
+          return 'os-public-trust-roots';                         // collapse all individual public roots
+        }
+        return null;
+      };
+      const groups = new Map<string, any[]>();
+      const kept: any[] = [];
+      for (const a of processedAssets) {
+        const k = bundleKey(a);
+        if (k) { (groups.get(k) || groups.set(k, []).get(k)!).push(a); }
+        else kept.push(a);
+      }
+      for (const [k, members] of groups) {
+        if (members.length < COLLAPSE_MIN) { kept.push(...members); continue; }
+        const rep = members[0];
+        const algos = Array.from(new Set(members.map(m => m.algorithm).filter(Boolean)));
+        const algoList = algos.join(' / ') || 'RSA/ECC';
+        const isFile = k.startsWith('file:');
+        kept.push({
+          ...rep,
+          name: isFile ? rep.name : 'OS Public CA Trust Store (roots)',
+          algorithm: algoList,
+          is_vulnerable: false,
+          risk_level: 'informational',
+          status: 'Trust Anchor (OS / public CA store)',
+          description: `${isFile ? `OS CA trust bundle "${rep.name}"` : 'System public CA trust store'} — ${members.length} public CA certificate${members.length === 1 ? '' : 's'} (trust anchors, not tenant-owned keys). Algorithms: ${algoList}.`,
+          recommendation: 'Public trust anchors are managed via OS / trust-store updates, not PQC key migration.',
+        });
+      }
+      processedAssets.length = 0;
+      processedAssets.push(...kept);
+      // Re-tally vulnerability counts from the collapsed set (trust anchors are not vulnerable).
+      vulnerableCount = 0; criticalCount = 0; highCount = 0; mediumCount = 0;
+      for (const a of processedAssets) {
+        if (a.is_vulnerable) {
+          vulnerableCount++;
+          if (a.risk_level === 'critical') criticalCount++;
+          else if (a.risk_level === 'high') highCount++;
+          else if (a.risk_level === 'medium') mediumCount++;
+        }
+      }
+    }
+
     let machineRiskScore = 0;
     if (processedAssets.length > 0) {
       machineRiskScore = Math.min(100, (criticalCount * 25) + (highCount * 15) + (mediumCount * 5));
