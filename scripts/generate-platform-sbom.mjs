@@ -9,10 +9,13 @@
 //   - Emits idempotent SQL: deletes the current quarkshield.ai sbom_components rows and
 //     inserts the real component inventory with real advisories (GHSA/CVE, CVSS, fix).
 //
-// Scope / honesty: this covers the npm dependency layer (the application's own code).
-// Container base images (node:22-alpine, postgres:15-alpine) and the Alpine OS layer are
-// NOT covered here (needs Trivy/Grype image scanning) and are emitted as explicit
-// "not independently scanned" informational rows rather than claimed clean.
+// Container coverage: when Docker is available, the base images (node:22-alpine,
+// postgres:15-alpine) are scanned with Trivy (run as a container, no host install) for
+// OS-package AND image-bundled-tooling CVEs. The OS layer and the bundled tooling (npm
+// packages inside the node image, the gosu helper inside the postgres image) are emitted
+// as distinct, clearly-labeled rows so the reader can tell app-runtime risk from
+// image-bundled tooling. If Docker/Trivy is unavailable, the images fall back to explicit
+// "not independently scanned" rows rather than being claimed clean.
 //
 // Usage:
 //   node scripts/generate-platform-sbom.mjs > scripts/platform-sbom.generated.sql
@@ -34,12 +37,13 @@ const PROJECTS = [
   { dir: 'ui',     source: 'platform_ui',      ref: 'https://github.com/spinovation/quarkshield-ai/ui',     file: 'ui/package.json' },
 ];
 
-// Base images / OS layer — not scanned by npm audit. Emitted honestly as informational.
-const UNSCANNED = [
-  { name: 'node',     version: '22-alpine', source: 'container_base', ref: 'docker.io/library/node:22-alpine',     file: 'Dockerfile',         ecosystem: 'container' },
-  { name: 'postgres', version: '15-alpine', source: 'container_base', ref: 'docker.io/library/postgres:15-alpine', file: 'docker-compose.yml', ecosystem: 'container' },
-  { name: 'pqc-scanner-engine', version: '2.3.0', source: 'platform_agent', ref: 'https://github.com/spinovation/quarkshield-ai/agent', file: 'agent/go.mod', ecosystem: 'golang' },
+// Base container images to scan with Trivy (OS + bundled tooling).
+const IMAGES = [
+  { image: 'node:22-alpine',     file: 'Dockerfile',         toolingLabel: 'bundled npm/npx tooling (not app runtime)' },
+  { image: 'postgres:15-alpine', file: 'docker-compose.yml', toolingLabel: 'bundled entrypoint helper (gosu)' },
 ];
+// The Go agent has no third-party modules — emitted as a verified-clean row.
+const AGENT_ROW = { name: 'pqc-scanner-engine', version: '2.3.0', source: 'platform_agent', ref: 'https://github.com/spinovation/quarkshield-ai/agent', file: 'agent/go.mod', ecosystem: 'golang' };
 
 const sq = (s) => "'" + String(s ?? '').replace(/'/g, "''") + "'";
 const jsonb = (o) => sq(JSON.stringify(o)) + '::jsonb';
@@ -144,26 +148,106 @@ for (const proj of PROJECTS) {
   }
 }
 
-// Honest informational rows for layers npm audit does not cover.
-for (const u of UNSCANNED) {
-  rows.push({
-    id: mkId(u.source, u.name, u.version),
-    source: u.source,
-    source_ref: u.ref,
-    file_path: u.file,
-    name: u.name,
-    version: u.version,
-    ecosystem: u.ecosystem,
-    purl: `pkg:${u.ecosystem === 'golang' ? 'golang' : 'oci'}/${u.name}@${u.version}`,
-    license: u.name === 'pqc-scanner-engine' ? 'Proprietary' : 'Various (base image)',
-    has_vulnerabilities: false,
-    vuln_count: 0,
-    max_severity: 'none',
-    vulnerabilities: u.ecosystem === 'golang'
-      ? [{ cveId: 'CLEAN', title: 'Pure Go standard library — zero external modules', cvssScore: 0, severity: 'low', fixedVersion: 'n/a', remediationCmd: 'n/a', description: 'Agent compiles against the Go standard library only; no third-party module CVEs.' }]
-      : [{ cveId: 'NOT-SCANNED', title: 'OS-layer CVEs not scanned in this pass', cvssScore: 0, severity: 'low', fixedVersion: 'n/a', remediationCmd: 'Scan base image with Trivy/Grype for OS-package CVEs', description: 'Base image OS packages are not covered by npm audit. Run container image scanning (Trivy/Grype) for full coverage.' }],
-  });
+// ---- Container base-image scan (Trivy via Docker, no host install) ----
+const SEV_RANK = ['critical', 'high', 'medium', 'low'];
+const normSev = (s) => { const x = String(s || '').toLowerCase(); return x === 'moderate' ? 'medium' : (SEV_RANK.includes(x) ? x : 'low'); };
+
+function dockerAvailable() {
+  try { execSync('docker version', { stdio: 'ignore' }); return true; } catch { return false; }
 }
+
+function trivyScan(image) {
+  const cmd = `docker run --rm -v trivy-cache:/root/.cache/ aquasec/trivy:latest image --quiet --format json --severity CRITICAL,HIGH,MEDIUM --scanners vuln ${image}`;
+  try {
+    const out = execSync(cmd, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+    return JSON.parse(out);
+  } catch (e) {
+    try { return JSON.parse(e.stdout); } catch { return null; }
+  }
+}
+
+function trivyVulnToAdvisory(v) {
+  const cvss = v.CVSS || {};
+  let score = 0;
+  for (const src of Object.values(cvss)) { const s = (src && (src.V3Score ?? src.V2Score)) || 0; if (s > score) score = s; }
+  return {
+    cveId: v.VulnerabilityID || 'ADVISORY',
+    title: v.Title || (v.Description ? String(v.Description).slice(0, 120) : `${v.PkgName} advisory`),
+    cvssScore: score,
+    severity: normSev(v.Severity),
+    fixedVersion: v.FixedVersion || 'No fix available',
+    remediationCmd: v.FixedVersion ? `Rebuild base image / bump ${v.PkgName} to ${v.FixedVersion}` : 'Track upstream base-image update',
+    description: (v.Title || v.Description || '').slice(0, 300) + (v.PrimaryURL ? ` (${v.PrimaryURL})` : ''),
+  };
+}
+
+const dockerOk = dockerAvailable();
+process.stderr.write(`[generate-platform-sbom] docker available: ${dockerOk}\n`);
+
+for (const img of IMAGES) {
+  const data = dockerOk ? trivyScan(img.image) : null;
+  const artifact = img.image;
+  if (!data || !Array.isArray(data.Results)) {
+    // Fallback: cannot scan → explicit not-scanned row (never claimed clean).
+    rows.push({
+      id: mkId('container_base', img.image, 'unscanned'),
+      source: 'container_base', source_ref: `docker.io/library/${img.image}`, file_path: img.file,
+      name: img.image, version: 'image', ecosystem: 'container', purl: `pkg:oci/${img.image}`,
+      license: 'Various (base image)', has_vulnerabilities: false, vuln_count: 0, max_severity: 'none',
+      vulnerabilities: [{ cveId: 'NOT-SCANNED', title: 'Base image not scanned (Docker/Trivy unavailable)', cvssScore: 0, severity: 'low', fixedVersion: 'n/a', remediationCmd: 'Run the generator on a host with Docker to scan via Trivy', description: 'Container OS/tooling CVEs were not scanned in this run.' }],
+    });
+    continue;
+  }
+  const osVer = (data.Results.find(r => r.Class === 'os-pkgs')?.Target || artifact);
+  for (const r of data.Results) {
+    const vs = r.Vulnerabilities || [];
+    const isOs = r.Class === 'os-pkgs';
+    // Group this result's vulns by package.
+    const byPkg = new Map();
+    for (const v of vs) { const k = v.PkgName || 'unknown'; (byPkg.get(k) || byPkg.set(k, []).get(k)).push(v); }
+
+    if (isOs) {
+      // One row representing the OS layer (clean or not) — this is the key "container" result.
+      const advs = vs.map(trivyVulnToAdvisory);
+      const sev = advs.length ? (SEV_RANK.find(s => advs.some(a => a.severity === s)) || 'medium') : 'none';
+      rows.push({
+        id: mkId('container_base', artifact + ':os', 'os'),
+        source: 'container_base', source_ref: `${osVer} — OS layer (Trivy-scanned)`, file_path: img.file,
+        name: `${artifact} · OS layer`, version: (osVer.match(/\(([^)]+)\)/) || [,'os'])[1], ecosystem: 'os_pkg',
+        purl: `pkg:oci/${artifact}`, license: 'Various (base image)',
+        has_vulnerabilities: advs.length > 0, vuln_count: advs.length, max_severity: sev,
+        vulnerabilities: advs.length ? advs : [{ cveId: 'VERIFIED-CLEAN', title: `No OS-package CVEs (CRITICAL/HIGH/MEDIUM) — Trivy-scanned`, cvssScore: 0, severity: 'low', fixedVersion: 'n/a', remediationCmd: 'n/a', description: `${osVer} OS packages scanned with Trivy: zero CRITICAL/HIGH/MEDIUM CVEs.` }],
+      });
+    } else {
+      // Bundled tooling (node-pkg / gobinary): one row per package, clearly labeled.
+      for (const [pkg, pvs] of byPkg) {
+        const advs = pvs.map(trivyVulnToAdvisory);
+        const sev = SEV_RANK.find(s => advs.some(a => a.severity === s)) || 'medium';
+        const ver = pvs[0].InstalledVersion || 'bundled';
+        rows.push({
+          id: mkId('container_base', `${artifact}:${pkg}`, ver),
+          source: 'container_base',
+          source_ref: `${artifact} — ${img.toolingLabel}`, file_path: img.file,
+          name: pkg, version: ver, ecosystem: r.Type || 'bundled',
+          purl: `pkg:${r.Type || 'generic'}/${pkg}@${ver}`, license: 'Various (base image)',
+          has_vulnerabilities: true, vuln_count: advs.length, max_severity: sev,
+          vulnerabilities: advs,
+        });
+        totalVuln++;
+      }
+    }
+  }
+}
+
+// Go agent — verified clean (pure stdlib, zero external modules).
+rows.push({
+  id: mkId(AGENT_ROW.source, AGENT_ROW.name, AGENT_ROW.version),
+  source: AGENT_ROW.source, source_ref: AGENT_ROW.ref, file_path: AGENT_ROW.file,
+  name: AGENT_ROW.name, version: AGENT_ROW.version, ecosystem: AGENT_ROW.ecosystem,
+  purl: `pkg:golang/${AGENT_ROW.name}@${AGENT_ROW.version}`, license: 'Proprietary',
+  has_vulnerabilities: false, vuln_count: 0, max_severity: 'none',
+  vulnerabilities: [{ cveId: 'CLEAN', title: 'Pure Go standard library — zero external modules', cvssScore: 0, severity: 'low', fixedVersion: 'n/a', remediationCmd: 'n/a', description: 'Agent compiles against the Go standard library only; no third-party module CVEs.' }],
+});
 
 // ---- Emit SQL ----
 const now = new Date().toISOString();
