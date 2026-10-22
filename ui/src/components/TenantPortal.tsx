@@ -70,6 +70,7 @@ import { EnterprisePkiVaults } from './EnterprisePkiVaults';
 import { PqcProxyGateway } from './PqcProxyGateway';
 import { GitRepoAuditor } from './GitRepoAuditor';
 import SbomInventory from './SbomInventory';
+import SupportAccessCard from './SupportAccessCard';
 import ComplianceProjects from './ComplianceProjects';
 
 // Threat & Risk Graph pulls in React Flow; load it only when the tab is opened.
@@ -3358,6 +3359,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
+                {/* Tenant-controlled support access (GDPR drill-down window) */}
+                <SupportAccessCard apiUrl="" canManage={/admin|owner/i.test(currentUserRole || '')} />
                 {/* 4 Metric Cards */}
                 <div style={{
                   display: 'grid',

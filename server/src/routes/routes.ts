@@ -136,6 +136,11 @@ import {
   getSuperAdminGuide
 } from '../controllers/sbomController';
 import {
+  grantSupportAccess,
+  revokeSupportAccess,
+  getSupportAccessStatus
+} from '../controllers/supportAccessController';
+import {
   createCheckoutSession,
   getRegistrationStatus,
   createCustomCheckoutSession,
@@ -429,6 +434,13 @@ router.get('/sbom/stats', requireAuth, requireTenantAccess, getSbomStats);
 router.get('/sbom/export', requireAuth, requireTenantAccess, exportSbom);
 router.get('/sbom/fix-script', requireAuth, requireTenantAccess, getFixScript);
 router.get('/sbom/superadmin-guide', requireSuperAdmin, getSuperAdminGuide);
+
+// =========================================================================
+// SUPPORT ACCESS — tenant-granted, time-boxed super-admin drill-down (GDPR)
+// =========================================================================
+router.post('/support-access/grant', requireAuth, requireTenantAdmin, grantSupportAccess);
+router.post('/support-access/revoke', requireAuth, requireTenantAdmin, revokeSupportAccess);
+router.get('/support-access/status', requireAuth, getSupportAccessStatus);
 
 // =========================================================================
 // STRIPE BILLING & COMMERCIAL PAYMENTS

@@ -88,6 +88,10 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
     patchablePercent: 100
   });
   const [loading, setLoading] = useState(false);
+  // GDPR: super-admin viewing a customer tenant without an active support grant
+  // gets aggregate metrics only — the component table is withheld.
+  const [restricted, setRestricted] = useState(false);
+  const [grantExpiry, setGrantExpiry] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [ecosystemFilter, setEcosystemFilter] = useState('all');
   const [severityFilter, setSeverityFilter] = useState('all');
@@ -130,7 +134,10 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
 
       if (compRes.ok) {
         const compData = await compRes.json();
-        if (compData.success && Array.isArray(compData.components)) {
+        setRestricted(!!compData.restricted);
+        if (compData.restricted) {
+          setComponents([]);
+        } else if (compData.success && Array.isArray(compData.components)) {
           setComponents(compData.components);
         }
       }
@@ -140,6 +147,19 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
         if (statsData.success && statsData.stats) {
           setStats(statsData.stats);
         }
+      }
+
+      // Super-admin: surface the active support-access window (if any) for this tenant.
+      if (isSuperAdmin && !isPlatformStack) {
+        try {
+          const sg = await fetch(`${apiUrl}/api/support-access/status?tenant=${tenantParam}`, { credentials: 'include' });
+          if (sg.ok) {
+            const sgData = await sg.json();
+            setGrantExpiry(sgData.active && sgData.grant ? sgData.grant.expires_at : null);
+          }
+        } catch { /* non-fatal */ }
+      } else {
+        setGrantExpiry(null);
       }
     } catch (err) {
       console.error('Failed to fetch SBOM data:', err);
@@ -407,6 +427,43 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
         </div>
       </div>
 
+      {/* Support-access window active (super-admin drilling into a customer tenant) */}
+      {isSuperAdmin && !isPlatformStack && grantExpiry && !restricted && (
+        <div style={{
+          background: 'rgba(34, 197, 94, 0.08)', border: '1px solid rgba(34, 197, 94, 0.4)',
+          borderRadius: '10px', padding: '0.85rem 1.1rem', display: 'flex', alignItems: 'center', gap: '0.6rem'
+        }}>
+          <ShieldCheck size={16} color="#4ade80" />
+          <span style={{ fontSize: '0.82rem', color: '#bbf7d0' }}>
+            <strong>Support access active</strong> — {activeTenant} granted component-level troubleshooting until{' '}
+            {new Date(grantExpiry).toLocaleString()}. This view is audit-logged.
+          </span>
+        </div>
+      )}
+
+      {/* GDPR: component detail withheld until the tenant grants support access */}
+      {restricted && (
+        <div style={{
+          background: 'linear-gradient(135deg, rgba(168, 85, 247, 0.08) 0%, rgba(56, 189, 248, 0.06) 100%)',
+          border: '1px solid rgba(168, 85, 247, 0.35)', borderRadius: '12px', padding: '1.4rem 1.6rem'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.5rem' }}>
+            <ShieldAlert size={18} color="#c084fc" />
+            <h4 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 700, color: '#ffffff' }}>
+              Component-level inventory withheld (GDPR)
+            </h4>
+          </div>
+          <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-muted, #94a3b8)', maxWidth: '760px', lineHeight: 1.5 }}>
+            As super-admin you can see <strong>aggregate metrics</strong> for <strong>{activeTenant}</strong> (component
+            counts, vulnerability and severity distribution, patchability — shown above), but not individual package
+            names, versions, hosts or CVE rows. To troubleshoot this tenant's data, ask their admin to enable a
+            time-boxed <strong>Support Access</strong> window from their portal. The drill-down then unlocks here and
+            every access is audit-logged.
+          </p>
+        </div>
+      )}
+
+      {!restricted && (<>
       {/* 2. Control Toolbar (Search, Filter, Export) */}
       <div style={{
         background: 'rgba(255, 255, 255, 0.02)',
@@ -855,6 +912,7 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
           </div>
         </div>
       </div>
+      </>)}
 
       {/* 4. Advisory Details Modal */}
       {activeAdvisory && (

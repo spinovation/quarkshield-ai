@@ -270,6 +270,22 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Time-boxed "support access" grants. GDPR: a super-admin cannot view a customer
+-- tenant's component-level SBOM by default (only numeric aggregates). The tenant's
+-- admin opens a time-boxed, auto-expiring, audit-logged window to unlock drill-down.
+-- A grant is ACTIVE when revoked_at IS NULL AND expires_at > now().
+CREATE TABLE IF NOT EXISTS support_access_grants (
+  id VARCHAR(100) PRIMARY KEY,
+  tenant_name VARCHAR(255) NOT NULL,
+  granted_by VARCHAR(255) NOT NULL,
+  reason TEXT,
+  created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+  revoked_at TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX IF NOT EXISTS idx_support_grants_tenant ON support_access_grants (LOWER(tenant_name));
+CREATE INDEX IF NOT EXISTS idx_support_grants_active ON support_access_grants (expires_at) WHERE revoked_at IS NULL;
+
 -- Read-only machine-to-machine posture tokens (QSG platform-integration spec).
 -- A tenant admin mints a token (shown once); only its SHA-256 hash is stored. The
 -- token is BOUND to one tenant and carries explicit scopes (today: posture:read).

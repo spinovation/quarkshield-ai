@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { isSuperRole } from '../middleware/auth';
+import { hasActiveSupportGrant, auditSupportEvent } from '../lib/supportAccess';
 
 interface VulnerabilityDetail {
   cveId: string;
@@ -829,6 +830,27 @@ function checkSuperAdminAccess(req: Request): boolean {
  * Resolves the active tenant from the request context.
  * Super admins can query any tenant via ?tenant=...; tenant users are pinned to their tenant.
  */
+/**
+ * GDPR gate for component-level SBOM access.
+ * A super-admin may see a CUSTOMER tenant's component rows only while that tenant
+ * has an active support-access grant. The platform's own stack ('quarkshield.ai')
+ * is not customer PII and is always viewable by a super-admin. Tenant users are
+ * pinned to their own tenant upstream and are never gated here.
+ * Returns true if access is ALLOWED (and audit-logs a granted super-admin read).
+ */
+async function allowComponentAccess(req: Request, tenant: string): Promise<boolean> {
+  const isSuper = !!(req.user?.role && isSuperRole(req.user.role));
+  if (!isSuper) return true;                                   // tenant user → own data
+  if (tenant.toLowerCase() === 'quarkshield.ai') return true;  // platform's own stack
+  const granted = await hasActiveSupportGrant(tenant);
+  if (granted) {
+    await auditSupportEvent('support_access_sbom_read', req.user?.id || 'superadmin',
+      `tenant=${tenant} route=${req.path}`, req.ip);
+    return true;
+  }
+  return false;
+}
+
 function resolveTenant(req: Request): string {
   const isSuper = req.user?.role && isSuperRole(req.user.role);
   if (isSuper && req.query.tenant) {
@@ -920,11 +942,26 @@ export async function getSbomComponents(req: Request, res: Response) {
       });
     }
 
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const limit = parseInt(req.query.limit as string, 10) || 50;
+
+    // GDPR: a super-admin viewing a customer tenant gets component rows only
+    // while that tenant has granted a time-boxed support window. Otherwise return
+    // an aggregate-only signal (numeric metrics remain available via /sbom/stats).
+    if (!(await allowComponentAccess(req, tenant))) {
+      return res.json({
+        success: true,
+        restricted: true,
+        tenant,
+        message: 'Component-level inventory for this tenant requires tenant approval (support access). Numeric/aggregate metrics are available without approval.',
+        components: [],
+        pagination: { total: 0, page, limit, totalPages: 0 }
+      });
+    }
+
     const ecosystem = (req.query.ecosystem as string) || 'all';
     const severity = (req.query.severity as string) || 'all';
     const search = (req.query.search as string) || '';
-    const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 50;
     const offset = (page - 1) * limit;
 
     await ensureTenantSbomSeed(tenant);
@@ -1066,6 +1103,15 @@ export async function exportSbom(req: Request, res: Response) {
       });
     }
 
+    // GDPR: exporting a customer tenant's full component BOM requires an active
+    // support-access grant when the caller is a super-admin.
+    if (!(await allowComponentAccess(req, tenant))) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access Denied: a full SBOM export for this tenant requires tenant approval (support access).'
+      });
+    }
+
     await ensureTenantSbomSeed(tenant);
 
     const dataRes = await pool.query(`
@@ -1164,6 +1210,15 @@ export async function getFixScript(req: Request, res: Response) {
     const tenant = resolveTenant(req);
     if (!tenant) return res.status(400).json({ success: false, error: 'A tenant is required.' });
     const isPlatform = tenant.toLowerCase() === 'quarkshield.ai';
+
+    // GDPR: a tenant fix script enumerates the tenant's vulnerable packages, so a
+    // super-admin needs an active support-access grant to pull one for a customer.
+    if (!isPlatform && !(await allowComponentAccess(req, tenant))) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access Denied: generating a fix script for this tenant requires tenant approval (support access).'
+      });
+    }
 
     if (isPlatform) {
       if (!checkSuperAdminAccess(req)) {

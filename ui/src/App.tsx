@@ -2369,6 +2369,39 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                         </div>
                       </button>
 
+                      {/* Pinned Platform (quarkshield.ai own stack) Option — non-tenant, non-PII */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedTenantFilter('quarkshield.ai');
+                          setSelectedMachineFilter('all');
+                          setIsTenantDropdownOpen(false);
+                        }}
+                        style={{
+                          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                          padding: '0.65rem 0.85rem',
+                          background: selectedTenantFilter === 'quarkshield.ai' ? 'rgba(168, 85, 247, 0.2)' : 'transparent',
+                          border: 'none', borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                          color: selectedTenantFilter === 'quarkshield.ai' ? '#ffffff' : 'var(--text-secondary)',
+                          cursor: 'pointer', textAlign: 'left', transition: 'background 0.12s ease'
+                        }}
+                        onMouseEnter={e => { if (selectedTenantFilter !== 'quarkshield.ai') e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                        onMouseLeave={e => { if (selectedTenantFilter !== 'quarkshield.ai') e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+                          <ShieldCheck size={14} color="#c084fc" />
+                          <div>
+                            <span style={{ fontSize: '0.84rem', fontWeight: 600, color: '#ffffff' }}>
+                              🛡️ Platform SBOM (quarkshield.ai)
+                            </span>
+                            <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: '0.5rem' }}>
+                              Our own stack & CVEs
+                            </span>
+                          </div>
+                        </div>
+                        {selectedTenantFilter === 'quarkshield.ai' && <Check size={14} color="#c084fc" />}
+                      </button>
+
                       {/* Alphabetical List of Tenants / Partners */}
                       {filteredTenantList.length === 0 ? (
                         <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
@@ -2644,7 +2677,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
 
               {cbomViewMode === 'sbom' ? (
                 <div style={{ marginTop: '0.75rem' }}>
-                  <SbomInventory tenant={selectedTenantFilter === 'all' ? 'SPINOVATIONCORP' : (selectedTenantOption?.rawName || selectedTenantOption?.key || selectedTenantFilter)} apiUrl="" isSuperAdmin={true} />
+                  <SbomInventory tenant={selectedTenantFilter === 'all' ? 'quarkshield.ai' : (selectedTenantOption?.rawName || selectedTenantOption?.key || selectedTenantFilter)} apiUrl="" isSuperAdmin={true} />
                 </div>
               ) : (
                 <>
