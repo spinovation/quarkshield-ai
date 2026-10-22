@@ -70,6 +70,10 @@ interface SbomInventoryProps {
 
 export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '', isSuperAdmin = false }: SbomInventoryProps) {
   const activeTenant = tenant || 'SPINOVATIONCORP';
+  // The super-admin banner previously always claimed "quarkshield.ai Core Stack"
+  // even while the table below showed a customer tenant's inventory. Reflect what
+  // is actually being displayed: the platform's own stack vs a tenant SBOM.
+  const isPlatformStack = activeTenant.trim().toLowerCase() === 'quarkshield.ai';
 
   const [components, setComponents] = useState<SbomComponent[]>([]);
   const [stats, setStats] = useState<SbomStats>({
@@ -221,14 +225,20 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
               <ShieldCheck size={20} color="#c084fc" />
               <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#ffffff' }}>
-                QuarkShield Platform Architecture &amp; System Stack SBOM
+                {isPlatformStack
+                  ? 'QuarkShield Platform Architecture & System Stack SBOM'
+                  : `Tenant Software Inventory — ${activeTenant}`}
               </h3>
               <span style={{ fontSize: '0.68rem', padding: '0.15rem 0.5rem', borderRadius: '4px', background: 'rgba(168, 85, 247, 0.25)', color: '#c084fc', border: '1px solid rgba(168, 85, 247, 0.5)', fontWeight: 700 }}>
                 Super Admin Only
               </span>
             </div>
             <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--text-muted, #94a3b8)', maxWidth: '780px' }}>
-              Privileged infrastructure inventory documenting <strong>quarkshield.ai</strong> production runtime packages, database drivers, scanner binaries, and container layers. Evaluated against NVD &amp; GitHub Security Advisories.
+              {isPlatformStack ? (
+                <>Privileged infrastructure inventory documenting <strong>quarkshield.ai</strong> production runtime packages, database drivers, scanner binaries, and container layers. Evaluated against NVD &amp; GitHub Security Advisories.</>
+              ) : (
+                <>Software bill of materials for tenant <strong>{activeTenant}</strong>, collected from its endpoint agents and connected repositories. Evaluated against NVD &amp; GitHub Security Advisories.</>
+              )}
             </p>
           </div>
 
@@ -244,10 +254,10 @@ export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '',
           }}>
             <Package size={15} color="#c084fc" />
             <span style={{ fontSize: '0.82rem', fontWeight: 700, color: '#ffffff' }}>
-              quarkshield.ai Core Stack
+              {isPlatformStack ? 'quarkshield.ai Core Stack' : `${activeTenant} — Tenant SBOM`}
             </span>
             <span style={{ fontSize: '0.74rem', color: '#c084fc', borderLeft: '1px solid rgba(255, 255, 255, 0.15)', paddingLeft: '0.6rem' }}>
-              github.com/spinovation/quarkshield-ai
+              {isPlatformStack ? 'github.com/spinovation/quarkshield-ai' : 'Endpoint agents + connected repos'}
             </span>
           </div>
         </div>
