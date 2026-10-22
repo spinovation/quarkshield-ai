@@ -79,6 +79,19 @@ while [ $COUNT -lt $MAX_RETRIES ]; do
   COUNT=$((COUNT+1))
 done
 
+# Step 4: Overlay the REAL quarkshield.ai platform SBOM (npm-audit based) on top of
+# the schema fixture, so the super-admin Platform SBOM shows honest CVEs — not the
+# seeded 0-CVE stack. Generated locally by scripts/generate-platform-sbom.mjs
+# (the VPS host has no node/npm). Safe to skip if the file is absent.
+if [ -f scripts/platform-sbom.generated.sql ]; then
+  echo "🧬 Step 4: Applying real platform SBOM (npm audit CVEs)..."
+  if docker exec -i pqc-scanner-db psql -U postgres -d quarkshield_scanner < scripts/platform-sbom.generated.sql >/dev/null 2>&1; then
+    echo "   ✓ Platform SBOM refreshed from real dependency audit."
+  else
+    echo "   ⚠️  Could not apply platform SBOM overlay (continuing)."
+  fi
+fi
+
 if [ "$HEALTHY" = true ]; then
   echo "======================================================================"
   echo "✅ Deployment Successful!"
