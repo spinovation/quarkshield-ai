@@ -7,6 +7,7 @@ import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
 import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTargets';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
+import { canonicalizeAlgorithmLabel } from '../lib/algorithmLabel';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
 // Requires the query to alias fleet_machines as m and LEFT JOIN fleet_tokens as t.
@@ -904,7 +905,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         id,
         type: rawAsset.type,
         name: rawAsset.name,
-        algorithm: rawAsset.algorithm,
+        // Store a canonical algorithm label (strip the agent's prose wrappers such
+        // as "Classical TLS / KEX Protocol" / "Legacy Protocol (SSL 2.0)"). Classification
+        // above used the RAW value, so vuln/risk is unchanged — this only cleans storage/display.
+        algorithm: canonicalizeAlgorithmLabel(rawAsset.algorithm),
         key_size: size,
         hash_algorithm: rawAsset.hash_algorithm || null,
         is_vulnerable: isVulnerable,
