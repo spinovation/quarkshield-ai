@@ -844,7 +844,7 @@ async function allowComponentAccess(req: Request, tenant: string): Promise<boole
   if (tenant.toLowerCase() === 'quarkshield.ai') return true;  // platform's own stack
   const granted = await hasActiveSupportGrant(tenant);
   if (granted) {
-    await auditSupportEvent('support_access_sbom_read', req.user?.id || 'superadmin',
+    await auditSupportEvent('support_access_sbom_read', req.user?.email || req.user?.sub || 'superadmin',
       `tenant=${tenant} route=${req.path}`, req.ip);
     return true;
   }

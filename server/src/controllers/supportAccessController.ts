@@ -15,8 +15,8 @@ export async function grantSupportAccess(req: Request, res: Response) {
     const tenant = req.user?.tenant;
     if (!tenant) return res.status(400).json({ success: false, error: 'No tenant in session.' });
     const { durationHours, reason } = req.body || {};
-    const grant = await createGrant(tenant, req.user?.id || 'tenant-admin', Number(durationHours) || DEFAULT_GRANT_HOURS, reason);
-    await auditSupportEvent('support_access_granted', req.user?.id || tenant,
+    const grant = await createGrant(tenant, req.user?.email || req.user?.sub || 'tenant-admin', Number(durationHours) || DEFAULT_GRANT_HOURS, reason);
+    await auditSupportEvent('support_access_granted', req.user?.email || tenant,
       `tenant=${tenant} expires=${grant.expires_at} reason=${(reason || '').slice(0, 200)}`, req.ip);
     return res.json({ success: true, grant, limits: { min: MIN_GRANT_HOURS, max: MAX_GRANT_HOURS } });
   } catch (err) {
@@ -32,7 +32,7 @@ export async function revokeSupportAccess(req: Request, res: Response) {
     if (!tenant) return res.status(400).json({ success: false, error: 'No tenant in session.' });
     const n = await revokeGrants(tenant);
     if (n > 0) {
-      await auditSupportEvent('support_access_revoked', req.user?.id || tenant, `tenant=${tenant}`, req.ip);
+      await auditSupportEvent('support_access_revoked', req.user?.email || tenant, `tenant=${tenant}`, req.ip);
     }
     return res.json({ success: true, revoked: n });
   } catch (err) {
