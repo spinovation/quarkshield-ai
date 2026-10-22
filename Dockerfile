@@ -1,7 +1,7 @@
 # ========================================================
 # Stage 1: Build Frontend UI Console (React + Vite)
 # ========================================================
-FROM node:22-alpine AS ui-builder
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS ui-builder
 WORKDIR /app/ui
 
 # Install dependencies
@@ -15,7 +15,7 @@ RUN npm run build
 # ========================================================
 # Stage 2: Build Backend Server (TypeScript + Express)
 # ========================================================
-FROM node:22-alpine AS server-builder
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS server-builder
 WORKDIR /app/server
 
 # Install dependencies
@@ -29,7 +29,7 @@ RUN npm run build
 # ========================================================
 # Stage 3: Production Runner Image
 # ========================================================
-FROM node:22-alpine AS runner
+FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS runner
 RUN apk add --no-cache bash curl ca-certificates openssl git
 # The origin TLS key is generated at CONTAINER START (into a volume-backed dir), not
 # baked into the image: a key in an image layer is shared by every container built

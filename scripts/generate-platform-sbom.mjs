@@ -32,6 +32,16 @@ import path from 'node:path';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const TENANT = 'quarkshield.ai';
 
+// Base-image digests the deployment is pinned to (Dockerfile + docker-compose).
+// Trivy scans these exact digests so the SBOM reflects the deployed bytes, not a
+// drifting tag. Falls back to the plain tag if the manifest is missing.
+let PINNED_DIGESTS = {};
+try {
+  PINNED_DIGESTS = JSON.parse(readFileSync(path.join(ROOT, 'scripts/platform-image-digests.json'), 'utf8')).images || {};
+} catch { /* fall back to tags */ }
+const pinnedRef = (image) => PINNED_DIGESTS[image] ? `${image.split(':')[0]}@${PINNED_DIGESTS[image]}` : image;
+const shortDigest = (image) => (PINNED_DIGESTS[image] || '').replace('sha256:', '').slice(0, 12);
+
 const PROJECTS = [
   { dir: 'server', source: 'platform_backend', ref: 'https://github.com/spinovation/quarkshield-ai/server', file: 'server/package.json' },
   { dir: 'ui',     source: 'platform_ui',      ref: 'https://github.com/spinovation/quarkshield-ai/ui',     file: 'ui/package.json' },
@@ -185,14 +195,17 @@ const dockerOk = dockerAvailable();
 process.stderr.write(`[generate-platform-sbom] docker available: ${dockerOk}\n`);
 
 for (const img of IMAGES) {
-  const data = dockerOk ? trivyScan(img.image) : null;
+  const scanRef = pinnedRef(img.image);       // image@sha256:... when pinned
+  const data = dockerOk ? trivyScan(scanRef) : null;
   const artifact = img.image;
+  const dig = shortDigest(img.image);
+  const pinNote = dig ? ` @${dig}` : '';
   if (!data || !Array.isArray(data.Results)) {
     // Fallback: cannot scan → explicit not-scanned row (never claimed clean).
     rows.push({
       id: mkId('container_base', img.image, 'unscanned'),
-      source: 'container_base', source_ref: `docker.io/library/${img.image}`, file_path: img.file,
-      name: img.image, version: 'image', ecosystem: 'container', purl: `pkg:oci/${img.image}`,
+      source: 'container_base', source_ref: `docker.io/library/${pinnedRef(img.image)}`, file_path: img.file,
+      name: img.image, version: dig || 'image', ecosystem: 'container', purl: `pkg:oci/${pinnedRef(img.image)}`,
       license: 'Various (base image)', has_vulnerabilities: false, vuln_count: 0, max_severity: 'none',
       vulnerabilities: [{ cveId: 'NOT-SCANNED', title: 'Base image not scanned (Docker/Trivy unavailable)', cvssScore: 0, severity: 'low', fixedVersion: 'n/a', remediationCmd: 'Run the generator on a host with Docker to scan via Trivy', description: 'Container OS/tooling CVEs were not scanned in this run.' }],
     });
@@ -212,7 +225,7 @@ for (const img of IMAGES) {
       const sev = advs.length ? (SEV_RANK.find(s => advs.some(a => a.severity === s)) || 'medium') : 'none';
       rows.push({
         id: mkId('container_base', artifact + ':os', 'os'),
-        source: 'container_base', source_ref: `${osVer} — OS layer (Trivy-scanned)`, file_path: img.file,
+        source: 'container_base', source_ref: `${osVer} — OS layer (Trivy, digest-pinned${pinNote})`, file_path: img.file,
         name: `${artifact} · OS layer`, version: (osVer.match(/\(([^)]+)\)/) || [,'os'])[1], ecosystem: 'os_pkg',
         purl: `pkg:oci/${artifact}`, license: 'Various (base image)',
         has_vulnerabilities: advs.length > 0, vuln_count: advs.length, max_severity: sev,
@@ -227,7 +240,7 @@ for (const img of IMAGES) {
         rows.push({
           id: mkId('container_base', `${artifact}:${pkg}`, ver),
           source: 'container_base',
-          source_ref: `${artifact} — ${img.toolingLabel}`, file_path: img.file,
+          source_ref: `${artifact}${pinNote} — ${img.toolingLabel}`, file_path: img.file,
           name: pkg, version: ver, ecosystem: r.Type || 'bundled',
           purl: `pkg:${r.Type || 'generic'}/${pkg}@${ver}`, license: 'Various (base image)',
           has_vulnerabilities: true, vuln_count: advs.length, max_severity: sev,
