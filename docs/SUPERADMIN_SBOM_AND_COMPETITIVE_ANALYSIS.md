@@ -243,6 +243,8 @@ The following matrix compares the four platforms across 18 critical architectura
 | **17. Professional Services Dependency** | ✅ **Zero Dependency** (100% self-service, instant onboarding, auto-generated scripts) | ❌ Extremely heavy (Mandatory consulting hours included in contract) | ❌ Extremely heavy (Requires dedicated IBM Consulting team) | ⚠️ Moderate-to-heavy (Network engineering consulting required) |
 | **18. Total Cost of Ownership (TCO)** | 💰 **Low / High ROI** (Accessible SaaS/MSP pricing, transparent tiers) | 💸 **Extremely High** (\$250,000 to \$1M+ per year) | 💸 **Extremely High** (Enterprise ELA + consulting fees) | 💸 **High** (\$100,000+ per year based on network throughput) |
 
+> **See also — incumbent security stack:** The matrix above compares the **PQC-native** field. For *"don't we already have this with Qualys / Tenable / ArcSight / Splunk / Venafi / Keyfactor?"*, see the companion [Incumbent Security Stack Comparison](COMPETITIVE_INCUMBENT_STACK_COMPARISON.md) (and the side-by-side Excel in [competitive/](competitive/)).
+
 ---
 
 ## 5. Strategic Battlecard: Executive Objection Handling
