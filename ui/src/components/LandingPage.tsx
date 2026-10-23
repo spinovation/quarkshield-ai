@@ -178,7 +178,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
     return (raw || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
   };
 
-  const runProbe = (rawHost: string) => {
+  // Runs a REAL TLS 1.3 socket probe of the host via POST /api/probe (SSRF-guarded,
+  // public-endpoints only, rate-limited). The server uses the native Go PQC scanner
+  // (FIPS 203 ML-KEM detection) with a Node tls.connect fallback, then returns the
+  // negotiated protocol/cipher/key-exchange and certificate chain. We render the
+  // real result in the terminal — no canned data.
+  const runProbe = async (rawHost: string) => {
     if (probing) return;
     const host = cleanHost(rawHost);
     if (!host || host.indexOf('.') === -1) {
@@ -194,43 +199,66 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
     setProbeHostInput(host);
     setProbeVerdict(null);
 
-    const d = PROBE_PRESETS[host] || {
-      pqc: false,
-      kx: 'ECDHE X25519',
-      tls: 'TLS 1.3',
-      cipher: 'TLS_AES_128_GCM_SHA256',
-      cert: 'RSA-2048'
+    const push = (item: { cls: string; text: string }) => {
+      setProbeLogs(prev => [...prev, item]);
+      if (termBodyRef.current) termBodyRef.current.scrollTop = termBodyRef.current.scrollHeight;
     };
 
-    const tlsOld = d.tls === 'TLS 1.2';
-    const seq = [
-      { t: 0,    item: { cls: 'muted', text: `$ quarkshield probe --host ${host} --tls1.3 --pq` } },
-      { t: 320,  item: { cls: 'muted', text: `→ resolving ${host} … 104.18.x.x` } },
-      { t: 680,  item: { cls: 'muted', text: '→ TCP 443 connected · TLS handshake' } },
-      { t: 1040, item: { cls: 'cyan',  text: '→ ClientHello  key_share = [X25519MLKEM768, X25519, secp256r1]' } },
-      { t: 1480, item: { cls: tlsOld ? 'amber' : 'muted', text: `← ServerHello  ${d.tls}${tlsOld ? '  ⚠ no TLS 1.3' : ''} · ${d.cipher}` } },
-      { t: 1860, item: { cls: d.pqc ? 'green' : 'red',   text: `← key_exchange  ${d.kx}${d.pqc ? '  ✓ quantum-safe' : '  ✕ classical'}` } },
-      { t: 2180, item: { cls: 'muted', text: `← certificate   ${d.cert}${d.cert.indexOf('RSA') === 0 ? '  ⚠ Shor-vulnerable signature' : ''}` } },
-      { t: 2460, item: { cls: 'muted', text: `→ analysis complete (${d.pqc ? '0' : (tlsOld ? '3' : '2')} findings)` } }
+    setProbeLogs([{ cls: 'muted', text: `$ quarkshield probe --host ${host} --tls1.3 --pq` }]);
+    // Progressive "working" lines while the real handshake runs server-side.
+    const pending = [
+      window.setTimeout(() => push({ cls: 'muted', text: `→ resolving ${host} …` }), 300),
+      window.setTimeout(() => push({ cls: 'muted', text: '→ TCP 443 connected · negotiating TLS handshake' }), 750),
+      window.setTimeout(() => push({ cls: 'cyan', text: '→ ClientHello  key_share = [X25519MLKEM768, X25519, secp256r1]' }), 1200)
     ];
+    const clearPending = () => pending.forEach(id => window.clearTimeout(id));
 
-    setProbeLogs([]);
-    seq.forEach((step) => {
-      setTimeout(() => {
-        setProbeLogs(prev => [...prev, step.item]);
-        if (termBodyRef.current) {
-          termBodyRef.current.scrollTop = termBodyRef.current.scrollHeight;
-        }
-      }, step.t);
-    });
+    try {
+      const res = await fetch('/api/probe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ target: host }),
+        credentials: 'include'
+      });
+      const data = await res.json().catch(() => ({} as any));
+      clearPending();
 
-    setTimeout(() => {
-      setProbeVerdict({ pqc: d.pqc, kx: d.kx, cert: d.cert, tls: d.tls });
-      setProbing(false);
-      if (termBodyRef.current) {
-        termBodyRef.current.scrollTop = termBodyRef.current.scrollHeight;
+      if (!res.ok || !data.success) {
+        push({ cls: 'muted', text: `→ resolving ${host} …` });
+        push({ cls: 'red', text: `! ${data.error || `probe failed (HTTP ${res.status})`}` });
+        setProbeVerdict(null);
+        setProbing(false);
+        return;
       }
-    }, 2900);
+
+      const protocol = String(data.protocol || 'TLS').replace('TLSv', 'TLS ');
+      const isTls13 = protocol.indexOf('1.3') !== -1;
+      const isPQ = /secure/i.test(String(data.quantumStatus || ''));
+      const kex = String(data.standard || data.cipher || 'ECDHE');
+      const c0 = Array.isArray(data.certChain) && data.certChain[0] ? data.certChain[0] : null;
+      // A ≤571-bit key is an elliptic curve (P-256/384/521), not RSA; both RSA and
+      // ECDSA are Shor-vulnerable — only ML-DSA/SLH-DSA signatures are quantum-safe.
+      const certBits = c0 ? (c0.bits || 2048) : 2048;
+      const cert = c0
+        ? (c0.asn1Curve ? `ECDSA ${c0.asn1Curve}` : (certBits <= 571 ? `ECDSA P-${certBits}` : `RSA-${certBits}`))
+        : 'RSA-2048';
+      const certQuantumSafe = /ml-dsa|dilithium|falcon|slh-dsa|sphincs/i.test(cert);
+
+      push({ cls: isTls13 ? 'muted' : 'amber', text: `← ServerHello  ${protocol}${isTls13 ? '' : '  ⚠ no TLS 1.3'} · ${data.cipher || ''}` });
+      push({ cls: isPQ ? 'green' : 'red', text: `← key_exchange  ${kex}${isPQ ? '  ✓ quantum-safe' : '  ✕ classical'}` });
+      if (c0) {
+        push({ cls: 'muted', text: `← certificate   ${cert}${certQuantumSafe ? '' : '  ⚠ Shor-vulnerable signature'}` });
+      }
+      push({ cls: 'muted', text: `→ analysis complete · ${data.quantumStatus || (isPQ ? 'Post-Quantum Secure' : 'Quantum Vulnerable')}` });
+
+      setProbeVerdict({ pqc: isPQ, kx: kex, cert, tls: protocol });
+      setProbing(false);
+    } catch (e: any) {
+      clearPending();
+      push({ cls: 'red', text: `! probe error: ${e?.message || 'network error — please try again'}` });
+      setProbeVerdict(null);
+      setProbing(false);
+    }
   };
 
   // ---------------------------------------------------------
@@ -1010,7 +1038,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
 
               <div className="probe-mini-note">
-                ◆ Sample output · the QuarkShield scanner runs a real TLS 1.3 socket probe of your endpoints
+                ◆ Live TLS 1.3 socket probe · runs a real handshake against your endpoint (public internet hosts only)
               </div>
             </div>
 
