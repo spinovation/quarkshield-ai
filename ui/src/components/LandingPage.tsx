@@ -1010,7 +1010,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               </div>
 
               <div className="probe-mini-note">
-                ◆ Simulated handshake in this prototype · the live site performs a real TLS 1.3 socket probe
+                ◆ Sample output · the QuarkShield scanner runs a real TLS 1.3 socket probe of your endpoints
               </div>
             </div>
 
@@ -2002,7 +2002,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <a href="#" onClick={(e) => { e.preventDefault(); setLegalDoc('terms'); }}>Terms of Service</a>
               <a href="#" onClick={(e) => { e.preventDefault(); setLegalDoc('disclosure'); }}>Responsible Disclosure</a>
             </div>
-            <span className="proto-note">◆ Clickable prototype — probes &amp; forms are simulated</span>
           </div>
         </div>
       </footer>
@@ -2409,7 +2408,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                   <p>Depending on your jurisdiction you may request access, correction, export or deletion of your personal data. Contact <b>privacy@quarkshield.ai</b>.</p>
                   <h4>7. Contact</h4>
                   <p>QuarkShield (a FedMitigate product) — <b>privacy@quarkshield.ai</b></p>
-                  <div className="disclaimer">◆ Prototype draft for review — not yet legal advice. Have counsel review before publishing to quarkshield.ai.</div>
+                  <div className="disclaimer">◆ Provided for general information and does not constitute legal advice.</div>
                 </>
               )}
 
@@ -2440,7 +2439,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                   <p>These Terms are governed by the laws of the State of Delaware, USA, unless a signed enterprise agreement states otherwise.</p>
                   <h4>10. Contact</h4>
                   <p><b>legal@quarkshield.ai</b></p>
-                  <div className="disclaimer">◆ Prototype draft for review — not yet legal advice. Have counsel review before publishing to quarkshield.ai.</div>
+                  <div className="disclaimer">◆ Provided for general information and does not constitute legal advice.</div>
                 </>
               )}
 
@@ -2471,7 +2470,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                   </ul>
                   <h4>Recognition</h4>
                   <p>With your permission we credit valid reports in our security acknowledgements. Contact: <b>security@quarkshield.ai</b></p>
-                  <div className="disclaimer">◆ Prototype draft for review — not yet legal advice. Have counsel review before publishing to quarkshield.ai.</div>
+                  <div className="disclaimer">◆ Provided for general information and does not constitute legal advice.</div>
                 </>
               )}
             </div>
