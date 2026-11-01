@@ -3392,6 +3392,21 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           </div>
         ) : (
           <>
+            {/* Pull-telemetry status toast (top-level — renders on every tab) */}
+            {pullToast && (
+              <div style={{
+                position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)',
+                maxWidth: '640px', width: 'calc(100% - 2rem)', zIndex: 100000,
+                background: '#0a1120', border: '1px solid rgba(0, 242, 254, 0.35)', borderRadius: '10px',
+                padding: '0.85rem 1.15rem', color: '#e2e8f0', fontSize: '0.85rem', lineHeight: 1.45,
+                boxShadow: '0 12px 40px rgba(0,0,0,0.6), 0 0 24px rgba(0,242,254,0.12)',
+                display: 'flex', alignItems: 'center', gap: '0.6rem'
+              }}>
+                {pullingMachineId && <RefreshCw size={14} className="animate-spin" color="#38bdf8" />}
+                <span>{pullToast}</span>
+              </div>
+            )}
+
             {/* OVERVIEW TAB */}
             {activeTab === 'overview' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -7306,21 +7321,6 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           </div>
         )}
 
-
-            {/* Pull-telemetry status toast */}
-            {pullToast && (
-              <div style={{
-                position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)',
-                maxWidth: '640px', width: 'calc(100% - 2rem)', zIndex: 100000,
-                background: '#0a1120', border: '1px solid rgba(0, 242, 254, 0.35)', borderRadius: '10px',
-                padding: '0.85rem 1.15rem', color: '#e2e8f0', fontSize: '0.85rem', lineHeight: 1.45,
-                boxShadow: '0 12px 40px rgba(0,0,0,0.6), 0 0 24px rgba(0,242,254,0.12)',
-                display: 'flex', alignItems: 'center', gap: '0.6rem'
-              }}>
-                {pullingMachineId && <RefreshCw size={14} className="animate-spin" color="#38bdf8" />}
-                <span>{pullToast}</span>
-              </div>
-            )}
 
             {/* Fleet Enrollment Token Generator Modal */}
             {showEnrollModal && (
