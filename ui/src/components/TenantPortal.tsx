@@ -740,6 +740,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   // Daily Historical Snapshots & On-Demand Pull State
   const [dailySnapshots, setDailySnapshots] = useState<DailySnapshot[]>([]);
   const [pullingMachineId, setPullingMachineId] = useState<string | null>(null);
+  const [pullToast, setPullToast] = useState<string | null>(null);
   const [scheduleModalOpen, setScheduleModalOpen] = useState<boolean>(false);
   const [syncSchedulePolicy, setSyncSchedulePolicy] = useState<{
     frequency: 'daily' | 'hourly' | 'weekly';
@@ -1111,6 +1112,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   };
 
   const handlePullWorkstation = async (machineId: string, hostname: string) => {
+    if (pullingMachineId) return;
+    // Baseline the endpoint's last check-in so we can detect when the agent actually
+    // reports back. The pull only QUEUES a command; the agent syncs ~1-2 min later,
+    // so we must poll and refresh — otherwise the console shows stale data and it
+    // looks like the pull did nothing (it didn't: it just hadn't landed yet).
+    const baselineLastSeen = machines.find(mm => mm.id === machineId)?.lastSeen || '';
+    const baselineMs = baselineLastSeen ? new Date(baselineLastSeen).getTime() : 0;
     setPullingMachineId(machineId);
     try {
       const res = await fetch(`/api/fleet/machines/${machineId}/pull`, {
@@ -1118,15 +1126,43 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ priority: 'high' })
       });
-      if (res.ok) {
-        alert(`Telemetry pull queued for ${hostname}. The agent picks up on-demand requests while the QuarkShield app is running (within ~2 min); if the app is closed it will sync at its next scheduled run. Status updates once the endpoint reports back.`);
-        fetchTenantData();
-      } else {
-        alert(`Failed to dispatch pull request to ${hostname}.`);
+      if (!res.ok) {
+        setPullToast(`❌ Failed to dispatch pull request to ${hostname}.`);
+        setTimeout(() => setPullToast(null), 4000);
+        return;
+      }
+      setPullToast(`⏳ Pull queued for ${hostname} — waiting for the endpoint to report back…`);
+
+      // Poll portal-data until this machine's lastSeen advances (agent synced), or time out.
+      const startedAt = Date.now();
+      const MAX_MS = 190000;   // ~3 min (daemon on-demand pickup is ~2 min)
+      const INTERVAL_MS = 15000;
+      let landed = false;
+      while (!landed && Date.now() - startedAt < MAX_MS) {
+        await new Promise(r => setTimeout(r, INTERVAL_MS));
+        try {
+          const pr = await fetch(`/api/tenant/${cleanSlug}/portal-data`);
+          if (!pr.ok) continue;
+          const data = await pr.json();
+          if (data.machines) setMachines(data.machines);
+          if (data.assets) setAssets(data.assets);
+          if (data.stats) setStats(data.stats);
+          const tgt: FleetMachine | undefined = (data.machines || []).find((mm: FleetMachine) => mm.id === machineId);
+          if (tgt?.lastSeen && new Date(tgt.lastSeen).getTime() > baselineMs) {
+            landed = true;
+            setPullToast(`✓ ${hostname} synced · ${tgt.assetCount} assets (${tgt.vulnerableCount} vulnerable) · ${new Date(tgt.lastSeen).toLocaleTimeString()}`);
+            setTimeout(() => setPullToast(null), 6000);
+          }
+        } catch { /* transient — keep polling */ }
+      }
+      if (!landed) {
+        setPullToast(`${hostname}: no sync yet. The agent reports within ~2 min while the QuarkShield app is running; if it's closed it will sync at its next scheduled daemon run.`);
+        setTimeout(() => setPullToast(null), 8000);
       }
     } catch (e) {
       console.error('Error dispatching pull:', e);
-      alert(`Pull error: ${e}`);
+      setPullToast(`Pull error: ${e}`);
+      setTimeout(() => setPullToast(null), 5000);
     } finally {
       setPullingMachineId(null);
     }
@@ -7270,6 +7306,21 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           </div>
         )}
 
+
+            {/* Pull-telemetry status toast */}
+            {pullToast && (
+              <div style={{
+                position: 'fixed', bottom: '1.5rem', left: '50%', transform: 'translateX(-50%)',
+                maxWidth: '640px', width: 'calc(100% - 2rem)', zIndex: 100000,
+                background: '#0a1120', border: '1px solid rgba(0, 242, 254, 0.35)', borderRadius: '10px',
+                padding: '0.85rem 1.15rem', color: '#e2e8f0', fontSize: '0.85rem', lineHeight: 1.45,
+                boxShadow: '0 12px 40px rgba(0,0,0,0.6), 0 0 24px rgba(0,242,254,0.12)',
+                display: 'flex', alignItems: 'center', gap: '0.6rem'
+              }}>
+                {pullingMachineId && <RefreshCw size={14} className="animate-spin" color="#38bdf8" />}
+                <span>{pullToast}</span>
+              </div>
+            )}
 
             {/* Fleet Enrollment Token Generator Modal */}
             {showEnrollModal && (
