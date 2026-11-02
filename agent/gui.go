@@ -1078,10 +1078,12 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 					continue
 				}
 
-				findings, _, errScan := RunScan(true, "")
-				if errScan == nil && len(findings) > 0 {
-					_ = SendFleetTelemetry(cfg.ServerURL, cfg.Token, hostname, osName, archName, localIP, findings, lic.LicenseKey, lic.TenantName)
-				}
+				// DEF-55: reproduce this host's REAL inventory (same scope as the operator's
+				// last local scan), not a shallow quick scan — re-pushing cached findings
+				// first for instant console feedback, then a fresh same-scope rescan. Fixes
+				// "admin can't pull what the agent shows" for custom/full-scanned hosts, and
+				// applies equally to the scheduled daily sync.
+				runOnDemandPull(cfg.ServerURL, cfg.Token, hostname, localIP)
 			}
 		}
 	}()

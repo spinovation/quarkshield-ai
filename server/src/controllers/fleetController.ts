@@ -1269,6 +1269,20 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       console.warn('Could not record daily snapshot:', snapErr);
     }
 
+    // DEF-55: this telemetry push satisfies any outstanding on-demand pull for this
+    // machine. Flip its dispatched scan_and_sync commands to 'completed' so the queue
+    // reflects reality (instead of an unbounded 'dispatched' backlog) and the console can
+    // report the pull as done. Only 'dispatched' (already delivered to the agent) is
+    // completed — a still-'pending' command the agent hasn't fetched yet is left alone.
+    try {
+      await pool.query(
+        "UPDATE fleet_commands SET status = 'completed', completed_at = NOW() WHERE machine_id = $1 AND command = 'scan_and_sync' AND status = 'dispatched'",
+        [machineId]
+      );
+    } catch (cmdErr) {
+      console.warn('Could not close out pull commands:', cmdErr);
+    }
+
     // Tenant resolved from the fleet token, for the Threat & Risk Graph rebuild hook.
     res.locals.tenant = assignedTenant;
     res.status(201).json({

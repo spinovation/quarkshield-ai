@@ -471,18 +471,13 @@ func main() {
 		fmt.Println("🛡️  QuarkShield agent started in persistent daemon mode (command polling + scheduled sync).")
 
 		runSync := func(reason string) {
-			fmt.Printf("📡 %s — scanning and syncing...\n", reason)
-			findings, _, scanErr := headlessScan(true, "", *sbomFlag)
-			if scanErr != nil {
-				fmt.Printf("❌ Scan failed: %v\n", scanErr)
-				return
-			}
-			lic := GetLicenseInfo()
-			if err := SendFleetTelemetry(server, token, hn, runtime.GOOS, runtime.GOARCH, "", findings, lic.LicenseKey, lic.TenantName); err != nil {
-				fmt.Printf("❌ Telemetry failed: %v\n", err)
-				return
-			}
-			fmt.Printf("✅ Synced %d assets.\n", len(findings))
+			// DEF-55: reproduce the host's REAL inventory (the operator's last scan scope),
+			// not a hardcoded quick scan — re-push cached findings first for instant console
+			// feedback, then a fresh same-scope rescan. Fixes console pulls under-reporting a
+			// custom/full-scanned host; also covers the scheduled daily sync.
+			fmt.Printf("📡 %s — reproducing last scan scope and syncing...\n", reason)
+			n := runOnDemandPull(server, token, hn, "")
+			fmt.Printf("✅ Synced %d assets.\n", n)
 		}
 
 		// runProbe handles an on-demand `probe` command: it runs the TLS prober
