@@ -22,6 +22,11 @@ CREATE TABLE IF NOT EXISTS fleet_machines (
   quantum_risk_score INTEGER DEFAULT 0,
   asset_count INTEGER DEFAULT 0,
   vulnerable_count INTEGER DEFAULT 0,
+  -- DEF-48: reconcile the agent's raw artifact count with the console's de-noised
+  -- inventory. raw_asset_count = total artifacts the agent sent (pre trust-store
+  -- collapse); deduped_cert_count = public-CA trust-store certs folded into trust anchors.
+  raw_asset_count INTEGER,
+  deduped_cert_count INTEGER,
   last_seen TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );

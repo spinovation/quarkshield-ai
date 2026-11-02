@@ -172,6 +172,8 @@ interface FleetMachine {
   quantumRiskScore: number;
   assetCount: number;
   vulnerableCount: number;
+  rawAssetCount?: number | null;      // DEF-48: total raw artifacts the agent sent (pre de-dup)
+  dedupedCertCount?: number | null;   // DEF-48: public-CA trust-store certs folded into trust anchors
   lastSeen: string;
   lastSync?: string;
   createdAt: string;
@@ -3877,6 +3879,17 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem', color: '#ffffff', fontWeight: 600 }}>
                                 {m.assetCount} assets ({m.vulnerableCount} vulnerable)
+                                {(m.dedupedCertCount ?? 0) > 0 && (
+                                  <div
+                                    style={{ fontSize: '0.68rem', fontWeight: 500, color: '#94a3b8', marginTop: '0.25rem', lineHeight: 1.35 }}
+                                    title={`The agent reported ${(m.rawAssetCount ?? (m.assetCount + (m.dedupedCertCount || 0))).toLocaleString()} raw artifacts. ${Number(m.dedupedCertCount).toLocaleString()} of them are public CA certificates from OS / app trust stores (ca-bundle, ca-certificates, cacert.pem …). These are public trust anchors — not this tenant's keys and not migratable to PQC by you — so the console de-duplicates them into trust-anchor rows to keep the count meaningful.`}
+                                  >
+                                    ↳ {Number(m.dedupedCertCount).toLocaleString()} public-CA trust-store certs de-duplicated
+                                    {typeof m.rawAssetCount === 'number' && m.rawAssetCount > 0 && (
+                                      <span style={{ color: '#64748b' }}> · agent raw: {m.rawAssetCount.toLocaleString()}</span>
+                                    )}
+                                  </div>
+                                )}
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem' }}>
                                 <span style={{

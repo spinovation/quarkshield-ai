@@ -923,6 +923,13 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       });
     }
 
+    // Reconciliation counters (DEF-48): the console shows the de-noised inventory, but
+    // the agent shows every raw artifact. Capture the pre-collapse total and how many
+    // public-CA trust-store certs we fold away, so the UI can bridge the two numbers
+    // ("2,896 assets · 2,353 public CA certs de-duplicated") instead of looking lossy.
+    const rawAssetCount = processedAssets.length;
+    let dedupedCertCount = 0;
+
     // ---- Scanner-accuracy: collapse the OS / public CA trust-store explosion ----
     // The agent enumerates every certificate inside the OS CA trust bundles
     // (ca-bundle.crt, ca-certificates.crt, *-ca-bundle.pem ...) and every individual
@@ -953,6 +960,7 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       }
       for (const [k, members] of groups) {
         if (members.length < COLLAPSE_MIN) { kept.push(...members); continue; }
+        dedupedCertCount += members.length;
         const rep = members[0];
         const algos = Array.from(new Set(members.map(m => m.algorithm).filter(Boolean)));
         const algoList = algos.join(' / ') || 'RSA/ECC';
@@ -992,8 +1000,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       INSERT INTO fleet_machines (
         id, token_id, hostname, computer_name, hardware_uuid, os, arch, ip, agent_version, status,
         risk_level, quantum_risk_score, asset_count, vulnerable_count, last_seen, last_sync,
-        tenant_name, license_key
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'online', $10, $11, $12, $13, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $14, $15)
+        tenant_name, license_key, raw_asset_count, deduped_cert_count
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'online', $10, $11, $12, $13, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, $14, $15, $16, $17)
       ON CONFLICT (id) DO UPDATE SET
         token_id = EXCLUDED.token_id,
         hostname = EXCLUDED.hostname,
@@ -1008,6 +1016,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         quantum_risk_score = EXCLUDED.quantum_risk_score,
         asset_count = EXCLUDED.asset_count,
         vulnerable_count = EXCLUDED.vulnerable_count,
+        raw_asset_count = EXCLUDED.raw_asset_count,
+        deduped_cert_count = EXCLUDED.deduped_cert_count,
         last_seen = CURRENT_TIMESTAMP,
         last_sync = CURRENT_TIMESTAMP,
         tenant_name = COALESCE(NULLIF(EXCLUDED.tenant_name, ''), fleet_machines.tenant_name, $14),
@@ -1029,7 +1039,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       processedAssets.length,
       vulnerableCount,
       assignedTenant,
-      assignedLicense
+      assignedLicense,
+      rawAssetCount,
+      dedupedCertCount
     ]);
 
     if (tokenRow.id) {

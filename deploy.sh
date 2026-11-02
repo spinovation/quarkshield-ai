@@ -92,6 +92,17 @@ if [ -f scripts/platform-sbom.generated.sql ]; then
   fi
 fi
 
+# Step 4.5: DEF-48 — add + backfill the asset-reconciliation columns so the console can
+# bridge the agent's raw artifact count with its de-noised (trust-store-collapsed) count.
+if [ -f scripts/fleet-dedup-columns.sql ]; then
+  echo "🔢 Step 4.5: Reconciling fleet asset counts (raw vs de-duplicated)..."
+  if docker exec -i pqc-scanner-db psql -U postgres -d quarkshield_scanner < scripts/fleet-dedup-columns.sql >/dev/null 2>&1; then
+    echo "   ✓ Asset-reconciliation columns ready."
+  else
+    echo "   ⚠️  Could not apply asset-reconciliation migration (continuing)."
+  fi
+fi
+
 if [ "$HEALTHY" = true ]; then
   echo "======================================================================"
   echo "✅ Deployment Successful!"

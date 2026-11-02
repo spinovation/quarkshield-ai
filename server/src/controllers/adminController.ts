@@ -3415,6 +3415,8 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         m.quantum_risk_score as "quantumRiskScore",
         m.asset_count as "assetCount",
         m.vulnerable_count as "vulnerableCount",
+        m.raw_asset_count as "rawAssetCount",
+        m.deduped_cert_count as "dedupedCertCount",
         m.last_seen as "lastSeen",
         m.last_sync as "lastSync",
         m.created_at as "createdAt",
