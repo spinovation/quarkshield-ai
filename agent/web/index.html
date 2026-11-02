@@ -1372,6 +1372,7 @@
 
   <script>
     let currentFindings = [];
+    let lastDedupInfo = { dedupedCertCount: 0, rawCount: 0, consoleTotal: 0 };
     let hostInfo = {};
     let currentLicenseInfo = {};
 
@@ -2025,12 +2026,71 @@
       document.getElementById('btn-cancel-scan').disabled = true;
     }
 
+    // DEF-48 (agent side): mirror the console's OS / public-CA trust-store collapse so the
+    // headline posture numbers the agent shows equal the de-noised inventory the console
+    // stores after a sync. Must stay byte-for-byte aligned with the server logic in
+    // server/src/controllers/fleetController.ts ("collapse the OS / public CA trust-store
+    // explosion"): any group of >=5 public-CA certs from one trust SOURCE folds to a single
+    // informational trust-anchor row. We DO NOT mutate currentFindings — that stays the raw
+    // scan (the table detail + the /api/sync payload the server itself re-collapses), so the
+    // console's own raw-vs-deduped reconciliation keeps working. This is numbers-only.
+    function collapseTrustStore(rawFindings) {
+      const COLLAPSE_MIN = 5; // only collapse real explosions, never a one-off private CA
+      const bundleKey = (a) => {
+        if (!/cert/i.test(String(a.type || ''))) return null;
+        const n = String(a.name || ''); const p = String(a.path || '');
+        if (/(ca-bundle|ca-certificates|tls-ca-bundle|objsign-ca-bundle|email-ca-bundle|-ca-bundle\.pem|\bcacert)/i.test(`${n} ${p}`)) {
+          return 'file:' + (p || n).toLowerCase();        // collapse per bundle FILE
+        }
+        if (/^Linux Trust Store:/i.test(n) || /(\/etc\/ssl\/certs|\/etc\/pki\/|\/usr\/share\/ca-certificates)/i.test(p)) {
+          return 'os-public-trust-roots';                 // collapse all individual public roots
+        }
+        return null;
+      };
+      const groups = new Map();
+      const kept = [];
+      (rawFindings || []).forEach(a => {
+        const k = bundleKey(a);
+        if (k) { if (!groups.has(k)) groups.set(k, []); groups.get(k).push(a); }
+        else kept.push(a);
+      });
+      let dedupedCertCount = 0;
+      groups.forEach((members, k) => {
+        if (members.length < COLLAPSE_MIN) { kept.push.apply(kept, members); return; }
+        dedupedCertCount += members.length;
+        const rep = members[0];
+        const algos = Array.from(new Set(members.map(m => m.algorithm).filter(Boolean)));
+        const algoList = algos.join(' / ') || 'RSA/ECC';
+        const isFile = k.indexOf('file:') === 0;
+        kept.push(Object.assign({}, rep, {
+          name: isFile ? rep.name : 'OS Public CA Trust Store (roots)',
+          algorithm: algoList,
+          isVulnerable: false,
+          riskLevel: 'informational',
+          quantumThreat: '',
+          status: 'Trust Anchor (OS / public CA store)',
+          description: (isFile ? ('OS CA trust bundle "' + rep.name + '"') : 'System public CA trust store') + ' — ' + members.length + ' public CA certificate' + (members.length === 1 ? '' : 's') + ' (trust anchors, not tenant-owned keys). Algorithms: ' + algoList + '.',
+          recommendation: 'Public trust anchors are managed via OS / trust-store updates, not PQC key migration.'
+        }));
+      });
+      return { findings: kept, dedupedCertCount: dedupedCertCount, rawCount: (rawFindings || []).length };
+    }
+
     // 3. Render Results with Post-Quantum Threat & Configuration Assessment
     function renderScanResults(data, mode) {
       const findings = data.findings || [];
       currentFindings = findings;
-      const vulnerableCount = findings.filter(f => f.isVulnerable).length;
-      const secureCount = findings.filter(f => !f.isVulnerable && f.type !== 'config').length;
+      // De-noised (console-equivalent) view for the headline numbers + category cards.
+      const _collapse = collapseTrustStore(findings);
+      const collapsedForCounts = _collapse.findings;
+      const dedupedCertCount = _collapse.dedupedCertCount;
+      const rawScannedCount = _collapse.rawCount;
+      const consoleAssetTotal = collapsedForCounts.length;
+      // Remember the dedup split so the raw detail table can explain why its row count
+      // ("of 5,233") is larger than the de-noised "Total Assets" card.
+      lastDedupInfo = { dedupedCertCount: dedupedCertCount, rawCount: rawScannedCount, consoleTotal: consoleAssetTotal };
+      const vulnerableCount = collapsedForCounts.filter(f => f.isVulnerable).length;
+      const secureCount = collapsedForCounts.filter(f => !f.isVulnerable && f.type !== 'config').length;
 
       // Calculate Breakdown across Shor's, Config Violations, HNDL, Grover's, and Software BOM
       let shorCount = 0;
@@ -2045,7 +2105,7 @@
       let pqcAgileCount = 0;
       let remediationCount = 0;
 
-      findings.forEach(f => {
+      collapsedForCounts.forEach(f => {
         const threat = (f.quantumThreat || '').toLowerCase();
         const algo = (f.algorithm || '').toLowerCase();
         const desc = (f.description || '').toLowerCase();
@@ -2144,7 +2204,9 @@
         pulse.className = 'shield-pulse vulnerable';
         icon.setAttribute('stroke', 'var(--accent-red)');
         heading.textContent = `${vulnerableCount} Quantum Vulnerabilities Detected`;
-        desc.textContent = `Audit completed. ${findings.length} total cryptographic artifacts identified.`;
+        desc.textContent = dedupedCertCount > 0
+          ? `Audit completed. ${consoleAssetTotal.toLocaleString()} cryptographic assets after de-duplicating ${dedupedCertCount.toLocaleString()} public-CA trust-store certs (${rawScannedCount.toLocaleString()} raw artifacts scanned).`
+          : `Audit completed. ${findings.length} total cryptographic artifacts identified.`;
 
         // Banner
         const banner = document.getElementById('threat-banner');
@@ -2238,9 +2300,17 @@
         const elI1 = document.getElementById('m-icon-total');
         if (elI1) elI1.textContent = '📁';
         const elV1 = document.getElementById('m-total-assets');
-        if (elV1) elV1.textContent = findings.length;
+        // Show the de-noised (console-equivalent) total so the agent matches the fleet console.
+        if (elV1) elV1.textContent = consoleAssetTotal.toLocaleString();
         const elS1 = document.getElementById('m-sub-total');
-        if (elS1) elS1.textContent = 'Discovered across target dirs';
+        if (elS1) {
+          elS1.textContent = dedupedCertCount > 0
+            ? `${rawScannedCount.toLocaleString()} raw · ${dedupedCertCount.toLocaleString()} public-CA certs de-duplicated`
+            : 'Discovered across target dirs';
+          elS1.title = dedupedCertCount > 0
+            ? `The scanner enumerated ${rawScannedCount.toLocaleString()} raw artifacts. ${dedupedCertCount.toLocaleString()} of them are public CA certificates from OS / app trust stores (ca-bundle, ca-certificates, cacert.pem …). These are public trust anchors — not this machine's own keys and not migratable to PQC by you — so they are folded into trust-anchor rows. The ${consoleAssetTotal.toLocaleString()} shown here is the de-noised inventory, which matches what the fleet console stores after sync.`
+            : '';
+        }
 
         const elL2 = document.getElementById('m-label-shor');
         if (elL2) { elL2.textContent = "Shor's Risk"; elL2.style.color = '#f87171'; }
@@ -2504,7 +2574,10 @@
 
       document.getElementById('pagination-info').textContent = isSbomView
         ? `Showing ${start + 1}-${end} of ${total} software components`
-        : `Showing ${start + 1}-${end} of ${total} cryptographic assets`;
+        : `Showing ${start + 1}-${end} of ${total} cryptographic assets` +
+          ((!isSbomView && lastDedupInfo.dedupedCertCount > 0)
+            ? ` (full raw scan — ${lastDedupInfo.dedupedCertCount.toLocaleString()} public-CA certs here fold into trust-anchor rows in the console)`
+            : '');
       document.getElementById('page-indicator').textContent = `${currentPage} / ${totalPages}`;
       document.getElementById('btn-prev-page').disabled = currentPage <= 1;
       document.getElementById('btn-next-page').disabled = currentPage >= totalPages;

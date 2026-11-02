@@ -18,6 +18,19 @@ echo "======================================================================"
 echo " 🛡️ Building QuarkShield Windows Agent with Azure Trusted Signing"
 echo "======================================================================"
 
+# 0. Regenerate the Windows resource (.syso) so the exe embeds the CURRENT app_icon.ico.
+#    The .syso files are gitignored and NOT committed, and `go build` links whatever
+#    .syso happen to be on disk — so without this step a Windows build would ship a stale
+#    (or default Go) icon. goversioninfo rebuilds all four arch resources from versioninfo.json
+#    (IconPath: app_icon.ico). Skip gracefully if the tool isn't installed.
+if command -v goversioninfo >/dev/null 2>&1; then
+  echo "🎨 [0/4] Embedding app icon into Windows resources (goversioninfo)..."
+  goversioninfo -platform-specific -icon=app_icon.ico versioninfo.json
+else
+  echo "   ⚠️ goversioninfo not found — Windows exe may keep a stale/default icon."
+  echo "      Install it:  go install github.com/josephspurrier/goversioninfo/cmd/goversioninfo@latest"
+fi
+
 # 1. Compile Windows amd64 binary with embedded syso resources
 echo "⚙️ [1/4] Compiling quarkshield-scanner-windows-amd64.exe..."
 GOOS=windows GOARCH=amd64 go build -ldflags="$GO_LDFLAGS" -o quarkshield-scanner-windows-amd64.exe .
