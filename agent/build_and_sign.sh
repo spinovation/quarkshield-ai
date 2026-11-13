@@ -76,15 +76,15 @@ if [ "$SIGNED" = false ]; then
   fi
 fi
 
-# 3. Package clean zip archive for distribution (including 1-click publisher trust scripts)
+# 3. Package clean zip archive for distribution.
+#    NOTE: the FedMitigate self-signed root CA + Trust-FedMitigate.* scripts are
+#    deliberately NOT bundled anymore — the exe is now signed by Azure Trusted
+#    Signing (publicly trusted Microsoft chain), so asking users to install a
+#    private root CA is obsolete and a trust red flag. Do not re-add them.
 echo "📦 [3/4] Creating distribution ZIP..."
 rm -f quarkshield-scanner-windows.zip
 zip -9 quarkshield-scanner-windows.zip \
   quarkshield-scanner-windows-amd64.exe \
-  Trust-FedMitigate.bat \
-  Trust-FedMitigate.ps1 \
-  FedMitigate-Root-CA.cer \
-  FedMitigate-LLC-CodeSigning.cer \
   app_icon.ico \
   uninstall.bat \
   README.txt
@@ -94,10 +94,6 @@ echo "🔄 [4/4] Syncing to binaries and UI downloads..."
 mkdir -p binaries
 cp -f quarkshield-scanner-windows-amd64.exe binaries/
 cp -f quarkshield-scanner-windows.zip binaries/
-cp -f Trust-FedMitigate.bat binaries/
-cp -f Trust-FedMitigate.ps1 binaries/
-cp -f FedMitigate-Root-CA.cer binaries/
-cp -f FedMitigate-LLC-CodeSigning.cer binaries/
 
 # Also support legacy pqc-scanner name aliases
 cp -f quarkshield-scanner-windows-amd64.exe binaries/pqc-scanner-windows-amd64.exe
@@ -109,10 +105,6 @@ for DL_DIR in "../ui/public/downloads" "../ui/dist/downloads" "../public/downloa
     cp -f quarkshield-scanner-windows.zip "$DL_DIR/"
     cp -f quarkshield-scanner-windows-amd64.exe "$DL_DIR/pqc-scanner-windows-amd64.exe"
     cp -f quarkshield-scanner-windows.zip "$DL_DIR/pqc-scanner-windows.zip"
-    cp -f Trust-FedMitigate.bat "$DL_DIR/"
-    cp -f Trust-FedMitigate.ps1 "$DL_DIR/"
-    cp -f FedMitigate-Root-CA.cer "$DL_DIR/"
-    cp -f FedMitigate-LLC-CodeSigning.cer "$DL_DIR/"
   fi
 done
 

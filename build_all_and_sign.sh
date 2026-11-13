@@ -76,12 +76,10 @@ fi
 # Package Windows ZIP with 1-click publisher trust scripts
 echo "📦 Packaging quarkshield-scanner-windows.zip..."
 rm -f quarkshield-scanner-windows.zip
+# NOTE: FedMitigate self-signed CA + Trust-FedMitigate.* deliberately NOT bundled —
+# the exe is Azure Trusted Signing (publicly trusted); a private root CA is obsolete.
 zip -9 quarkshield-scanner-windows.zip \
   quarkshield-scanner-windows-amd64.exe \
-  Trust-FedMitigate.bat \
-  Trust-FedMitigate.ps1 \
-  FedMitigate-Root-CA.cer \
-  FedMitigate-LLC-CodeSigning.cer \
   app_icon.ico \
   uninstall.bat \
   README.txt
@@ -204,9 +202,8 @@ mkdir -p "$ZIP_STAGE"
 cp -R "$APP_STAGE/QuarkShield.app" "$ZIP_STAGE/"
 cp Start-QuarkShield.command "$ZIP_STAGE/"
 cp Trust-QuarkShield.command "$ZIP_STAGE/"
-cp Trust-FedMitigate.command "$ZIP_STAGE/" 2>/dev/null || true
 cp README-macOS.txt "$ZIP_STAGE/README.txt"
-(cd "$ZIP_STAGE" && zip -9 -r "$AGENT_DIR/quarkshield-scanner-macos.zip" QuarkShield.app Start-QuarkShield.command Trust-QuarkShield.command Trust-FedMitigate.command README.txt)
+(cd "$ZIP_STAGE" && zip -9 -r "$AGENT_DIR/quarkshield-scanner-macos.zip" QuarkShield.app Start-QuarkShield.command Trust-QuarkShield.command README.txt)
 rm -rf "$ZIP_STAGE"
 
 # Package macOS DMG Disk Image
@@ -218,7 +215,6 @@ cp -R "$APP_STAGE/QuarkShield.app" "$STAGE_DIR/"
 ln -s /Applications "$STAGE_DIR/Applications"
 cp Start-QuarkShield.command "$STAGE_DIR/"
 cp Trust-QuarkShield.command "$STAGE_DIR/"
-cp Trust-FedMitigate.command "$STAGE_DIR/" 2>/dev/null || true
 cp README-macOS.txt "$STAGE_DIR/README.txt"
 hdiutil create -volname "QuarkShield Guard" -srcfolder "$STAGE_DIR" -ov -format UDZO QuarkShield-macOS.dmg
 rm -rf "$STAGE_DIR" "$APP_STAGE"
@@ -269,10 +265,6 @@ cp -f Trust-QuarkShield.command binaries/
 cp -f quarkshield-scanner-windows-amd64.exe binaries/
 cp -f quarkshield-scanner-windows.zip binaries/
 [ -f QuarkShield-Setup.exe ] && cp -f QuarkShield-Setup.exe binaries/
-cp -f Trust-FedMitigate.bat binaries/
-cp -f Trust-FedMitigate.ps1 binaries/
-cp -f FedMitigate-Root-CA.cer binaries/
-cp -f FedMitigate-LLC-CodeSigning.cer binaries/
 cp -f quarkshield-scanner-linux-amd64 binaries/
 cp -f quarkshield-scanner-linux-arm64 binaries/
 cp -f quarkshield-scanner-linux.tar.gz binaries/
@@ -306,10 +298,6 @@ for DL_DIR in "$SCRIPT_DIR/ui/public/downloads" "$SCRIPT_DIR/ui/dist/downloads" 
     cp -f quarkshield-scanner-windows-amd64.exe "$DL_DIR/"
     cp -f quarkshield-scanner-windows.zip "$DL_DIR/"
     [ -f QuarkShield-Setup.exe ] && cp -f QuarkShield-Setup.exe "$DL_DIR/"
-    cp -f Trust-FedMitigate.bat "$DL_DIR/"
-    cp -f Trust-FedMitigate.ps1 "$DL_DIR/"
-    cp -f FedMitigate-Root-CA.cer "$DL_DIR/"
-    cp -f FedMitigate-LLC-CodeSigning.cer "$DL_DIR/"
     cp -f quarkshield-scanner-linux-amd64 "$DL_DIR/"
     cp -f quarkshield-scanner-linux-arm64 "$DL_DIR/"
     cp -f quarkshield-scanner-linux.tar.gz "$DL_DIR/"

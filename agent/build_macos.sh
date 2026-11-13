@@ -88,9 +88,8 @@ mkdir -p "$ZIP_STAGE"
 cp -R "$APP_STAGE/QuarkShield.app" "$ZIP_STAGE/"
 cp Start-QuarkShield.command "$ZIP_STAGE/"
 cp Trust-QuarkShield.command "$ZIP_STAGE/" 2>/dev/null || true
-cp Trust-FedMitigate.command "$ZIP_STAGE/" 2>/dev/null || true
 cp README-macOS.txt "$ZIP_STAGE/README.txt"
-(cd "$ZIP_STAGE" && zip -9 -r "$SCRIPT_DIR/quarkshield-scanner-macos.zip" QuarkShield.app Start-QuarkShield.command Trust-QuarkShield.command Trust-FedMitigate.command README.txt)
+(cd "$ZIP_STAGE" && zip -9 -r "$SCRIPT_DIR/quarkshield-scanner-macos.zip" QuarkShield.app Start-QuarkShield.command Trust-QuarkShield.command README.txt)
 rm -rf "$ZIP_STAGE"
 
 # 5. Create DMG disk image
@@ -102,7 +101,6 @@ cp -R "$APP_STAGE/QuarkShield.app" "$STAGE_DIR/"
 ln -s /Applications "$STAGE_DIR/Applications"
 cp Start-QuarkShield.command "$STAGE_DIR/"
 cp Trust-QuarkShield.command "$STAGE_DIR/" 2>/dev/null || true
-cp Trust-FedMitigate.command "$STAGE_DIR/" 2>/dev/null || true
 cp README-macOS.txt "$STAGE_DIR/README.txt"
 
 hdiutil create -volname "QuarkShield Guard" -srcfolder "$STAGE_DIR" -ov -format UDZO QuarkShield-macOS.dmg || echo "⚠️ DMG creation deferred (sandboxed environment). Universal .app and .zip ready."
@@ -123,7 +121,6 @@ cp -f quarkshield-scanner-darwin-universal binaries/
 cp -f quarkshield-scanner-macos.zip binaries/
 [ -f QuarkShield-macOS.dmg ] && cp -f QuarkShield-macOS.dmg binaries/ || true
 cp -f Trust-QuarkShield.command binaries/ 2>/dev/null || true
-cp -f Trust-FedMitigate.command binaries/ 2>/dev/null || true
 
 # Aliases for backwards compatibility
 cp -f quarkshield-scanner-darwin-arm64 binaries/pqc-scanner-darwin-arm64
@@ -138,7 +135,6 @@ for DL_DIR in "../ui/public/downloads" "../ui/dist/downloads"; do
     cp -f quarkshield-scanner-macos.zip "$DL_DIR/"
     [ -f QuarkShield-macOS.dmg ] && cp -f QuarkShield-macOS.dmg "$DL_DIR/" || true
     cp -f Trust-QuarkShield.command "$DL_DIR/" 2>/dev/null || true
-    cp -f Trust-FedMitigate.command "$DL_DIR/" 2>/dev/null || true
     cp -f quarkshield-scanner-darwin-arm64 "$DL_DIR/pqc-scanner-darwin-arm64"
     cp -f quarkshield-scanner-darwin-amd64 "$DL_DIR/pqc-scanner-darwin-amd64"
     cp -f quarkshield-scanner-macos.zip "$DL_DIR/pqc-scanner-macos.zip"
