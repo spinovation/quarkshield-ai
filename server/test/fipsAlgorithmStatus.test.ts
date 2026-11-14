@@ -218,17 +218,4 @@ test('deck facts: HNDL only for key establishment; no invented Mosca numbers; 0 
   assert.match(empty.baseline, /No cryptographic assets are in scope/);
 });
 
-// ---- Advisor chat inventory scope (routed: POST /api/ai/chat) ----------------
-
-import { chatInventoryScope } from '../src/controllers/aiController';
-
-test('chat scope: a non-super session with no tenant gets NO inventory (not the fleet)', () => {
-  assert.deepEqual(chatInventoryScope(req({ role: 'admin', tenant: '' })), { allowed: false, tenant: null });
-  assert.deepEqual(chatInventoryScope(req({ role: 'admin' })), { allowed: false, tenant: null });
-  assert.deepEqual(chatInventoryScope(req({ role: 'admin', tenant: 'acme' }, { tenant: 'othercorp' })), { allowed: true, tenant: 'acme' });
-});
-
-test('chat scope: super sessions keep ?tenant targeting and fleet view', () => {
-  assert.deepEqual(chatInventoryScope(req({ role: 'superadmin' }, { tenant: 'acme' })), { allowed: true, tenant: 'acme' });
-  assert.deepEqual(chatInventoryScope(req({ role: 'superadmin', tenant: '' }, { tenant: 'all' })), { allowed: true, tenant: null });
-});
+// (Advisor chat scope tests live in test/tenantAccess.test.ts.)

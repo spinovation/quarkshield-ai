@@ -56,3 +56,20 @@ test('QSG service-token identity (tenant bound from the token record) still pass
   const r = run({ role: 'service', accountType: 'service', tenant: 'acme' }, { query: { tenant: 'acme' } });
   assert.equal(r.nextCalled, true);
 });
+
+// ---- Advisor chat inventory scope (POST /api/ai/chat) -------------------------
+
+import { chatInventoryScope } from '../src/controllers/aiController';
+
+const chatReq = (user: any, query: any = {}) => ({ user, query, body: {} } as any);
+
+test('chat scope: a non-super session with no tenant gets NO inventory (not the fleet)', () => {
+  assert.deepEqual(chatInventoryScope(chatReq({ role: 'user', tenant: '' })), { allowed: false, tenant: null });
+  assert.deepEqual(chatInventoryScope(chatReq({ role: 'user' })), { allowed: false, tenant: null });
+  assert.deepEqual(chatInventoryScope(chatReq({ role: 'admin', tenant: 'acme' }, { tenant: 'othercorp' })), { allowed: true, tenant: 'acme' });
+});
+
+test('chat scope: super sessions keep ?tenant targeting and fleet view', () => {
+  assert.deepEqual(chatInventoryScope(chatReq({ role: 'superadmin' }, { tenant: 'acme' })), { allowed: true, tenant: 'acme' });
+  assert.deepEqual(chatInventoryScope(chatReq({ role: 'superadmin', tenant: '' }, { tenant: 'all' })), { allowed: true, tenant: null });
+});
