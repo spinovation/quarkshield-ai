@@ -16,6 +16,7 @@ const isValidEmail = (v: unknown): v is string =>
 /** Strip CR/LF so a subject can never inject additional mail headers. */
 const safeHeader = (v: unknown): string => String(v ?? '').replace(/[\r\n]+/g, ' ').slice(0, 500);
 import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
+import { fipsAlgorithmStatus } from '../lib/fipsAlgorithmStatus';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
 /**
@@ -3439,7 +3440,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         a.id, a.type, a.name, a.path, a.algorithm, a.key_size as "keySize", a.hash_algorithm as "hashAlgorithm",
         a.is_vulnerable as "isVulnerable", a.risk_level as "riskLevel", a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations as "complianceViolations", a.created_at as "createdAt",
-        a.machine_id as "machineId", a.source, a.source_ref as "sourceRef",
+        a.machine_id as "machineId", a.source, a.source_ref as "sourceRef", a.purpose,
         COALESCE(m.hostname, a.source_ref, 'Remote Repository') as hostname,
         COALESCE(m.computer_name, a.source_ref, 'Remote Asset') as "computerName",
         COALESCE(m.os, 'cloud') as os,
@@ -3457,7 +3458,13 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       ORDER BY a.is_vulnerable DESC, a.created_at DESC;
     `, [tenantNameSearch]);
 
-    const assets = assetsQuery.rows;
+    // FIPS algorithm-approval status (CMVP/FIPS Stage 1, axis A1). Computed with the one
+    // resolver rather than read from assets.fips_status so legacy rows (NULL until re-scanned)
+    // show the correct status immediately. Algorithm approval only — not CMVP validation.
+    const assets = assetsQuery.rows.map((a: any) => {
+      const f = fipsAlgorithmStatus({ algorithm: a.algorithm, key_size: a.keySize, hash_algorithm: a.hashAlgorithm, purpose: a.purpose, type: a.type });
+      return { ...a, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft };
+    });
 
     // 4. Fetch Licenses strictly for this tenant (returning status so revoked keys are clearly identified)
     const licensesQuery = await pool.query(`

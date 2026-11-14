@@ -9,6 +9,7 @@ import { assertPublicHost } from '../utils/ssrf';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { resolveWriteTenant } from '../middleware/auth';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
+import { fipsColumns } from '../lib/fipsAlgorithmStatus';
 
 export interface GitFinding {
   id: string;
@@ -794,8 +795,9 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
           id, machine_id, type, name, algorithm, key_size, hash_algorithm,
           is_vulnerable, risk_level, status, description,
           recommendation, explainer, compliance_violations, path,
-          tenant_name, source, source_ref, purpose, created_at
-        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW())
+          tenant_name, source, source_ref, purpose,
+          fips_status, fips_standard, fips_transition_date, created_at
+        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, NOW())
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           algorithm = EXCLUDED.algorithm,
@@ -812,7 +814,10 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
           tenant_name = EXCLUDED.tenant_name,
           source = EXCLUDED.source,
           source_ref = EXCLUDED.source_ref,
-          purpose = EXCLUDED.purpose;
+          purpose = EXCLUDED.purpose,
+          fips_status = EXCLUDED.fips_status,
+          fips_standard = EXCLUDED.fips_standard,
+          fips_transition_date = EXCLUDED.fips_transition_date;
       `;
 
       for (let idx = 0; idx < findings.length; idx++) {
@@ -820,6 +825,13 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
         const uniqueKey = `${cleanTenant}-${summary.repoName}-${f.filePath}-${f.assetName}-${f.algorithm}-${idx}`;
         const assetId = 'asset-git-' + crypto.createHash('sha256').update(uniqueKey).digest('hex').substring(0, 24);
 
+        const findingPurpose = classifyPurpose({
+          type: f.category || 'source_code',
+          name: f.assetName || summary.repoName,
+          algorithm: f.algorithm || '',
+          key_size: f.keySize || null,
+          description: f.quantumThreat || null,
+        });
         await client.query(insertAssetQuery, [
           assetId,
           f.category || 'source_code',
@@ -838,13 +850,8 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
           cleanTenant,
           'git_repo',
           summary.repoUrl,
-          classifyPurpose({
-            type: f.category || 'source_code',
-            name: f.assetName || summary.repoName,
-            algorithm: f.algorithm || '',
-            key_size: f.keySize || null,
-            description: f.quantumThreat || null,
-          }),
+          findingPurpose,
+          ...fipsColumns({ algorithm: f.algorithm || '', key_size: f.keySize || null, purpose: findingPurpose, type: f.category || 'source_code' }),
         ]);
       }
       await client.query('COMMIT');

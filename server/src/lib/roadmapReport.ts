@@ -1,6 +1,7 @@
 import pool from '../config/db';
 import { assessSizeImpact, SizeImpact } from './threatGraph/sizeImpact';
 import { CryptoPurpose } from './threatGraph/types';
+import { fipsAlgorithmStatus, FipsStatus, FIPS_TABLE_VERSION } from './fipsAlgorithmStatus';
 
 /**
  * PQC Executive Roadmap Report engine.
@@ -30,6 +31,25 @@ export interface Priority {
   purpose?: string;         // dominant CryptoPurpose for this algorithm group (CBOM purpose, P1)
   purposeLabel?: string;    // human label for the dominant purpose
   sizeImpact?: SizeImpact;  // "what breaks" size analysis for migrating this exposure (P2)
+  fipsStatus?: FipsStatus;  // FIPS algorithm-approval status of the group's weakest instance (A1)
+}
+
+/**
+ * FIPS ALGORITHM compliance posture (CMVP & FIPS mapping, Stage 1 / axis A1). Algorithm
+ * approval only — CMVP module validation (axis A2) is not assessed yet, which is why
+ * approved algorithms are counted as "module validation not determined", never "compliant".
+ */
+export interface FipsCompliance {
+  tableVersion: string;          // FIPS_TABLE_VERSION provenance
+  assessed: number;              // algorithm instances (excludes package/module rows)
+  moduleRows: number;            // package/SBOM rows — axis A2, not assessed here
+  byStatus: Record<FipsStatus, number>;
+  disallowedNow: number;         // disallowed + non-FIPS — non-compliant regardless of CRQC timing
+  approvedModuleUndetermined: number; // approved/PQC/acceptable algorithms whose CMVP module is not yet determined
+  topDisallowed: { algorithm: string; count: number; standard: string; rationale: string }[];
+  sunsetting: { algorithm: string; count: number; disallowedAfter: string; standard: string; draft: boolean }[];
+  headline: string;
+  note: string;                  // honesty statement rendered with the section
 }
 
 /** Threat urgency a cryptographic PURPOSE implies (decouples HNDL from forgery). */
@@ -109,6 +129,7 @@ export interface RoadmapReport {
   roadmap: RoadmapPhase[];
   purposeBreakdown: PurposeBreakdown[];  // vulnerable assets grouped by crypto purpose (P1)
   migrationFriction: MigrationFriction;  // PQC size-impact ("what breaks") summary (P2)
+  fipsCompliance: FipsCompliance;        // FIPS algorithm-approval posture (CMVP/FIPS Stage 1)
   perTenant: TenantBreakdown[];   // populated for collective
   summary: string;                // narrative (AI or templated)
 }
@@ -160,6 +181,68 @@ const REMEDIATION_BY_FAMILY: Record<string, Remediation> = {
   SHA1: { finding: 'SHA-1 hashing', replacement: 'SHA-256 / SHA-3', standard: 'NIST FIPS 180-4 / 202', effort: 'Low', how: 'Eliminate SHA-1 from certificates and signing; move to SHA-256/384.' },
 };
 
+/** One aggregated inventory group fed to the FIPS summarizer. */
+export interface FipsGroupRow {
+  algorithm: string; key_size: number | null; hash_algorithm: string | null;
+  purpose: string | null; type: string | null; count: number;
+}
+
+/**
+ * Pure, DB-free FIPS algorithm-compliance rollup. Recomputes status from the row's
+ * algorithm/key_size/hash/purpose with the ONE resolver (fipsAlgorithmStatus.ts) rather
+ * than reading the persisted fips_status column — so legacy rows that pre-date the column
+ * (NULL until re-scanned) are assessed correctly the moment this ships.
+ */
+export const summarizeFipsCompliance = (rows: FipsGroupRow[]): FipsCompliance => {
+  const byStatus: Record<FipsStatus, number> = {
+    pq_approved: 0, approved: 0, acceptable: 0, restricted: 0, disallowed: 0, non_fips: 0, not_applicable: 0, unknown: 0,
+  };
+  const disallowed = new Map<string, { algorithm: string; count: number; standard: string; rationale: string }>();
+  const sunset = new Map<string, { algorithm: string; count: number; disallowedAfter: string; standard: string; draft: boolean }>();
+
+  for (const row of rows) {
+    const n = Number(row.count) || 0;
+    const res = fipsAlgorithmStatus({
+      algorithm: row.algorithm, key_size: row.key_size, hash_algorithm: row.hash_algorithm,
+      purpose: row.purpose, type: row.type,
+    });
+    byStatus[res.status] += n;
+    const label = row.key_size && /RSA|DH|DSA/i.test(row.algorithm) && !/\d{3,}/.test(row.algorithm)
+      ? `${row.algorithm}-${row.key_size}` : row.algorithm;
+    if (res.status === 'disallowed' || res.status === 'non_fips') {
+      const d = disallowed.get(label) || { algorithm: label, count: 0, standard: res.standard, rationale: res.rationale };
+      d.count += n; disallowed.set(label, d);
+    } else if (res.status === 'acceptable' && res.disallowedAfter) {
+      const k = `${label}|${res.disallowedAfter}`;
+      const s = sunset.get(k) || { algorithm: label, count: 0, disallowedAfter: res.disallowedAfter, standard: res.standard, draft: res.draft };
+      s.count += n; sunset.set(k, s);
+    }
+  }
+
+  const moduleRows = byStatus.not_applicable;
+  const assessed = Object.values(byStatus).reduce((a, b) => a + b, 0) - moduleRows;
+  const disallowedNow = byStatus.disallowed + byStatus.non_fips;
+  const approvedModuleUndetermined = byStatus.approved + byStatus.pq_approved + byStatus.acceptable;
+  const topDisallowed = Array.from(disallowed.values()).sort((a, b) => b.count - a.count).slice(0, 6);
+  const sunsetting = Array.from(sunset.values())
+    .sort((a, b) => a.disallowedAfter.localeCompare(b.disallowedAfter) || b.count - a.count).slice(0, 8);
+
+  const nextSunset = sunsetting[0];
+  const headline = assessed === 0
+    ? 'No algorithm instances to assess for FIPS approval.'
+    : `${disallowedNow} of ${assessed} algorithm instance(s) are not FIPS-compliant today (disallowed or non-FIPS)` +
+      (byStatus.acceptable ? `; ${byStatus.acceptable} are approved but on a published sunset${nextSunset ? ` (earliest: ${nextSunset.algorithm} after ${nextSunset.disallowedAfter}${nextSunset.draft ? ', draft' : ''})` : ''}` : '') +
+      (byStatus.unknown ? `; ${byStatus.unknown} not determined (missing key size or unrecognized)` : '') + '.';
+
+  return {
+    tableVersion: FIPS_TABLE_VERSION, assessed, moduleRows, byStatus, disallowedNow,
+    approvedModuleUndetermined, topDisallowed, sunsetting, headline,
+    note: `FIPS ALGORITHM approval only (SP 800-131A Rev. 2, FIPS 186-5, FIPS 203/204/205, SP 800-52 Rev. 2; table ${FIPS_TABLE_VERSION}). ` +
+      `It does NOT establish that any algorithm runs in a CMVP-validated module: the ${approvedModuleUndetermined} approved instance(s) have CMVP module validation NOT YET DETERMINED. ` +
+      'Dates marked "draft" come from NIST IR 8547 (initial public draft) and may change.',
+  };
+};
+
 const severityRank = (s: string): number => SEVERITY_WEIGHT[(s || 'high').toLowerCase()] ?? 3;
 const worstSeverity = (a: string, b: string): string => (severityRank(a) >= severityRank(b) ? a : b);
 
@@ -188,6 +271,8 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
             COUNT(*)::int AS count,
             MODE() WITHIN GROUP (ORDER BY COALESCE(source,'endpoint')) AS dominant_source,
             MODE() WITHIN GROUP (ORDER BY COALESCE(NULLIF(purpose,''),'unknown')) AS dominant_purpose,
+            MIN(key_size) AS min_key_size,
+            MODE() WITHIN GROUP (ORDER BY hash_algorithm) AS dominant_hash,
             (ARRAY_AGG(DISTINCT COALESCE(risk_level,'high')))::text[] AS risks
      FROM assets ${where}${where ? ' AND' : 'WHERE'} is_vulnerable
      GROUP BY algorithm ORDER BY count DESC LIMIT 40`, params);
@@ -197,6 +282,15 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     `SELECT COALESCE(NULLIF(purpose,''),'unknown') AS purpose, COUNT(*)::int AS count
      FROM assets ${where}${where ? ' AND' : 'WHERE'} is_vulnerable
      GROUP BY 1`, params);
+
+  // FIPS algorithm compliance (CMVP/FIPS Stage 1) — ALL assets, not just quantum-vulnerable:
+  // an AES-128 or SHA-1 instance can be non-compliant without being Shor-breakable.
+  const fipsQ = await pool.query(
+    `SELECT COALESCE(algorithm,'') AS algorithm, key_size, hash_algorithm,
+            NULLIF(purpose,'') AS purpose, type, COUNT(*)::int AS count
+     FROM assets ${where}
+     GROUP BY 1, 2, 3, 4, 5 ORDER BY count DESC LIMIT 5000`, params);
+  const fipsCompliance = summarizeFipsCompliance(fipsQ.rows as FipsGroupRow[]);
 
   // Remediation families present (vulnerable).
   const t = totalsQ.rows[0] || {};
@@ -218,14 +312,28 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     // HNDL purposes (key establishment / RSA key transport) are harvestable TODAY,
     // so they outrank an equally-breakable signing key of the same algorithm.
     const hndlMult = purposeMeta(purpose).urgency === 'immediate_hndl' ? 1.15 : 1.0;
-    const score = Math.round(r.count * severityRank(sev) * exposureW * shorMult * hndlMult);
-    return { algorithm: r.algorithm, fam, count: r.count, sev, src, score, shorBreakable, purpose };
+    // Compliance-now: an algorithm already disallowed / non-FIPS is non-compliant TODAY,
+    // independent of CRQC timing, so it outranks an equal quantum-only exposure. Judged on
+    // the group's weakest instance (smallest key) — deterministic, from the one resolver.
+    const fips = fipsAlgorithmStatus({ algorithm: r.algorithm, key_size: r.min_key_size, hash_algorithm: r.dominant_hash, purpose });
+    const fipsMult = fips.status === 'disallowed' || fips.status === 'non_fips' ? 1.3 : 1.0;
+    const score = Math.round(r.count * severityRank(sev) * exposureW * shorMult * hndlMult * fipsMult);
+    return { algorithm: r.algorithm, fam, count: r.count, sev, src, score, shorBreakable, purpose, fips, minKeySize: r.min_key_size as number | null };
   }).filter(x => x.fam !== 'PQC' && x.fam !== 'AES'); // exclude already-safe primitives
 
   scored.sort((a, b) => b.score - a.score);
   const priorities: Priority[] = scored.slice(0, 8).map((x, i) => {
     const meta = purposeMeta(x.purpose);
     const purposeNote = x.purpose && x.purpose !== 'unknown' ? ` Purpose: ${meta.label.toLowerCase()} (${meta.urgencyLabel}).` : '';
+    // The group is judged on its WEAKEST instance, so for multi-asset groups say exactly that
+    // rather than implying every asset in the group is non-compliant.
+    const weakest = x.count > 1
+      ? `the weakest instance${x.minKeySize && !/\d{3,}/.test(x.algorithm) ? ` (${x.algorithm}-${x.minKeySize})` : ''} is `
+      : '';
+    const fipsNote = x.fips.status === 'disallowed' || x.fips.status === 'non_fips'
+      ? ` FIPS: ${weakest}${x.fips.status === 'disallowed' ? 'disallowed' : 'not FIPS-approved'} under ${x.fips.standard} — non-compliant today.`
+      : x.fips.status === 'acceptable' && x.fips.disallowedAfter
+        ? ` FIPS: ${weakest ? `${weakest}approved` : 'approved'} until ${x.fips.disallowedAfter}${x.fips.draft ? ' (NIST IR 8547 draft)' : ''}.` : '';
     return {
       rank: i + 1,
       title: x.algorithm,
@@ -234,8 +342,9 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
       severity: (['critical', 'high', 'medium', 'low'].includes(x.sev.toLowerCase()) ? x.sev.toLowerCase() : 'high') as Priority['severity'],
       exposure: SOURCE_LABEL[x.src] || 'assets',
       score: x.score,
-      rationale: `${x.count} ${x.algorithm} asset${x.count === 1 ? '' : 's'} on ${SOURCE_LABEL[x.src] || 'assets'}${x.shorBreakable ? ', breakable by Shor’s algorithm on a CRQC (Harvest-Now-Decrypt-Later risk today)' : ''}.${purposeNote}`,
+      rationale: `${x.count} ${x.algorithm} asset${x.count === 1 ? '' : 's'} on ${SOURCE_LABEL[x.src] || 'assets'}${x.shorBreakable ? ', breakable by Shor’s algorithm on a CRQC (Harvest-Now-Decrypt-Later risk today)' : ''}.${purposeNote}${fipsNote}`,
       purpose: x.purpose,
+      fipsStatus: x.fips.status,
       purposeLabel: meta.label,
       // Per-exposure "what breaks" size analysis (deterministic; no topology needed).
       sizeImpact: assessSizeImpact({ algorithm: x.algorithm, purpose: (x.purpose || 'unknown') as CryptoPurpose }),
@@ -295,9 +404,15 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
   const frictionClause = vulnPct > 0 && firmwareOrRootAssets
     ? ` Migration time (Y) is longer than it looks: ${firmwareOrRootAssets} code-signing / root-of-trust key(s) may need firmware or hardware changes to fit larger PQC signatures, not just a config switch.`
     : '';
+  // Compliance-now overlay: algorithms already disallowed need action regardless of CRQC timing.
+  const complianceClause = fipsCompliance.disallowedNow
+    ? ` Independently of the quantum timeline, ${fipsCompliance.disallowedNow} algorithm instance(s) are already disallowed or non-FIPS under current NIST guidance — these are non-compliant today.`
+    : '';
   const mosca = vulnPct > 0
-    ? { verdict: 'ACTION REQUIRED', detail: `With ${vulnPct}% of assets quantum-vulnerable and multi-year migration timelines, data harvested today is at risk before migration completes (X + Y > Z). Begin Phase 2 now.${frictionClause}` }
-    : { verdict: 'ON TRACK', detail: 'No quantum-vulnerable assets detected in the current inventory. Maintain continuous CBOM attestation.' };
+    ? { verdict: 'ACTION REQUIRED', detail: `With ${vulnPct}% of assets quantum-vulnerable and multi-year migration timelines, data harvested today is at risk before migration completes (X + Y > Z). Begin Phase 2 now.${frictionClause}${complianceClause}` }
+    : fipsCompliance.disallowedNow
+      ? { verdict: 'ACTION REQUIRED', detail: `No quantum-vulnerable assets detected, but${complianceClause.replace(' Independently of the quantum timeline,', '')}` }
+      : { verdict: 'ON TRACK', detail: 'No quantum-vulnerable assets detected in the current inventory. Maintain continuous CBOM attestation.' };
 
   // ---- Per-tenant breakdown (collective) ----
   let perTenant: TenantBreakdown[] = [];
@@ -334,6 +449,7 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     roadmap,
     purposeBreakdown,
     migrationFriction,
+    fipsCompliance,
     perTenant,
     summary: '', // filled by generateNarrative()
   };
@@ -348,7 +464,10 @@ export const generateNarrative = async (r: RoadmapReport, tenant?: string): Prom
   const hndl = r.purposeBreakdown.filter(p => p.urgency === 'immediate_hndl').reduce((n, p) => n + p.count, 0);
   const sig = r.purposeBreakdown.filter(p => p.urgency === 'forgery_planned').reduce((n, p) => n + p.count, 0);
   const purposeFact = r.purposeBreakdown.length ? ` By purpose: ${hndl} key-establishment (immediate HNDL), ${sig} signature/trust (planned forgery risk).` : '';
-  const facts = `Scope: ${r.scopeLabel}. Assets: ${r.totals.assets}. Quantum-vulnerable: ${r.totals.vulnerable} (${r.totals.vulnPct}%). Endpoints: ${r.totals.machines}. Avg risk: ${r.totals.avgRisk}/100. Top priorities: ${r.priorities.slice(0, 3).map(p => p.title).join(', ') || 'none'}. Mosca verdict: ${r.mosca.verdict}.${purposeFact}`;
+  const fipsFact = r.fipsCompliance?.assessed
+    ? ` FIPS algorithm approval: ${r.fipsCompliance.disallowedNow} of ${r.fipsCompliance.assessed} instances disallowed or non-FIPS today (CMVP module validation not yet assessed).`
+    : '';
+  const facts = `Scope: ${r.scopeLabel}. Assets: ${r.totals.assets}. Quantum-vulnerable: ${r.totals.vulnerable} (${r.totals.vulnPct}%). Endpoints: ${r.totals.machines}. Avg risk: ${r.totals.avgRisk}/100. Top priorities: ${r.priorities.slice(0, 3).map(p => p.title).join(', ') || 'none'}. Mosca verdict: ${r.mosca.verdict}.${purposeFact}${fipsFact}`;
   const template =
     `${r.scopeLabel} has ${r.totals.assets} catalogued cryptographic assets, of which ${r.totals.vulnerable} (${r.totals.vulnPct}%) are quantum-vulnerable classical primitives exposed to Harvest-Now-Decrypt-Later attacks. ` +
     `The highest-priority exposures are ${r.priorities.slice(0, 3).map(p => p.title).join(', ') || 'being assessed'}. ` +

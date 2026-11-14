@@ -1,6 +1,6 @@
 # 🔏 QuarkShield — CMVP & FIPS Compliance Mapping
 **Feature Design & Scoping Specification**
-**Status: 🟡 ROADMAP / OPPORTUNITY — not shipped. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today."**
+**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) built on branch, not deployed; Stages 2–6 not built. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a).**
 **Owner: Platform / Scanner Engineering · Drafted: 2026-11-13 · NIST refs: FIPS 140-2 / 140-3 (CMVP), SP 800-131A Rev. 2, FIPS 203 (ML-KEM) / 204 (ML-DSA) / 205 (SLH-DSA), SP 800-140-series, NSA CNSA 2.0**
 
 ---
@@ -35,7 +35,7 @@ This also complements — does not replace — the functional-triage work in [`P
 
 ### 1.1 The honest gaps
 
-1. **No structured FIPS-approval status.** `compliance_violations` is a free-text `TEXT[]`. There is no column that says, per asset, *approved / deprecated / restricted / disallowed / legacy-use-only* against **SP 800-131A Rev. 2**, and no **sunset/transition date** (e.g. "RSA-2048 signature generation disallowed after 2030-12-31"). Reporting cannot aggregate it, and the roadmap cannot order by *regulatory deadline* — only by quantum risk.
+1. **No structured FIPS-approval status.** `compliance_violations` is a free-text `TEXT[]`. There is no column that says, per asset, *approved / deprecated / restricted / disallowed / legacy-use-only* against **SP 800-131A Rev. 2**, and no **sunset/transition date** (e.g. "RSA-2048 deprecated after 2030, disallowed after 2035 — NIST IR 8547 draft"). Reporting cannot aggregate it, and the roadmap cannot order by *regulatory deadline* — only by quantum risk.
 2. **No approved-vs-validated distinction.** Nothing in the schema expresses the central two-axis fact: an *approved algorithm* may or may not be running in a *validated module*. The `CMVP_CERT_CAPTURE_DESIGN.md` fields capture the module side; there is no field pairing it with the algorithm-approval side into a single compliance verdict.
 3. **No reference data for either axis.** There is no bundled SP 800-131A transition table and no bundled CMVP validated-modules map in the repo today. Both must be vendored, versioned, and refreshed (§5).
 4. **`nistQuantumSecurityLevel` is misleadingly derived.** `cyclonedx.ts:61` sets it to `0`/`3` purely from `isVulnerable` — an auditor reading the CBOM may over- or under-read it. It should reflect the FIPS parameter set, or be omitted where unknown.
@@ -68,7 +68,7 @@ The product of the two axes is a single, honest **compliance verdict** (§4.2) t
 
 > *"Approved algorithm (ML-KEM-768, FIPS 203), performed by CMVP cert #4986 (Active, FIPS 140-3) — fully compliant."*
 > *"Approved algorithm (AES-256), but no validated module confirmed on this host — approved-but-unvalidated."*
-> *"RSA-2048 signature generation — disallowed after 2030-12-31 under SP 800-131A Rev. 2 — remediate."*
+> *"RSA-1024 — disallowed under SP 800-131A Rev. 2 — non-compliant today. RSA-2048 — approved until 2035-12-31 (NIST IR 8547 draft)."*
 
 Both axes **reuse the existing `assets` row and the deterministic roadmap engine**; no parallel store.
 
@@ -126,6 +126,7 @@ A pure resolver `fipsAlgorithmStatus({algorithm, keySize, purpose, hashAlgorithm
 | `restricted` | Legacy/verification-only or constrained use | SHA-1 (verification of legacy signatures only); 3DES (decrypt-only legacy) |
 | `disallowed` | Not approved for the detected use | RSA < 2048; SHA-1 for signature *generation*; MD5; DES; 1024-bit DH |
 | `non_fips` | Not a FIPS-approved algorithm at all | non-NIST curves, proprietary ciphers |
+| `not_applicable` | Not an algorithm instance: a package/module row, assessed by CMVP (A2) instead | SBOM `openssl` package row |
 | `unknown` | Cannot classify (unparsed/ambiguous) | renders as "not determined," never pass/fail |
 
 `transition_date` makes the roadmap orderable by **regulatory deadline**, not only quantum risk — the dimension §6.1 adds to the Mosca verdict.
@@ -155,29 +156,23 @@ The three verdicts federal reviewers care about most and that no "list of algori
 
 Two vendored, versioned tables ship with the product. **Neither is queried at scan time** (air-gapped fleets must work — same constraint as `CMVP_CERT_CAPTURE_DESIGN.md`). Both are refreshed by an offline job and committed as data.
 
-### 5.1 SP 800-131A transition table (`server/src/data/fips_algorithm_status.json`)
+### 5.1 FIPS algorithm table — ✅ built as `server/src/lib/fipsAlgorithmStatus.ts`
 
-Hand-curated from SP 800-131A Rev. 2 and the FIPS 203/204/205 final standards — small, slow-moving, high-trust. Matched by algorithm family + key-size range + use (signature-gen vs verify vs key-transport, keyed off `CryptoPurpose`).
+Hand-curated, small, slow-moving, high-trust. **Implemented as a versioned TS constant, not a JSON file**: the server `tsconfig.json` has no `resolveJsonModule`, so `tsc` would not emit a `.json` table into `dist/` (same convention as the size table in `threatGraph/sizeImpact.ts`). `FIPS_TABLE_VERSION` is bumped on every change and stamped on every report. Rules match algorithm family + key size/curve + use (signature vs non-signature, keyed off `CryptoPurpose`). Every result carries a `ruleId` (evidence trail) and a `draft` flag.
 
-```jsonc
-{
-  "source": "NIST SP 800-131A Rev. 2; FIPS 203/204/205",
-  "version": "2026-11-13",
-  "rules": [
-    { "match": {"family": "RSA", "use": "signature_generation", "minBits": 2048, "maxBits": 3071},
-      "status": "acceptable", "standard": "SP 800-131A Rev. 2", "transitionDate": "2030-12-31" },
-    { "match": {"family": "RSA", "maxBits": 2047},
-      "status": "disallowed", "standard": "SP 800-131A Rev. 2" },
-    { "match": {"family": "SHA-1", "use": "signature_generation"},
-      "status": "disallowed", "standard": "SP 800-131A Rev. 2" },
-    { "match": {"family": "ML-KEM"}, "status": "pq_approved", "standard": "FIPS 203" },
-    { "match": {"family": "ML-DSA"}, "status": "pq_approved", "standard": "FIPS 204" },
-    { "match": {"family": "SLH-DSA"}, "status": "pq_approved", "standard": "FIPS 205" }
-  ]
-}
-```
+| Basis | What the table encodes |
+| :--- | :--- |
+| SP 800-131A Rev. 2 | RSA/DH < 2048 and ECC < 224-bit disallowed; 3DES encryption disallowed after 2023-12-31; MD5/DES not approved; SHA-1 disallowed for signature generation |
+| FIPS 186-5 | DSA retired for signature generation (→ `restricted`, verify-only); EdDSA approved |
+| FIPS 203 / 204 / 205, SP 800-208 | ML-KEM / ML-DSA / SLH-DSA / LMS-XMSS → `pq_approved`; hybrid `X25519MLKEM768` approved via its ML-KEM component |
+| SP 800-56A Rev. 3, SP 800-186 | X25519/X448 key agreement alone and non-NIST curves (secp256k1, Brainpool) → `non_fips` |
+| SP 800-52 Rev. 2 | SSL and TLS 1.0/1.1 → `disallowed` |
+| NIST SHA-1 retirement (Dec 2022) | SHA-1 non-signature use acceptable until 2030-12-31 |
+| **NIST IR 8547 (initial public draft)** | Quantum-vulnerable public key: 112-bit strength (RSA-2048, P-224, DH-2048) deprecated after 2030-12-31; **all** disallowed after 2035-12-31. Flagged `draft: true` and labelled "draft" everywhere it surfaces. |
 
-*Dates are illustrative of the schema; the committed table carries the exact published transition dates and is reviewed on each NIST revision.*
+**Correction to the earlier draft of this spec:** RSA-2048 is *not* "disallowed after 2030-12-31". Under IR 8547 (draft) it is *deprecated* after 2030 and *disallowed* after 2035. `fips_transition_date` stores the hard (disallowed-after) date; the deprecation date is carried in the result and rationale.
+
+**Honesty rules in the resolver:** a finding naming several primitives (cert key + signature hash, cipher-suite parts) takes the **worst** status, and `unknown` outranks the approved states, so an unsized `ECDHE` makes a suite "not determined", never "approved". A missing RSA/DH key size or EC curve gives `unknown`, never a guess. Pre-standard names (Kyber/Dilithium/SPHINCS+) are `unknown` until confirmed as final ML-KEM/ML-DSA/SLH-DSA. Package/SBOM rows are `not_applicable`: they are modules (axis A2), not algorithm instances.
 
 ### 5.2 CMVP validated-modules map (owned by `CMVP_CERT_CAPTURE_DESIGN.md`)
 
@@ -195,7 +190,7 @@ The module-match file (`agent/data/cmvp_modules.json`) is defined there. This do
 asset row (algorithm, key_size, hash, purpose)
    │
    ├── A1: fipsAlgorithmStatus() ──▶ {fips_status, fips_standard, transition_date}
-   │        (server-side, from fips_algorithm_status.json)
+   │        (server-side, lib/fipsAlgorithmStatus.ts)
    │
    ├── A2: module fields from CMVP_CERT_CAPTURE_DESIGN.md
    │        {cmvp_cert_id, cmvp_status, fips_level}  (agent resolver + provider gate)
@@ -226,7 +221,7 @@ fipsCompliance: {
 
 ### 6.2 Console / UI
 
-- Per-asset **compliance verdict chip** beside the existing CMVP badge from the capture note: `Compliant · CMVP #4986 (Active)` / `Approved algorithm — no validated module` / `Disallowed after 2030-12-31`.
+- Per-asset **compliance verdict chip** beside the existing CMVP badge from the capture note: `Compliant · CMVP #4986 (Active)` / `Approved algorithm — no validated module` / `Approved until 2035-12-31 (draft)`.
 - A scope-level **compliance posture tile**: `% from validated modules · # approved-but-unvalidated · # disallowed-now`, alongside existing posture tiles.
 - A filter: *show only `approved_unvalidated`* / *`noncompliant`* — the queryable view the free-text array can't give today.
 
@@ -285,16 +280,31 @@ Ordered so that **RFP-citable value ships before the hardest collection work**, 
 
 | Stage | Goal (buyer-facing exit criterion) | Builds | Prereq | Effort | Agent rebuild? |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1 — Algorithm axis (A1)** | *"N algorithms are disallowed under SP 800-131A today; M are approved but sunset by \<date\>."* Visible to every tenant. | Vendor `fips_algorithm_status.json` (§5.1); pure `fipsAlgorithmStatus()` + DB-free tests; `fips_status`/`fips_standard`/`fips_transition_date` columns computed at every ingest site; per-asset chip + core counts tile (ungated); deadline-aware roadmap ordering (§6.1). | §5.1, §7.1 | **M** | No |
+| **1 — Algorithm axis (A1)** ✅ | *"N algorithms are disallowed under SP 800-131A today; M are approved but sunset by \<date\>."* Visible to every tenant. | Versioned table `lib/fipsAlgorithmStatus.ts` (§5.1); pure `fipsAlgorithmStatus()` + DB-free tests; `fips_status`/`fips_standard`/`fips_transition_date` columns computed at every ingest site; per-asset chip + core counts tile (ungated); deadline-aware roadmap ordering (§6.1). | §5.1, §7.1 | **M** | No |
 | **2 — CBOM honesty fix** | CBOM `nistQuantumSecurityLevel` reflects the real FIPS parameter set (or is omitted), plus `quarkshield:fipsStatus`/`fipsStandard`/`transitionDate` properties. | Replace `cyclonedx.ts:61` binary `nqsl`; add crypto properties (§6.3). | Stage 1 | **S** | No |
 | **3 — CMVP via connectors (A2, cheapest/highest-confidence)** | *"This KMS/HSM-backed key is performed by CMVP cert #\<n\> (Active, FIPS 140-3)."* | Vendor `cmvp_modules.json` (§5.2) + offline refresh job; teach KMS/HSM connectors (`pkiConnectorController.ts`) to report module name/vendor/cert for AWS KMS FIPS, CloudHSM, Luna, nShield; populate `cmvp_*` fields on those assets. Prereqs **P-c, P-d, P-e**. | Stages 1, §3.1 | **M** (data curation) | No (connector-side) |
 | **4 — CMVP module identity on hosts (A2, P-a)** | *"OpenSSL FIPS Provider 3.0.0 on this host → cert #4282 (environment: RHEL 8 / x86-64)."* | Agent resolves providing module + version + operating environment per finding (extend `sbom_scanner.go` fingerprinting and tie it to the asset); new `AuditResult` module fields; `agent/cmvp.go` resolver with match-precedence gate. | Stage 3 | **M–L** | **Yes** |
 | **5 — Verdict + posture view + FIPS-mode gate (A2, P-b)** | *"Approved algorithm **and** validated module in confirmed FIPS mode → compliant"* vs `approved_unvalidated`. Full posture view + filters (gated); FIPS attestation export (§6.4). | Agent FIPS-mode probes per platform (OpenSSL provider state, CNG policy, BC-FIPS) → confidence `measured` vs `unverified`; cross-product `compliance_verdict` (§4.2); gated posture view + attestation PDF/CSV; provenance stamping. | Stage 4 | **M** | **Yes** |
 | **6 — CAVP extension (A2′)** | *"The exact algorithm + mode this asset uses is on the module's CAVP list"* → `compliant` vs `compliant_module_algo_unverified`. | Vendor CAVP lists; add `cavpAlgorithms[]` to `cmvp_modules.json`; compute `cavp_covered`; surface as verdict refinement (§3.2). | Stage 5 | **M** (data curation) | No (data + server) |
 
+### 9.1a Stage 1 — implemented 2026-11-14
+
+Axis A1 is built end to end, server-side, with **no agent rebuild**.
+
+- **Resolver:** `server/src/lib/fipsAlgorithmStatus.ts`, with `fipsAlgorithmStatus()`, `fipsColumns()` and `FIPS_TABLE_VERSION`. It is pure, deterministic, and the one source of truth (§5.1 lists the rules and honesty rules).
+- **Schema:** `assets.fips_status VARCHAR(24)`, `fips_standard VARCHAR(40)`, `fips_transition_date DATE` (hard sunset), plus `idx_assets_fips_status`. All are nullable `ADD COLUMN IF NOT EXISTS`, in `schema.sql`.
+- **All five ingest writes** spread `fipsColumns(...)`: endpoint `ingestTelemetry` (`fleetController.ts`), git scan (`gitScanController.ts`), KMS/PKI sync (`pkiConnectorController.ts`), and both PQC-proxy assets (`pqcProxyController.ts`).
+- **Legacy rows correct immediately:** the roadmap rollup and the console API *recompute* status from `algorithm/key_size/hash/purpose` with the same resolver, instead of reading the persisted column. Rows from before the change (NULL until re-scanned) are therefore assessed correctly on day one. The persisted column serves indexed querying.
+- **Roadmap:** `RoadmapReport.fipsCompliance` covers disallowed-now, approved-with-sunset ordered earliest first, not-determined, module rows, and the table version. Each priority carries `fipsStatus`. A group whose weakest instance is disallowed or non-FIPS gets a ×1.3 compliance-now bump, and its rationale names that weakest instance rather than implying the whole group fails. Mosca gains a compliance-now clause, and the narrative facts gain a FIPS line.
+- **Exec report:** a "FIPS Algorithm Compliance" section in HTML, PDF and DOCX (`reportController.ts`), with the honesty note.
+- **Console (ungated):** the portal-data API adds `fipsStatus/fipsStandard/fipsTransitionDate/fipsDraft` per asset. `TenantPortal.tsx` gets a per-row FIPS chip (tooltip shows the standard, sunset, draft flag and "CMVP not yet assessed") and a "FIPS Non-Compliant Algorithms" KPI tile.
+- **Wording discipline:** nothing says "validated" or "compliant" for an approved algorithm. Approved instances are counted as *"CMVP module validation not yet determined"* (`approvedModuleUndetermined`) until Stage 3–5 supply the module axis.
+- **Verified:** 18 new DB-free tests in `server/test/fipsAlgorithmStatus.test.ts` (resolver plus rollup), and the full server suite passes 91/91. Server and UI `tsc --noEmit` are clean, and `vite build` succeeds. An end-to-end run against a scratch Postgres checked that `schema.sql` applies and the proxy ingest persists the right statuses, and that legacy NULL rows are assessed correctly in `buildRoadmapReport`.
+- **Not verified:** the console chip and tile were not viewed in a running browser, because the portal needs a signed-in tenant session. The fleet, git and PKI INSERTs were checked by placeholder count and a mirrored INSERT, not by driving those endpoints.
+
 ### 9.2 Sequencing rationale
 
-- **Ship Stages 1–2 first.** Server-only, no agent rebuild, and they produce the *regulatory-deadline* and *approved-but-unvalidated-count* facts that are demo-safe and RFP-citable **now** — the GSA/Army/FDA asks can be partially answered before any module work exists.
+- **Ship Stages 1–2 first.** Server-only, no agent rebuild, and they produce the *regulatory-deadline* and *approved-but-module-undetermined* facts that are demo-safe and RFP-citable **now** — the GSA/Army/FDA asks can be partially answered before any module work exists.
 - **Stage 3 before Stage 4.** Connector-reported CMVP certs are high-confidence with almost no inference and no agent rebuild, so they prove the module axis end-to-end on KMS/HSM assets while the harder host-side identification (Stage 4) is built. This is the lowest-risk way to get a real cert # on screen.
 - **Stage 4 then Stage 5 (never skip the gate).** Module *identity* (P-a) and FIPS-*mode* (P-b) are separate; identity without the mode gate can only yield `unverified`. Stage 5 is what turns `approved_unvalidated` into `compliant`, and it is where the honesty discipline matters most — ship them in order, never fold the gate into Stage 4.
 - **Stage 6 (CAVP) last.** It is pure refinement with no value until Stages 3–5 attach a module to the finding; it must never block or downgrade a CMVP verdict when its data is absent.

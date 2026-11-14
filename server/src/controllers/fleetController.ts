@@ -7,6 +7,7 @@ import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 import { geoLocateMachine } from '../lib/downloadTracker';
 import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTargets';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
+import { fipsColumns } from '../lib/fipsAlgorithmStatus';
 import { canonicalizeAlgorithmLabel } from '../lib/algorithmLabel';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
@@ -1078,8 +1079,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         id, type, name, algorithm, key_size, hash_algorithm, 
         is_vulnerable, risk_level, status, description, 
         recommendation, explainer, compliance_violations, machine_id, path,
-        tenant_name, source, source_ref, purpose
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        tenant_name, source, source_ref, purpose,
+        fips_status, fips_standard, fips_transition_date
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         algorithm = EXCLUDED.algorithm,
@@ -1097,7 +1099,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         tenant_name = EXCLUDED.tenant_name,
         source = EXCLUDED.source,
         source_ref = EXCLUDED.source_ref,
-        purpose = EXCLUDED.purpose;
+        purpose = EXCLUDED.purpose,
+        fips_status = EXCLUDED.fips_status,
+        fips_standard = EXCLUDED.fips_standard,
+        fips_transition_date = EXCLUDED.fips_transition_date;
     `;
 
     for (const a of processedAssets) {
@@ -1112,7 +1117,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         a.id, a.type, a.name, a.algorithm, a.key_size, a.hash_algorithm,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.machine_id,
-        a.path, assignedTenant, 'endpoint_deploy', cleanHost, purpose
+        a.path, assignedTenant, 'endpoint_deploy', cleanHost, purpose,
+        // FIPS algorithm-approval status (axis A1) — single source: fipsAlgorithmStatus.ts.
+        ...fipsColumns({ algorithm: a.algorithm, key_size: a.key_size, hash_algorithm: a.hash_algorithm, purpose, type: a.type }),
       ]);
     }
     await txn.query('COMMIT');
