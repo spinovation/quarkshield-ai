@@ -62,6 +62,31 @@ export const isOffTopicQuery = (raw: string): boolean => {
 };
 
 // POST /api/ai/chat
+/**
+ * SECURITY: inventory scope for the advisor chat. requireTenantAccess only pins ?tenant when the
+ * session HAS a tenant, so a non-super session with an empty tenant used to reach this handler
+ * with scopeTenant = '' — and every inventory query below ran with NO tenant filter (all
+ * tenants' summary + the 40 most critical asset names went into the LLM prompt / local reply).
+ *  - super session          → ?tenant, else its own tenant, else fleet (tenant = null)
+ *  - tenant session         → its own tenant
+ *  - non-super, no tenant   → allowed = false: no inventory data at all (chat still answers
+ *                             general PQC questions)
+ */
+export const chatInventoryScope = (req: Request): { allowed: boolean; tenant: string | null } => {
+  const user = (req as any).user;
+  const sessionTenant = String(user?.tenant || '').trim();
+  if (isSuperRole(user?.role)) {
+    const requested = String((req.query?.tenant as string) || '').trim();
+    const t = requested && requested.toLowerCase() !== 'all' ? requested : sessionTenant;
+    return { allowed: true, tenant: t || null };
+  }
+  return sessionTenant ? { allowed: true, tenant: sessionTenant } : { allowed: false, tenant: null };
+};
+
+const NO_TENANT_INVENTORY_NOTE =
+  'No tenant is associated with this session, so no cryptographic inventory data is available. ' +
+  "Answer general post-quantum cryptography questions only; do not describe, estimate or invent the user's inventory.";
+
 export const getAIChatResponse = async (req: Request, res: Response) => {
   try {
     const { message, history, attachments } = req.body;
@@ -77,9 +102,8 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
 
     // SECURITY: scope all context to the caller's tenant. A non-super session is pinned
     // to its own tenant; a super (fleet) session may target ?tenant, else sees all.
-    const isSuper = isSuperRole(req.user?.role);
-    const sessionTenant = (req.user?.tenant || '').toString();
-    const scopeTenant = isSuper ? ((req.query.tenant as string) || sessionTenant || '') : sessionTenant;
+    const inventoryScope = chatInventoryScope(req);
+    const scopeTenant = inventoryScope.tenant || '';
 
     // Build a COMPACT inventory context. Dumping every asset as pretty-printed JSON made
     // the prompt enormous for large fleets (e.g. 7k+ assets => hundreds of thousands of
@@ -91,7 +115,9 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
     const tenantParams = scopeTenant ? [scopeTenant] : [];
     const riskRank = "CASE LOWER(COALESCE(risk_level,'')) WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END";
     let assetsContext = '';
-    try {
+    // A session with no tenant gets NO inventory (never the unfiltered fleet).
+    if (!inventoryScope.allowed) assetsContext = NO_TENANT_INVENTORY_NOTE;
+    else try {
       const summary = await pool.query(
         `SELECT COUNT(*)::int AS total,
                 COUNT(*) FILTER (WHERE is_vulnerable)::int AS vulnerable,
@@ -1347,7 +1373,11 @@ func main() {
       query.includes('vulnerable') || query.includes('list') || query.includes('assets') || query.includes('dashboard') || query.includes('inventory') || query.includes('cmdb')
     ) {
       try {
-        // SECURITY: tenant-scope this inventory lookup too (local-fallback reply path).
+        // SECURITY: tenant-scope this inventory lookup too (local-fallback reply path). The
+        // unfiltered query is reachable ONLY by a super (fleet) session that chose no tenant.
+        if (!inventoryScope.allowed) {
+          return res.json({ text: "No tenant is associated with your session, so I can't show inventory data. Ask your administrator to assign your account to a tenant.", code: undefined, language: 'text' });
+        }
         const assetsRes = scopeTenant
           ? await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets WHERE LOWER(tenant_name) = LOWER($1)', [scopeTenant])
           : await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets');
@@ -1358,7 +1388,7 @@ func main() {
           if (total === 0) {
             text = "According to your QuarkShield CMDB inventory database, there are currently no cryptographic assets registered. Please run a security scan first using the 'Crypto Scanner' or our CLI tool.";
           } else if (vulnerable.length === 0) {
-            text = `According to your QuarkShield dashboard and CMDB, you have a total of **${total}** monitored cryptographic assets, and **none of them are currently flagged as vulnerable**. All registered assets are secure and compliant with quantum-safe standards!`;
+            text = `According to your QuarkShield dashboard and CMDB, you have a total of **${total}** monitored cryptographic assets, and **none of them are currently flagged as quantum-vulnerable**. Keep scanning to keep the inventory current.`;
           } else {
             text = `Based on your QuarkShield dashboard and CMDB, you have a total of **${total}** monitored cryptographic assets, with **${vulnerable.length} vulnerable assets** flagged. Here is the list of vulnerable assets:\n\n` +
               vulnerable.map((r, index) => `${index + 1}. **${r.name}** (Algorithm: ${r.algorithm} ${r.key_size ? r.key_size + '-bit' : ''}) - Risk: *${r.risk_level}* (${r.status})`).join('\n') +

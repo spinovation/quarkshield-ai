@@ -350,12 +350,20 @@ export const requireTenantAccess = (req: Request, res: Response, next: NextFunct
     (req.headers['x-tenant-id'] as string) ||
     (req.headers['x-tenant-slug'] as string) ||
     '';
+  // SECURITY: a NON-super session with no tenant must never reach a tenant-data route.
+  // Previously, with no tenant requested, this fell through to next() WITHOUT pinning
+  // anything, so controllers resolved no tenant and queried ALL tenants (e.g. /fleet/cbom
+  // returned the whole fleet's CBOM; /ai/chat put every tenant's assets in the LLM prompt).
+  // Such sessions exist by design: console logins are issued `tenant: null`, and the only
+  // non-super console role is `user` — the least-privileged account. Fail closed.
+  if (!req.user.tenant) {
+    res.status(403).json({ error: 'No tenant is associated with this session.' });
+    return;
+  }
   if (!requested) {
     // No explicit tenant requested: pin the query to the session's own tenant so
     // downstream controllers cannot fall back to "all tenants" or a hardcoded default.
-    if (req.user.tenant) {
-      req.query.tenant = req.user.tenant;
-    }
+    req.query.tenant = req.user.tenant;
     next();
     return;
   }
