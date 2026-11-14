@@ -206,6 +206,12 @@ interface Asset {
   recommendation?: string;
   explainer?: string;
   complianceViolations?: string | string[];
+  // FIPS algorithm-approval status (CMVP/FIPS Stage 1, axis A1) — algorithm approval only,
+  // NOT CMVP module validation. Computed server-side by lib/fipsAlgorithmStatus.ts.
+  fipsStatus?: 'pq_approved' | 'approved' | 'acceptable' | 'restricted' | 'disallowed' | 'non_fips' | 'not_applicable' | 'unknown';
+  fipsStandard?: string;
+  fipsTransitionDate?: string | null;
+  fipsDraft?: boolean;
   createdAt: string;
   machineId?: string;
   hostname?: string;
@@ -269,6 +275,26 @@ interface CopilotSession {
   updatedAt: string;
   messages: CopilotMessage[];
 }
+
+// FIPS algorithm-approval chip (CMVP/FIPS Stage 1). Wording deliberately says "algorithm"
+// / "approved", never "validated" or "compliant": CMVP module validation is not assessed yet.
+const FIPS_CHIP: Record<NonNullable<Asset['fipsStatus']>, { label: string; color: string; bg: string }> = {
+  pq_approved:    { label: 'FIPS: PQC approved',      color: '#4ade80', bg: 'rgba(34, 197, 94, 0.12)' },
+  approved:       { label: 'FIPS: approved algorithm', color: '#4ade80', bg: 'rgba(34, 197, 94, 0.12)' },
+  acceptable:     { label: 'FIPS: approved, sunset',   color: '#fbbf24', bg: 'rgba(251, 191, 36, 0.12)' },
+  restricted:     { label: 'FIPS: legacy use only',    color: '#fb923c', bg: 'rgba(251, 146, 60, 0.12)' },
+  disallowed:     { label: 'FIPS: disallowed',         color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)' },
+  non_fips:       { label: 'FIPS: not approved',       color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)' },
+  not_applicable: { label: 'Module — CMVP pending',    color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)' },
+  unknown:        { label: 'FIPS: not determined',     color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)' },
+};
+
+const fipsChipTitle = (a: Asset): string => {
+  const parts = [`FIPS algorithm status per ${a.fipsStandard || 'NIST guidance'}.`];
+  if (a.fipsTransitionDate) parts.push(`Disallowed after ${a.fipsTransitionDate}${a.fipsDraft ? ' (NIST IR 8547 draft guidance)' : ''}.`);
+  parts.push('Algorithm approval only — CMVP module validation is not yet assessed.');
+  return parts.join(' ');
+};
 
 const formatInlineText = (text: string): React.ReactNode => {
   if (!text) return null;
@@ -1638,7 +1664,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         properties: [
           { name: "quantumVulnerability", value: a.isVulnerable ? "Vulnerable (Shor's Algorithm)" : "Post-Quantum Ready" },
           { name: "riskLevel", value: a.riskLevel },
-          { name: "complianceStandards", value: Array.isArray(a.complianceViolations) ? a.complianceViolations.join(', ') : (a.complianceViolations || 'NIST SP 800-208') },
+          // Never default to a standard name: an absent value would read as a compliance claim in the exported CBOM.
+          { name: "complianceStandards", value: (Array.isArray(a.complianceViolations) ? a.complianceViolations.join(', ') : a.complianceViolations) || 'None recorded' },
           { name: "hostMachine", value: a.hostname || "Workstation" },
           { name: "assetSource", value: a.source || "endpoint" },
           { name: "sourceReference", value: a.sourceRef || a.hostname || "Workstation" }
@@ -2003,6 +2030,18 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     ? activeLicenses.reduce((sum, l) => sum + (l.seats || 100), 0)
     : (client.mcaLimit || 100);
   const usedSeats = machines.length;
+
+  // FIPS algorithm-approval KPI counts (CMVP/FIPS Stage 1) — one pass, recomputed only when the
+  // asset list changes (was three full filters inline on every render of this large component).
+  const fipsCounts = useMemo(() => {
+    let nonCompliant = 0, sunset = 0, undetermined = 0;
+    for (const a of assets) {
+      if (a.fipsStatus === 'disallowed' || a.fipsStatus === 'non_fips') nonCompliant++;
+      else if (a.fipsStatus === 'acceptable') sunset++;
+      else if (a.fipsStatus === 'unknown') undetermined++;
+    }
+    return { nonCompliant, sunset, undetermined };
+  }, [assets]);
 
   const filteredAssets = assets.filter(a => {
     if (sourceFilter !== 'all') {
@@ -4642,6 +4681,30 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                             Require ML-KEM / ML-DSA
                           </div>
                         </div>
+
+                        {(() => {
+                          // FIPS algorithm approval (CMVP/FIPS Stage 1) — algorithm only, not module validation.
+                          const { nonCompliant, sunset, undetermined } = fipsCounts;
+                          return (
+                            <div
+                              title="FIPS ALGORITHM approval (SP 800-131A Rev. 2, FIPS 203/204/205). This does not establish CMVP module validation, which is not yet assessed."
+                              style={{ background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '8px', padding: '1rem' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)', textTransform: 'uppercase', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+                                <span>FIPS Non-Compliant Algorithms</span>
+                                <ShieldCheck size={15} color={nonCompliant ? '#f87171' : '#4ade80'} />
+                              </div>
+                              <div style={{ fontSize: '1.75rem', fontWeight: 800, color: nonCompliant ? '#f87171' : '#ffffff', margin: '0.3rem 0 0.15rem 0' }}>
+                                {nonCompliant}
+                              </div>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary, #94a3b8)' }}>
+                                {sunset} approved with sunset · {undetermined} not determined
+                              </div>
+                              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.2rem' }}>
+                                Algorithm approval only — CMVP not yet assessed
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
@@ -4788,7 +4851,21 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                   {Array.isArray(a.complianceViolations) && a.complianceViolations.length > 0 ? (
                                     <span style={{ color: '#f87171' }}>{a.complianceViolations.join(', ')}</span>
                                   ) : (
-                                    <span>NIST SP 800-208 / CNSA 2.0</span>
+                                    // No recorded violations is NOT a compliance attestation — say only what we know.
+                                    <span title="The scanner recorded no standards violations for this asset. This is not an attestation of compliance; see the FIPS status below.">
+                                      No violations recorded
+                                    </span>
+                                  )}
+                                  {a.fipsStatus && FIPS_CHIP[a.fipsStatus] && (
+                                    <div style={{ marginTop: '0.3rem' }}>
+                                      <span title={fipsChipTitle(a)} style={{
+                                        fontSize: '0.66rem', fontWeight: 700, whiteSpace: 'nowrap',
+                                        color: FIPS_CHIP[a.fipsStatus].color, background: FIPS_CHIP[a.fipsStatus].bg,
+                                        padding: '0.1rem 0.4rem', borderRadius: '3px',
+                                      }}>
+                                        {FIPS_CHIP[a.fipsStatus].label}{a.fipsTransitionDate ? ` · until ${a.fipsTransitionDate.slice(0, 4)}` : ''}
+                                      </span>
+                                    </div>
                                   )}
                                 </td>
                                 <td style={{ padding: '0.7rem 0.5rem', color: 'var(--text-muted, #94a3b8)' }}>

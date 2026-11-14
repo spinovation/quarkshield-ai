@@ -62,6 +62,10 @@ ALTER TABLE assets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE 
 -- configuration / unknown). Nullable so existing rows + legacy ingest paths are unaffected.
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS purpose VARCHAR(40);
 CREATE INDEX IF NOT EXISTS idx_assets_purpose ON assets(purpose);
+-- CMVP & FIPS compliance mapping, Stage 1: FIPS ALGORITHM status is computed on read by
+-- server/src/lib/fipsAlgorithmStatus.ts (single source of truth) — deliberately NOT persisted.
+-- A stored copy had no reader and would silently go stale on every FIPS_TABLE_VERSION change.
+-- Add a column (with a table-version stamp) only when a SQL-side filter actually needs one.
 ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);

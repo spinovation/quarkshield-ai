@@ -833,7 +833,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
           status = 'Quantum Vulnerable';
           recommendation = 'Upgrade OpenSSH to 9.8+ and adopt hybrid mlkem768x25519-sha256 or ML-DSA.';
           explainer = "RSA integer factorization is solved in polynomial time by Shor's algorithm.";
-          complianceViolations = ['CNSA 2.0', 'NIST SP 800-208', 'EO 14028'];
+          // SSH keys are authentication (signature) keys → FIPS 204 (ML-DSA). SP 800-208 is the
+          // LMS/XMSS hash-based-signature standard and does not apply. Sub-2048 RSA also fails SP 800-131A.
+          complianceViolations = ['CNSA 2.0', 'NIST FIPS 204 (ML-DSA)', 'EO 14028', ...((size ?? 2048) < 2048 ? ['NIST SP 800-131A'] : [])];
         } else if (algo.includes('DSA')) {
           isVulnerable = true;
           riskLevel = 'critical';
@@ -847,7 +849,7 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
           status = 'Quantum Vulnerable';
           recommendation = 'Configure hybrid post-quantum key exchange in ~/.ssh/config.';
           explainer = "Shor's algorithm breaks elliptic curve discrete logarithms.";
-          complianceViolations = ['CNSA 2.0', 'NIST SP 800-208'];
+          complianceViolations = ['CNSA 2.0', 'NIST FIPS 204 (ML-DSA)'];
         } else if (algo.includes('ML-KEM') || algo.includes('ML-DSA') || algo.includes('SNTRUP761')) {
           isVulnerable = false;
           riskLevel = 'secure';

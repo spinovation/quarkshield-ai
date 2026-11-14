@@ -79,6 +79,27 @@ const buildPdf = (r: RoadmapReport, res: Response) => {
     doc.moveDown(0.3);
   }
 
+  // FIPS algorithm compliance (CMVP/FIPS Stage 1, axis A1)
+  if (r.fipsCompliance?.assessed) {
+    const fc = r.fipsCompliance;
+    h('FIPS Algorithm Compliance');
+    doc.fillColor(fc.disallowedNow ? '#b91c1c' : '#15803d').fontSize(10).text(fc.headline);
+    if (fc.topDisallowed.length) {
+      doc.fillColor(slate).fontSize(9).text('Non-compliant today                Count   Standard');
+      rule();
+      fc.topDisallowed.forEach(d => doc.fillColor('#111').fontSize(9).text(
+        `${d.algorithm.padEnd(32).slice(0, 32)}  ${String(d.count).padStart(5)}   ${d.standard}`));
+    }
+    if (fc.sunsetting.length) {
+      doc.moveDown(0.2).fillColor(slate).fontSize(9).text('Approved, sunset scheduled         Count   Disallowed after');
+      rule();
+      fc.sunsetting.forEach(s => doc.fillColor('#111').fontSize(9).text(
+        `${s.algorithm.padEnd(32).slice(0, 32)}  ${String(s.count).padStart(5)}   ${s.disallowedAfter}${s.draft ? ' (draft)' : ''}`));
+    }
+    doc.moveDown(0.2).fillColor(slate).fontSize(8).text(fc.note, { align: 'justify' });
+    doc.moveDown(0.3);
+  }
+
   // Top priorities
   h('Top Migration Priorities');
   if (r.priorities.length === 0) doc.fillColor('#111').fontSize(10).text('No quantum-vulnerable assets identified.');
@@ -176,6 +197,19 @@ const buildDocx = async (r: RoadmapReport): Promise<Buffer> => {
       new Paragraph({ text: 'Migration Size Impact — "What Breaks"', heading: HeadingLevel.HEADING_1 }),
       new Paragraph({ children: [new TextRun({ text: r.migrationFriction.headline, bold: true })] }),
       new Paragraph(r.migrationFriction.detail),
+    ] : []),
+    ...(r.fipsCompliance?.assessed ? [
+      new Paragraph({ text: 'FIPS Algorithm Compliance', heading: HeadingLevel.HEADING_1 }),
+      new Paragraph({ children: [new TextRun({ text: r.fipsCompliance.headline, bold: true })] }),
+      ...(r.fipsCompliance.topDisallowed.length || r.fipsCompliance.sunsetting.length ? [new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          new TableRow({ children: [cell('Algorithm', true, 35), cell('Status', true, 25), cell('Count', true, 10), cell('Standard / sunset', true, 30)] }),
+          ...r.fipsCompliance.topDisallowed.map(d => new TableRow({ children: [cell(d.algorithm, false, 35), cell('Non-compliant today', false, 25), cell(String(d.count), false, 10), cell(d.standard, false, 30)] })),
+          ...r.fipsCompliance.sunsetting.map(s => new TableRow({ children: [cell(s.algorithm, false, 35), cell('Approved — sunset scheduled', false, 25), cell(String(s.count), false, 10), cell(`Disallowed after ${s.disallowedAfter}${s.draft ? ' (draft)' : ''}`, false, 30)] })),
+        ],
+      })] : []),
+      new Paragraph({ children: [new TextRun({ text: r.fipsCompliance.note, italics: true, size: 16 })] }),
     ] : []),
     new Paragraph({ text: 'Top Migration Priorities', heading: HeadingLevel.HEADING_1 }),
     ...(r.priorities.length ? r.priorities.map(p => new Paragraph({ children: [new TextRun({ text: `P${p.rank} [${p.severity.toUpperCase()}] ${p.title}`, bold: true }), new TextRun({ text: ` — ${p.rationale}` })] })) : [new Paragraph('No quantum-vulnerable assets identified.')]),
@@ -276,6 +310,14 @@ ${r.purposeBreakdown.map(p => `<tr><td><strong>${esc(p.label)}</strong></td><td>
 
 ${r.migrationFriction && (r.migrationFriction.signingAssets || r.migrationFriction.kexAssets) ? `<h2>Migration Size Impact — "What Breaks"</h2>
 <div class="verdict warn"><div>${esc(r.migrationFriction.headline)}</div><div class="d">${esc(r.migrationFriction.detail)}</div></div>` : ''}
+
+${r.fipsCompliance?.assessed ? `<h2>FIPS Algorithm Compliance</h2>
+<div class="verdict ${r.fipsCompliance.disallowedNow ? 'warn' : 'ok'}"><div>${esc(r.fipsCompliance.headline)}</div></div>
+${r.fipsCompliance.topDisallowed.length || r.fipsCompliance.sunsetting.length ? `<table><thead><tr><th>Algorithm</th><th>Status</th><th>Count</th><th>Standard / sunset</th></tr></thead><tbody>
+${r.fipsCompliance.topDisallowed.map(d => `<tr><td><strong>${esc(d.algorithm)}</strong></td><td>Non-compliant today</td><td>${d.count}</td><td>${esc(d.standard)}</td></tr>`).join('')}
+${r.fipsCompliance.sunsetting.map(s => `<tr><td><strong>${esc(s.algorithm)}</strong></td><td>Approved — sunset scheduled</td><td>${s.count}</td><td>Disallowed after ${esc(s.disallowedAfter)}${s.draft ? ' (draft)' : ''}</td></tr>`).join('')}
+</tbody></table>` : ''}
+<p style="color:var(--slate);font-size:12px;margin:6px 0 8px">${esc(r.fipsCompliance.note)}</p>` : ''}
 
 <h2>Top Migration Priorities</h2>
 ${r.priorities.length ? r.priorities.map(p => {

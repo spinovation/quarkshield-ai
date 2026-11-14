@@ -333,7 +333,7 @@ func RunScanWithProgress(ctx context.Context, quick bool, customPath string, onP
 							Description:          fmt.Sprintf("%s (%s)", v.Issue, path),
 							Recommendation:       v.Fix,
 							Explainer:            fmt.Sprintf("Configuration at line %d permits: \"%s\"", v.LineNumber, v.LineContent),
-							ComplianceViolations: []string{"CNSA 2.0", "NIST SP 800-208", "EO 14028"},
+							ComplianceViolations: []string{"CNSA 2.0", "EO 14028"},
 						})
 					}
 				}

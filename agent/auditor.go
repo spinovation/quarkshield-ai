@@ -164,7 +164,12 @@ func AuditSSHKey(keyString string, label string, path string) AuditResult {
 		}
 		description = fmt.Sprintf("Vulnerable SSH public key utilizing the RSA-%d algorithm.", keySize)
 		explainer = "RSA depends on prime factorization. Shor's algorithm running on a quantum computer solves integer factorization in cubic time, breaking RSA of any bit strength."
-		complianceViolations = []string{"CNSA 2.0", "NIST SP 800-208", "EO 14028"}
+		// SSH keys are authentication (signature) keys → FIPS 204 (ML-DSA). SP 800-208 is the
+		// LMS/XMSS stateful hash-based-signature standard and does not apply to SSH auth keys.
+		complianceViolations = []string{"CNSA 2.0", "NIST FIPS 204 (ML-DSA)", "EO 14028"}
+		if keySize > 0 && keySize < 2048 {
+			complianceViolations = append(complianceViolations, "NIST SP 800-131A")
+		}
 		quantumThreat = "Shor's Algorithm (Asymmetric Factorization)"
 
 	case "ssh-dss":
@@ -190,7 +195,7 @@ func AuditSSHKey(keyString string, label string, path string) AuditResult {
 		riskLevel = "high"
 		description = fmt.Sprintf("Vulnerable Elliptic Curve signature (ECDSA) public key on curve P-%d.", keySize)
 		explainer = "Elliptic curves rely on the discrete log problem. Shor's algorithm breaks elliptic curves even faster than RSA due to smaller key parameters."
-		complianceViolations = []string{"CNSA 2.0", "NIST SP 800-208", "EO 14028"}
+		complianceViolations = []string{"CNSA 2.0", "NIST FIPS 204 (ML-DSA)", "EO 14028"}
 		quantumThreat = "Shor's Algorithm (Discrete Log)"
 
 	case "ssh-ed25519":
@@ -200,7 +205,7 @@ func AuditSSHKey(keyString string, label string, path string) AuditResult {
 		riskLevel = "high"
 		description = "Vulnerable modern classical Elliptic Curve Signature (Ed25519) public key."
 		explainer = "Although Ed25519 is classically secure, the elliptic curve discrete logarithm problem is easily solved by a quantum computer running Shor's algorithm."
-		complianceViolations = []string{"CNSA 2.0", "NIST SP 800-208"}
+		complianceViolations = []string{"CNSA 2.0", "NIST FIPS 204 (ML-DSA)"}
 		quantumThreat = "Shor's Algorithm (Discrete Log)"
 
 	case "sntrup761x25519-sha512@openssh.com":
@@ -230,7 +235,9 @@ func AuditSSHKey(keyString string, label string, path string) AuditResult {
 			riskLevel = "medium"
 			description = fmt.Sprintf("Unrecognized key type: %s.", keyType)
 			explainer = "Assume any classical asymmetric key type is quantum-vulnerable unless mathematically proven otherwise."
-			complianceViolations = []string{"NIST SP 800-208"}
+			// Unrecognized type: we cannot name a specific NIST standard, only the CNSA 2.0
+			// transition that applies to any classical asymmetric key.
+			complianceViolations = []string{"CNSA 2.0"}
 			quantumThreat = "Shor's Algorithm Risk"
 		}
 	}
@@ -296,7 +303,9 @@ func AuditPEMCertificate(pemString string, label string, path string) AuditResul
 	riskLevel := "high"
 	description := ""
 	explainer := ""
-	complianceViolations := []string{"CNSA 2.0", "NIST SP 800-208", "EO 14028"}
+	// Default when KeyUsage triage below sets neither flag: a certificate is a signed object,
+	// so the PQC target is FIPS 204 (ML-DSA). (SP 800-208 = LMS/XMSS, not applicable.)
+	complianceViolations := []string{"CNSA 2.0", "NIST FIPS 204 (ML-DSA)", "EO 14028"}
 	quantumThreat := "Shor's Algorithm (Asymmetric Factorization/DLP)"
 
 	isKeyEstablishment := false
