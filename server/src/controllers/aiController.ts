@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import { isSuperRole } from '../middleware/auth';
+import { summarizeFipsCompliance, FipsGroupRow, FipsCompliance } from '../lib/roadmapReport';
 
 // =============================================================================
 // PQC Copilot scope guardrail
@@ -1368,7 +1369,7 @@ func main() {
           text = "**Crypto CMDB** (Configuration Management Database) is the asset tracking database of QuarkShield. It features:\n\n" +
                  "- **Centralized Inventory**: Automatically registers all cryptographic assets discovered by active/passive audits.\n" +
                  "- **Risk Scoring**: Grades risk based on key sizes and algorithms (e.g. RSA-2048 is flagged as High/Critical Risk, while AES-256 is Secure).\n" +
-                 "- **Violation Monitoring**: Shows compliance flags for standards like CNSA 2.0, NIST SP 800-208, and EO 14028.\n\n" +
+                 "- **Violation Monitoring**: Shows compliance flags for standards like CNSA 2.0, NIST SP 800-131A, FIPS 203/204, and EO 14028.\n\n" +
                  `Currently, your CMDB contains **${total}** cryptographic assets (**${vulnerable.length}** vulnerable).`;
         }
       } catch (dbErr: any) {
@@ -1617,6 +1618,42 @@ export const getAICorrelation = async (req: Request, res: Response) => {
 };
 
 // POST /api/ai/generate-presentation
+/**
+ * Data-derived NIST / CNSA 2.0 gap lines for the board deck and audit report. Every line is
+ * computed from the inventory (FIPS algorithm status via lib/fipsAlgorithmStatus.ts); nothing
+ * is invented. Replaces the former hardcoded "NIST SP 800-208: deficiencies in discovery…"
+ * fallback — SP 800-208 is the LMS/XMSS signature standard, not a discovery guideline.
+ * Format of each line: "Standard | Discovered gap | Deadline".
+ */
+export const buildComplianceGaps = (rows: any[]): { fc: FipsCompliance; lines: string[]; recorded: string[] } => {
+  const groups = new Map<string, FipsGroupRow>();
+  const recorded = new Set<string>();
+  for (const r of rows) {
+    const key = [r.algorithm, r.key_size, r.hash_algorithm, r.purpose, r.type].join('|');
+    const g = groups.get(key) || { algorithm: r.algorithm || '', key_size: r.key_size ?? null, hash_algorithm: r.hash_algorithm ?? null, purpose: r.purpose ?? null, type: r.type ?? null, count: 0 };
+    g.count++; groups.set(key, g);
+    if (Array.isArray(r.compliance_violations)) r.compliance_violations.forEach((v: string) => v && recorded.add(v));
+  }
+  const fc = summarizeFipsCompliance(Array.from(groups.values()));
+  const vuln = rows.filter(r => r.is_vulnerable).length;
+  const lines: string[] = [];
+  if (fc.disallowedNow) {
+    const eg = fc.topDisallowed.slice(0, 3).map(d => d.algorithm).join(', ');
+    lines.push(`NIST SP 800-131A Rev. 2 | ${fc.disallowedNow} algorithm instance(s) disallowed or not FIPS-approved today${eg ? ` (e.g. ${eg})` : ''} | Remediation: immediate`);
+  }
+  const first = fc.sunsetting[0];
+  if (first) {
+    lines.push(`${first.draft ? 'NIST IR 8547 (draft)' : first.standard} | ${fc.byStatus.acceptable} algorithm instance(s) approved only until a published sunset (earliest: ${first.algorithm} after ${first.disallowedAfter}) | Remediation: before ${first.disallowedAfter.slice(0, 4)}`);
+  }
+  if (vuln) {
+    lines.push(`NSA CNSA 2.0 | ${vuln} quantum-vulnerable asset(s) still rely on classical public-key cryptography | Remediation: per CNSA 2.0 category deadlines (2030–2033)`);
+  }
+  if (fc.byStatus.unknown) {
+    lines.push(`Inventory completeness | ${fc.byStatus.unknown} algorithm instance(s) could not be assessed (missing key size or unrecognized algorithm) | Remediation: re-scan with full key metadata`);
+  }
+  return { fc, lines, recorded: Array.from(recorded) };
+};
+
 export const generatePresentation = async (req: Request, res: Response) => {
   try {
     const { scope, items, engine, customPrompt } = req.body;
@@ -1695,11 +1732,14 @@ export const generatePresentation = async (req: Request, res: Response) => {
         r.compliance_violations.forEach((v: string) => violationsSet.add(v));
       }
     });
-    if (violationsSet.size > 0) {
-      complianceViolationsContext = Array.from(violationsSet).map(v => `- ${v}`).join('\n');
-    } else {
-      complianceViolationsContext = "- NIST SP 800-208: Deficiencies in automated cryptographic discovery and lifecycle management\n- NSA CNSA 2.0: Ingress load balancers negotiating legacy classical ciphers violate NSA timelines\n- Executive Order 14028: Active database credentials fail key rotation audits and lack centralized rotation logging";
-    }
+    // Data-derived gaps only. The old fallback invented three gaps (incl. a misattributed
+    // "NIST SP 800-208 discovery" one) whenever no violations were recorded.
+    const deckGaps = buildComplianceGaps(filteredAssets);
+    const ctxLines = deckGaps.lines.map(l => `- ${l}`);
+    if (violationsSet.size > 0) ctxLines.push(`- Standards flagged by the scanner on individual assets: ${Array.from(violationsSet).join(', ')}`);
+    complianceViolationsContext = ctxLines.length
+      ? ctxLines.join('\n')
+      : '- No standards gaps were recorded in the scanned inventory. Do not invent any.';
 
     // If the user selected Claude or Gemini, we will invoke the AI APIs
     const isClaude = engine === 'claude';
@@ -1718,7 +1758,7 @@ export const generatePresentation = async (req: Request, res: Response) => {
         "#### Slide 1: Title & Executive Baseline\n" +
         "*   **Layout**: High-contrast, dark aesthetic. Prominent title and a sidebar block for key posture KPIs.\n" +
         "*   **Title**: [Generate a title, max 45 chars. E.g., \"State of Cryptographic Risk & Post-Quantum Readiness\"]\n" +
-        "*   **Subtitle**: Aligning to CNSA 2.0 & NIST SP 800-208 Standards\n" +
+        "*   **Subtitle**: Aligning to NSA CNSA 2.0 & NIST FIPS 203/204/205 Standards\n" +
         "*   **Core KPI Block**: \n" +
         `    *   Total Assets: ${totalAssets}\n` +
         `    *   Vulnerable Inventory: ${riskPercentage}%\n` +
@@ -1745,10 +1785,10 @@ export const generatePresentation = async (req: Request, res: Response) => {
         "    *   Status: Agile and fully compliant.\n" +
         "*   **Deficit Calculus Callout**: \n" +
         `    *   "Mosca's Theorem: If U + V > Y (Shelf Life + Migration Time > Time to CRQC), your encrypted data is already at risk of offline decryption. Our deficit status: Active Risk (Score ${calculatedDeficitRating}/10 - ${riskPercentage}% of inventory is vulnerable to quantum decryption)."\n\n` +
-        "#### Slide 4: Compliance Gaps (NIST SP 800-208 & CNSA 2.0)\n" +
+        "#### Slide 4: Compliance Gaps (NIST SP 800-131A & CNSA 2.0)\n" +
         "*   **Layout**: Simple 3-column table matrix.\n" +
         "*   **Table Headers**: Target Compliance Standard | Discovered Organizational Gap | Remediation Deadline\n" +
-        "*   **Content**: Generate at least 3 critical regulatory gaps derived from the CMDB data (specifically focusing on CNSA 2.0 timelines and NIST discovery guidelines). Format each gap as a string: 'Standard | Discovered Gap | Deadline' inside the bullets array.\n\n" +
+        "*   **Content**: List ONLY the gaps given in the 'Compliance Violations/Gaps Context' data, one per bullet, formatted as 'Standard | Discovered Gap | Deadline'. Do NOT invent gaps, assets, standards or deadlines. If the context says no gaps were recorded, use a single bullet stating that.\n\n" +
         "#### Slide 5: Short-Term Remediation Steps (0-90 Days)\n" +
         "*   **Layout**: Horizontal progressive timeline layout (3 steps).\n" +
         "*   **Step 1: Certificate Lifecycle Cleanup** (Revoking weak, expired, or unmanaged wildcard certificates).\n" +
@@ -1959,13 +1999,12 @@ Please generate the structured 7-slide board presentation JSON following the exa
       },
       {
         id: 4,
-        title: 'Compliance Gaps (NIST SP 800-208 & CNSA 2.0)',
-        bullets: [
-          'NIST SP 800-208 | Deficiencies in automated asset discovery and centralized inventory management | Remediation: 2026',
-          'NSA CNSA 2.0 | Ingress load balancers negotiating legacy classical ciphers violate NSA timelines | Remediation: 2030',
-          `Executive Order 14028 | Active database credentials fail key rotation audits and lack centralized rotation logging | Remediation: 2026`
-        ],
-        speakerNotes: `Compliance is a critical driver. Our automated scanning has flagged policy gaps violating NIST SP 800-208 and NSA CNSA 2.0 guidelines. Many of our web interfaces and VPN gateways violate the NSA CNSA 2.0 mandate, which requires commencing the transition to post-quantum standards immediately. Furthermore, our current logging fail-safes do not fully meet the key rotation and cryptographic agility audits mandated under Executive Order 14028. Resolving these gaps is our top compliance priority.`
+        title: 'Compliance Gaps (NIST SP 800-131A & CNSA 2.0)',
+        // Data-derived (buildComplianceGaps) — never hardcoded findings.
+        bullets: deckGaps.lines.length ? deckGaps.lines : ['No standards gaps were recorded in the scanned inventory.'],
+        speakerNotes: deckGaps.lines.length
+          ? `These gaps come directly from the scanned inventory. ${deckGaps.fc.headline} Under NSA CNSA 2.0, classical public-key cryptography must be replaced on category deadlines between 2030 and 2033. Note that this is FIPS algorithm approval only; CMVP module validation has not yet been assessed.`
+          : 'The scanned inventory recorded no NIST or CNSA 2.0 gaps. Continue continuous CBOM monitoring to keep this current.',
       },
       {
         id: 5,
@@ -2103,6 +2142,9 @@ export const generateReport = async (req: Request, res: Response) => {
     const lowRiskText = lowRiskAssets.slice(0, 8).map(a => `| ${a.name} | ${a.algorithm}${a.keySize ? '-' + a.keySize : ''} | Low (Agile/Compliant) |`).join('\n') || '| No low risk assets found | - | - |';
     
     const gapMatrixText = gapMatrixRows.slice(0, 8).map(r => `| ${r.group} | ${r.protocol} | ${r.cnsa} | ${r.deadline} |`).join('\n') || '| No assets to report | - | - | - |';
+    // Data-derived NIST/CNSA gaps (FIPS algorithm status) — replaces the misattributed SP 800-208 text.
+    const reportGaps = buildComplianceGaps(assets);
+    const reportGapText = reportGaps.lines.length ? reportGaps.lines.map(l => `- ${l}`).join('\n') : '- No standards gaps were recorded in the scanned inventory.';
 
     const calculatedDeficitRating = totalAssets > 0 ? Math.min(10, Math.max(1, Math.round((vulnerableAssets / totalAssets) * 10))) : 1;
     const estimatedRunway = appCount > 10 ? '4' : '2';
@@ -2112,7 +2154,7 @@ export const generateReport = async (req: Request, res: Response) => {
 
     const systemInstruction = 
       "You are an expert Cybersecurity Auditor and Principal Cryptographic Engineer. Your task is to analyze the provided Cryptographic Configuration Management Database (Crypto CMDB) data and generate a highly detailed, comprehensive, executive-ready **Cryptographic Risk & Post-Quantum Cryptography (PQC) Readiness Report**.\n\n" +
-      "This is a formal PDF/Word document, not a slide deck. The output must be thorough, narrative-heavy, and structured professionally as a formal audit. It must align with NIST SP 800-208 (Cryptographic Discovery) and CNSA 2.0 (Commercial National Security Algorithm Suite) timelines.\n\n" +
+      "This is a formal PDF/Word document, not a slide deck. The output must be thorough, narrative-heavy, and structured professionally as a formal audit. It must align with OMB M-23-02 (cryptographic inventory), NIST SP 800-131A Rev. 2 and FIPS 203/204/205 (algorithm transitions), and NSA CNSA 2.0 (Commercial National Security Algorithm Suite) timelines.\n\n" +
       "--- \n\n" +
       "### [REPORT STRUCTURE]\n\n" +
       "Please generate the report using the following markdown outline:\n\n" +
@@ -2125,7 +2167,7 @@ export const generateReport = async (req: Request, res: Response) => {
       "1. Executive Summary & Posture Baseline\n" +
       "2. Cryptographic Inventory & Risk Analysis\n" +
       "3. Regulatory Compliance & Milestones Gap Analysis\n" +
-      "4. NIST SP 800-208 Discovery & Remediation Playbook\n" +
+      "4. Discovery & Remediation Playbook\n" +
       "5. Professional Disclaimer & Risk Assumptions\n\n" +
       "--- \n\n" +
       "# 1. Executive Summary & Posture Baseline\n" +
@@ -2141,10 +2183,10 @@ export const generateReport = async (req: Request, res: Response) => {
       "*   **Mosca's Theorem Threat Modeling**: Provide a detailed mathematical risk assessment using Mosca's Theorem formula: $U + V > Y$ (where $U$ is the shelf-life of the sensitive data, $V$ is the migration time to PQC, and $Y$ is the estimated time to a CRQC). Under a subheading \"Deficit Validation\", write a detailed narrative confirming whether the organization is currently in an active data-leakage state (where $U + V > Y$).\n" +
       "*   **Asset Risk Classification**: Break down the inventory findings into a Markdown table with three tiers (High Risk, Medium Risk, Low Risk).\n\n" +
       "# 3. Regulatory Compliance & Milestones Gap Analysis\n" +
-      "*   **NIST SP 800-208 Alignment**: Identify deficiencies in discovery, automated asset lifecycle management, and crypto-agility readiness.\n" +
+      "*   **NIST Algorithm Alignment (SP 800-131A Rev. 2, FIPS 203/204/205)**: Using ONLY the 'NIST/CNSA Gap Lines' in the data, state which algorithms are disallowed today and which are on a published sunset. Do not invent findings; this is algorithm approval only, not CMVP module validation.\n" +
       "*   **CNSA 2.0 Milestones**: Document specific timeline violations or upcoming risks based on commercial national security timelines (e.g., software/firmware signing, web browsers, operating system transitions).\n" +
       "*   **Gap Matrix Table**: Build a table listing: Asset Group | Discovered Protocol | CNSA 2.0 Compliant? (Yes/No) | Deadline Year.\n\n" +
-      "# 4. NIST SP 800-208 Discovery & Remediation Playbook\n" +
+      "# 4. Discovery & Remediation Playbook\n" +
       "Provide highly actionable, detailed technical instructions:\n" +
       "*   **Short-Term Tactical Remediation (0-90 Days)**: Tactical actions to clean up legacy certificate tech debt, disable weak CBC/DH ciphers, enforce TLS 1.3, and isolate systems running obsolete protocols.\n" +
       "*   **Long-Term Strategic Migration (90+ Days)**: Enterprise roadmap for migrating to PQC. Discuss deploying dual-key hybrid certificates, testing ML-KEM and ML-DSA implementations, updating Hardware Security Modules (HSMs), and integrating Open Policy Agent (OPA) policies into CI/CD pipelines to block weak cryptography before deployment.\n\n" +
@@ -2168,6 +2210,8 @@ export const generateReport = async (req: Request, res: Response) => {
 - Monitored Enterprise Applications: ${appCount}
 - Mapped Business Services: ${serviceCount}
 - Report Scope: ${scope} (Selected pillars: ${JSON.stringify(items)})${customPromptContext}
+- NIST/CNSA Gap Lines (data-derived; use only these):
+${reportGapText}
 
 High Risk Assets Sample Table Data:
 | Asset Name | Protocol/Algorithm | Risk Tier |
@@ -2323,7 +2367,7 @@ Please generate the complete report following the exact system instructions and 
 1. Executive Summary & Posture Baseline
 2. Cryptographic Inventory & Risk Analysis
 3. Regulatory Compliance & Milestones Gap Analysis
-4. NIST SP 800-208 Discovery & Remediation Playbook
+4. Discovery & Remediation Playbook
 5. Professional Disclaimer & Risk Assumptions
 
 ---${customPromptSection}
@@ -2352,14 +2396,14 @@ Please generate the complete report following the exact system instructions and 
     ${lowRiskText}
 
 # 3. Regulatory Compliance & Milestones Gap Analysis
-*   **NIST SP 800-208 Alignment**: We exhibit critical gaps in automated cryptographic discovery and lifecycle management. The lack of centralized, real-time discovery means the enterprise cannot maintain the crypto-agility required to execute rapid, automated algorithm rotations as mandated by the NIST SP 800-208 guidelines.
+*   **NIST Algorithm Alignment (SP 800-131A Rev. 2, FIPS 203/204/205)**: ${reportGaps.fc.headline} ${reportGaps.fc.note}
 *   **CNSA 2.0 Milestones**: Multiple active web endpoints, internal services, and databases fail the NSA CNSA 2.0 guidelines. These guidelines mandate initiating hybrid post-quantum key exchange support immediately, with complete classical deprecation targets by 2030. 
 *   **Gap Matrix Table**:
     | Asset Group | Discovered Protocol | CNSA 2.0 Compliant? (Yes/No) | Deadline Year |
     |---|---|---|---|
     ${gapMatrixText}
 
-# 4. NIST SP 800-208 Discovery & Remediation Playbook
+# 4. Discovery & Remediation Playbook
 *   **Short-Term Tactical Remediation (0-90 Days)**:
     1. Clean up legacy certificate tech debt by revoking RSA-1024 keys and wildcard certificates.
     2. Disable weak CBC/DH ciphers globally and enforce TLS 1.3 across all public ingress load balancers.

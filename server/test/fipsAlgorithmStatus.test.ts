@@ -152,3 +152,25 @@ test('empty inventory produces a safe headline', () => {
   assert.equal(fc.assessed, 0);
   assert.match(fc.headline, /No algorithm instances/);
 });
+
+// ---- Board deck / audit report gap lines (aiController.buildComplianceGaps) ----
+
+import { buildComplianceGaps } from '../src/controllers/aiController';
+
+test('deck/report gaps are derived from data and never cite SP 800-208 for discovery', () => {
+  const g = buildComplianceGaps([
+    { algorithm: 'RSA', key_size: 1024, is_vulnerable: true, compliance_violations: ['CNSA 2.0'] },
+    { algorithm: 'RSA', key_size: 2048, is_vulnerable: true, compliance_violations: [] },
+    { algorithm: 'AES-256-GCM', is_vulnerable: false },
+  ]);
+  assert.ok(g.lines.some(l => l.startsWith('NIST SP 800-131A Rev. 2 | 1 algorithm instance(s) disallowed')));
+  assert.ok(g.lines.some(l => l.startsWith('NIST IR 8547 (draft) | 1 ')), 'RSA-2048 sunset is labelled draft');
+  assert.ok(g.lines.some(l => l.startsWith('NSA CNSA 2.0 | 2 quantum-vulnerable')));
+  assert.ok(g.lines.every(l => !/800-208/.test(l)));
+  assert.deepEqual(g.recorded, ['CNSA 2.0']);
+});
+
+test('a clean inventory yields NO invented gaps', () => {
+  const g = buildComplianceGaps([{ algorithm: 'ML-KEM-768', is_vulnerable: false }, { algorithm: 'AES-256-GCM', is_vulnerable: false }]);
+  assert.deepEqual(g.lines, []);
+});
