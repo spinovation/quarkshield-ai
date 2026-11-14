@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import { isSuperRole } from '../middleware/auth';
 import { summarizeFipsCompliance, FipsGroupRow, FipsCompliance } from '../lib/roadmapReport';
-import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
+import { classifyPurpose, isClassicalAsymmetric } from '../lib/threatGraph/cryptoPurpose';
 
 // =============================================================================
 // PQC Copilot scope guardrail
@@ -1704,7 +1704,9 @@ export const buildComplianceGaps = (rows: any[]): { fc: FipsCompliance; lines: s
     if (Array.isArray(r.compliance_violations)) r.compliance_violations.forEach((v: string) => v && recorded.add(v));
   }
   const fc = summarizeFipsCompliance(Array.from(groups.values()));
-  const vuln = rows.filter(r => r.is_vulnerable).length;
+  // Shor-breakable public-key assets only. `is_vulnerable` is NOT this: the scanner also sets it
+  // for weak symmetric ciphers, hashes and legacy TLS / config findings (3DES, MD5, TLS 1.0…).
+  const vuln = rows.filter(r => isClassicalAsymmetric(r.algorithm || '')).length;
   const lines: string[] = [];
   if (fc.disallowedNow) {
     const eg = fc.topDisallowed.slice(0, 3).map(d => d.algorithm).join(', ');
@@ -1737,7 +1739,8 @@ export const buildDeckFacts = (rows: any[]) => {
   const total = rows.length;
   let vuln = 0, hndl = 0, sig = 0;
   for (const r of rows) {
-    if (!r.is_vulnerable) continue;
+    // Shor-breakable public-key crypto only (see buildComplianceGaps) — not every is_vulnerable row.
+    if (!isClassicalAsymmetric(r.algorithm || '')) continue;
     vuln++;
     const purpose = r.purpose || classifyPurpose({
       type: r.type || '', name: r.name || '', algorithm: r.algorithm || '', key_size: r.key_size,

@@ -219,3 +219,59 @@ test('deck facts: HNDL only for key establishment; no invented Mosca numbers; 0 
 });
 
 // (Advisor chat scope tests live in test/tenantAccess.test.ts.)
+
+// ---- Review regressions (PR #4 code review, 2026-11-14) ---------------------
+// Each case is the exact input that produced a wrong answer before the fix.
+
+import { summarizeFipsComplianceIndexed } from '../src/lib/roadmapReport';
+
+test('review #1: underscore IANA suites are tokenized — DES / RC4 are not "acceptable"', () => {
+  assert.equal(s({ algorithm: 'TLS_RSA_WITH_DES_CBC_SHA', key_size: 2048 }).status, 'disallowed');
+  assert.equal(s({ algorithm: 'TLS_ECDHE_RSA_WITH_RC4_128_SHA', key_size: 2048 }).status, 'non_fips');
+  assert.equal(s({ algorithm: 'TLS_AES_256_GCM_SHA384' }).status, 'approved', 'TLS 1.3 AEAD suite still approved');
+});
+
+test('review #3: key establishment with no identifiable key exchange is unknown, not approved', () => {
+  const kex = { purpose: 'key_establishment', type: 'protocol' };
+  assert.equal(s({ algorithm: 'key-exchange group not reported / TLSv1.3 / TLS_AES_256_GCM_SHA384', ...kex }).status, 'unknown');
+  assert.equal(s({ algorithm: 'key-exchange group not reported / TLSv1.3 / TLS_AES_256_GCM_SHA384', ...kex }).ruleId, 'kex.undetermined');
+  assert.equal(s({ algorithm: 'x25519 / TLSv1.3 / TLS_AES_256_GCM_SHA384', ...kex }).status, 'non_fips');
+  assert.equal(s({ algorithm: 'ML-KEM-768 + X25519 (Hybrid)', ...kex }).status, 'pq_approved');
+});
+
+test('review #4: a SHA-1-signed certificate with a NULL purpose (legacy row) is disallowed', () => {
+  assert.equal(s({ algorithm: 'RSA', key_size: 2048, hash_algorithm: 'SHA-1', type: 'certificate', purpose: null }).status, 'disallowed');
+  // Non-signature SHA-1 (e.g. HMAC on a config row) is still only on a sunset.
+  assert.equal(s({ algorithm: 'HMAC-SHA1', type: 'config', purpose: null }).status, 'acceptable');
+});
+
+test('review #5: in a DHE-RSA suite the RSA modulus is not used as the DH group size', () => {
+  assert.equal(s({ algorithm: 'DHE-RSA-AES256-SHA', key_size: 2048 }).status, 'unknown');
+  assert.equal(s({ algorithm: 'DH', key_size: 2048 }).status, 'acceptable', 'a standalone DH group still uses its own size');
+  assert.equal(s({ algorithm: 'DH', key_size: 1024 }).status, 'disallowed');
+});
+
+test('review #6: "OpenSSL 3…" is not the SSLv3 protocol; real SSLv3 still is', () => {
+  assert.notEqual(s({ algorithm: 'OpenSSL 3.0 FIPS provider', type: 'config' }).status, 'disallowed');
+  assert.equal(s({ algorithm: 'SSLv3' }).status, 'disallowed');
+  assert.equal(s({ algorithm: 'SSL 3.0' }).status, 'disallowed');
+});
+
+test('review #2: the deck counts Shor-breakable public-key assets, not every is_vulnerable row', () => {
+  const f = buildDeckFacts([
+    { algorithm: '3DES', is_vulnerable: true, type: 'config', purpose: 'configuration' },
+    { algorithm: 'MD5', is_vulnerable: true, type: 'config', purpose: 'configuration' },
+    { algorithm: 'RSA', key_size: 2048, is_vulnerable: true, purpose: 'tls_certificate' },
+  ]);
+  assert.equal(f.vuln, 1);
+  assert.match(f.baseline, /^1 of 3 assets \(33%\)/);
+  assert.ok(f.gaps.lines.some(l => l.startsWith('NSA CNSA 2.0 | 1 quantum-vulnerable asset')));
+});
+
+test('review #7: the rollup indexes non-compliant instances per algorithm (proportional priority bump)', () => {
+  const { nonCompliantByAlgorithm } = summarizeFipsComplianceIndexed([
+    { algorithm: 'RSA', key_size: 2048, hash_algorithm: null, purpose: 'tls_certificate', type: 'certificate', count: 500 },
+    { algorithm: 'RSA', key_size: 1024, hash_algorithm: null, purpose: 'tls_certificate', type: 'certificate', count: 1 },
+  ]);
+  assert.equal(nonCompliantByAlgorithm.get('RSA'), 1, 'only the RSA-1024 instance is non-compliant');
+});

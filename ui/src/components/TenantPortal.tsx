@@ -2031,6 +2031,18 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     : (client.mcaLimit || 100);
   const usedSeats = machines.length;
 
+  // FIPS algorithm-approval KPI counts (CMVP/FIPS Stage 1) — one pass, recomputed only when the
+  // asset list changes (was three full filters inline on every render of this large component).
+  const fipsCounts = useMemo(() => {
+    let nonCompliant = 0, sunset = 0, undetermined = 0;
+    for (const a of assets) {
+      if (a.fipsStatus === 'disallowed' || a.fipsStatus === 'non_fips') nonCompliant++;
+      else if (a.fipsStatus === 'acceptable') sunset++;
+      else if (a.fipsStatus === 'unknown') undetermined++;
+    }
+    return { nonCompliant, sunset, undetermined };
+  }, [assets]);
+
   const filteredAssets = assets.filter(a => {
     if (sourceFilter !== 'all') {
       const effectiveSource = a.source || 'endpoint';
@@ -4672,9 +4684,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
                         {(() => {
                           // FIPS algorithm approval (CMVP/FIPS Stage 1) — algorithm only, not module validation.
-                          const nonCompliant = assets.filter(a => a.fipsStatus === 'disallowed' || a.fipsStatus === 'non_fips').length;
-                          const sunset = assets.filter(a => a.fipsStatus === 'acceptable').length;
-                          const undetermined = assets.filter(a => a.fipsStatus === 'unknown').length;
+                          const { nonCompliant, sunset, undetermined } = fipsCounts;
                           return (
                             <div
                               title="FIPS ALGORITHM approval (SP 800-131A Rev. 2, FIPS 203/204/205). This does not establish CMVP module validation, which is not yet assessed."

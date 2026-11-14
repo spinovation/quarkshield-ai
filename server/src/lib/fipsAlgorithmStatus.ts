@@ -47,7 +47,7 @@ export interface FipsResult {
   status: FipsStatus;
   standard: string;            // governing document for the deciding rule
   deprecatedAfter?: string;    // ISO date — status worsens to "deprecated" after this
-  disallowedAfter?: string;    // ISO date — the hard sunset (persisted as fips_transition_date)
+  disallowedAfter?: string;    // ISO date — the hard sunset
   draft: boolean;              // true when any date relies on draft guidance (NIST IR 8547)
   rationale: string;
   ruleId: string;              // which rule fired — evidence trail
@@ -66,6 +66,13 @@ const IR8547_DISALLOW_ALL = '2035-12-31';
 const SHA1_RETIRE = '2030-12-31';
 
 const SIGNATURE_PURPOSES = new Set(['tls_certificate', 'code_or_data_signing', 'ca_trust_anchor', 'ssh_authentication']);
+// Asset types that are signature-bearing by nature — used when `purpose` is missing (legacy rows
+// pre-date the purpose column) so e.g. a SHA-1-signed certificate is still judged as a signature.
+const SIGNATURE_TYPES = new Set(['certificate', 'ca_root', 'signature', 'ssh_key', 'keystore']);
+// Rules that identify a KEY-ESTABLISHMENT primitive. A key_establishment finding with none of
+// these (e.g. 'key-exchange group not reported / TLSv1.3 / TLS_AES_256_GCM_SHA384') has an
+// undetermined key exchange and must not be reported as approved on the strength of its cipher.
+const KEX_RULES = new Set(['pq.mlkem', 'pq.mlkem.hybrid', 'kex.xcurve', 'rsa', 'rsa.nosize', 'ecc', 'ecc.nosize', 'ecc.curve', 'dh', 'dh.nosize', 'pq.prestandard']);
 const MODULE_TYPES = new Set(['package', 'library', 'dependency', 'sbom']);
 
 const r = (status: FipsStatus, standard: string, ruleId: string, rationale: string,
@@ -108,7 +115,8 @@ const curveBits = (a: string, keySize?: number | null): { bits: number | null; a
 const evalPrimitive = (aRaw: string, f: FipsInput): FipsResult | null => {
   const a = aRaw.toUpperCase();
   const purpose = String(f.purpose || 'unknown');
-  const isSig = SIGNATURE_PURPOSES.has(purpose);
+  const isSig = SIGNATURE_PURPOSES.has(purpose) ||
+    (purpose === 'unknown' && SIGNATURE_TYPES.has(String(f.type || '').toLowerCase()));
   const ks = f.key_size && f.key_size > 0 ? f.key_size : null;
 
   // ---- Post-quantum (check first: hybrid names also contain classical tokens) ----
@@ -130,7 +138,7 @@ const evalPrimitive = (aRaw: string, f: FipsInput): FipsResult | null => {
   }
 
   // ---- Protocol versions (SP 800-52 Rev. 2) ----
-  if (/SSL ?V?[23]|TLS ?V?1\.[01]\b/.test(a)) {
+  if (/(?<!OPEN)SSL ?V?[23]\b|TLS ?V?1\.[01]\b/.test(a)) {
     return r('disallowed', 'SP 800-52 Rev. 2', 'proto.tls_legacy', 'SSL and TLS 1.0/1.1 are not permitted for federal systems; require TLS 1.2+ (TLS 1.3 preferred).');
   }
 
@@ -155,7 +163,10 @@ const evalPrimitive = (aRaw: string, f: FipsInput): FipsResult | null => {
     return qvPublicKey(`${/ECDH/.test(a) ? 'ECDH' : 'ECDSA'} P-${c.bits}`, Math.floor(c.bits / 2), 'ecc');
   }
   if (/DIFFIE|\bDHE?\b|FFDHE|MODP/.test(a)) {
-    if (!ks) return r('unknown', 'SP 800-131A Rev. 2', 'dh.nosize', 'Finite-field DH group size was not captured, so its approval status cannot be determined.');
+    // On a cipher-suite row ("DHE-RSA-…") key_size is the authentication key's modulus, not
+    // the DH group — never use it as the group size (a 1024-bit group would be masked).
+    const authInSuite = /RSA|DSA|ECDSA/.test(String(f.algorithm || '').toUpperCase());
+    if (!ks || authInSuite) return r('unknown', 'SP 800-131A Rev. 2', 'dh.nosize', 'Finite-field DH group size was not captured, so its approval status cannot be determined.');
     return qvPublicKey(`DH-${ks}`, ifcStrength(ks), 'dh');
   }
 
@@ -205,7 +216,11 @@ export const fipsAlgorithmStatus = (f: FipsInput): FipsResult => {
   // "ECDHE-RSA-AES128-GCM-SHA256", "sha256WithRSAEncryption" and
   // "TLS 1.3 / AES-256-GCM / SHA-256" are judged component by component.
   const isPqUnit = /ML-?KEM|MLKEM|ML-?DSA|MLDSA|SLH-?DSA|\bLMS\b|XMSS/i.test(algo);
-  const parts = isPqUnit ? [algo] : algo.split(/\s*[\/,+|]\s*|[-_\s]*WITH[-_\s]*|-(?=(?:RSA|ECDSA|ECDHE?|DHE?|AES|SHA|CHACHA|3DES|DES|RC4|MD5)\b)/i);
+  // IANA suite names use '_' ("TLS_ECDHE_RSA_WITH_RC4_128_SHA"); '_' is a regex word char, so
+  // \bDES\b / \bRC4\b / \bAES could never match inside them. Normalize to '-' first.
+  const norm = isPqUnit ? algo : algo.replace(/_/g, '-');
+  const parts = isPqUnit ? [algo] : norm.split(
+    /\s*[\/,+|]\s*|[-\s]*WITH[-\s]*|-(?=(?:RSA|ECDSA|ECDHE?|DHE?|AES|SHA|CHACHA|3DES|DES|RC4|MD5|CAMELLIA|ARIA|SEED|IDEA|NULL)(?![A-Z]))|-(?=(?:AES|SHA|RC4|DES)\d)/i);
   const results: FipsResult[] = parts.filter(Boolean).map(p => evalPrimitive(p, f)).filter((x): x is FipsResult => !!x);
 
   // A cert/key row's hash_algorithm (e.g. sha1WithRSAEncryption's SHA-1) is part of the finding.
@@ -213,22 +228,16 @@ export const fipsAlgorithmStatus = (f: FipsInput): FipsResult => {
     const h = evalPrimitive(String(f.hash_algorithm), f);
     if (h) results.push(h);
   }
+  if (String(f.purpose || '') === 'key_establishment' && !results.some(x => KEX_RULES.has(x.ruleId))) {
+    results.push(r('unknown', 'SP 800-56A Rev. 3', 'kex.undetermined',
+      'The key-exchange method was not identified, so this key-establishment finding cannot be assessed as approved.'));
+  }
   if (results.length === 0) {
     return r('unknown', '—', 'unrecognized', `Algorithm "${algo}" is not recognized by FIPS table ${FIPS_TABLE_VERSION}; status not determined.`);
   }
   // Worst first; on an approved/pq_approved tie keep pq_approved (the algorithm, not its hash).
   results.sort((x, y) => SEVERITY[y.status] - SEVERITY[x.status] || (x.status === 'pq_approved' ? -1 : y.status === 'pq_approved' ? 1 : 0));
   return results[0];
-};
-
-/**
- * The three persisted assets columns, in INSERT order:
- * [fips_status, fips_standard, fips_transition_date]. Every ingest site calls this one
- * function so the stored value can never drift from the resolver.
- */
-export const fipsColumns = (f: FipsInput): [FipsStatus, string, string | null] => {
-  const x = fipsAlgorithmStatus(f);
-  return [x.status, x.standard, x.disallowedAfter || null];
 };
 
 /** Short console/report label for a status. */

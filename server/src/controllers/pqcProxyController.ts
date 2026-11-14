@@ -5,7 +5,6 @@ import tls from 'tls';
 import net from 'net';
 import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
 import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
-import { fipsColumns } from '../lib/fipsAlgorithmStatus';
 
 /**
  * Derive real KEM crypto metadata from the gateway's CONFIGURED tls curve.
@@ -70,9 +69,8 @@ export const syndicateProxyToAssets = async (
     // 1. KEM / ingress key-exchange asset, derived from the configured curve.
     await pool.query(`
       INSERT INTO assets (
-        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose,
-        fips_status, fips_standard, fips_transition_date
-      ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, $7, 'planned', $8, $9, 'pqc_proxy', $10, $11, 'key_establishment', $12, $13, $14)
+        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose
+      ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, $7, 'planned', $8, $9, 'pqc_proxy', $10, $11, 'key_establishment')
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         path = EXCLUDED.path,
@@ -84,9 +82,6 @@ export const syndicateProxyToAssets = async (
         recommendation = EXCLUDED.recommendation,
         tenant_name = EXCLUDED.tenant_name,
         purpose = EXCLUDED.purpose,
-        fips_status = EXCLUDED.fips_status,
-        fips_standard = EXCLUDED.fips_standard,
-        fips_transition_date = EXCLUDED.fips_transition_date,
         updated_at = NOW()
     `, [
       kemId,
@@ -99,8 +94,7 @@ export const syndicateProxyToAssets = async (
       `QuarkShield hybrid TLS gateway CONFIGURED with curve "${tlsCurve || 'X25519MLKEM768'}" for ${name}. Status is 'planned' until the generated proxy config is deployed and a live hybrid handshake is confirmed — it does not yet protect traffic.`,
       kem.recommendation,
       name,
-      tenantName,
-      ...fipsColumns({ algorithm: kem.algorithm, key_size: kem.keySize, purpose: 'key_establishment', type: 'protocol' }),
+      tenantName
     ]);
 
     // 2. Measured upstream TLS asset — only when we actually probed the upstream.
@@ -111,9 +105,8 @@ export const syndicateProxyToAssets = async (
       const groupLabel = measured.group || 'key-exchange group not reported';
       await pool.query(`
         INSERT INTO assets (
-          id, type, name, path, algorithm, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose,
-          fips_status, fips_standard, fips_transition_date
-        ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, 'active', $7, $8, 'pqc_proxy', $9, $10, 'key_establishment', $11, $12, $13)
+          id, type, name, path, algorithm, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose
+        ) VALUES ($1, 'protocol', $2, $3, $4, $5, $6, 'active', $7, $8, 'pqc_proxy', $9, $10, 'key_establishment')
         ON CONFLICT (id) DO UPDATE SET
           name = EXCLUDED.name,
           path = EXCLUDED.path,
@@ -124,9 +117,6 @@ export const syndicateProxyToAssets = async (
           recommendation = EXCLUDED.recommendation,
           tenant_name = EXCLUDED.tenant_name,
           purpose = EXCLUDED.purpose,
-          fips_status = EXCLUDED.fips_status,
-          fips_standard = EXCLUDED.fips_standard,
-          fips_transition_date = EXCLUDED.fips_transition_date,
           updated_at = NOW()
       `, [
         upId,
@@ -138,11 +128,7 @@ export const syndicateProxyToAssets = async (
         `Measured upstream negotiation for ${upstreamUrl}: key-exchange ${groupLabel}${proto !== 'unknown' ? ', ' + proto : ''}${measured.cipher ? ', ' + measured.cipher : ''}. Quantum exposure is judged by the key-exchange group, not the TLS version.`,
         grp.note,
         name,
-        tenantName,
-        ...fipsColumns({
-          algorithm: `${groupLabel}${proto !== 'unknown' ? ' / ' + proto : ''}${measured.cipher ? ' / ' + measured.cipher : ''}`,
-          purpose: 'key_establishment', type: 'protocol',
-        }),
+        tenantName
       ]);
     }
   } catch (e) {

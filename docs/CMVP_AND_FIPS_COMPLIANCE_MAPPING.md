@@ -242,6 +242,8 @@ Design principle: **extend, don't fork** — same as the sibling specs and the D
 
 ### 7.1 `assets` columns (nullable ALTERs — existing rows + ingest unaffected)
 
+> **As built (Stage 1):** A1 is **computed on read and not persisted**. An earlier cut wrote `fips_status / fips_standard / fips_transition_date` at every ingest site, but review found no code read them. The roadmap and console recompute with the resolver anyway, which is required for legacy rows and is lossless (the stored copy dropped the `draft` flag and rationale). A stored copy would also go stale on every `FIPS_TABLE_VERSION` change. Add the A1 columns only when a SQL-side filter actually needs them, together with a `fips_table_version` stamp so stale rows are detectable. The block below is the **target** shape for Stage 5's `compliance_verdict`.
+
 ```sql
 -- server/src/models/schema.sql (append). Module columns (cmvp_*) are OWNED by
 -- CMVP_CERT_CAPTURE_DESIGN.md; listed here only to show the full verdict input.
@@ -254,7 +256,7 @@ CREATE INDEX IF NOT EXISTS idx_assets_fips_status ON assets(fips_status);
 CREATE INDEX IF NOT EXISTS idx_assets_compliance_verdict ON assets(compliance_verdict);
 ```
 
-A1 is **server-computed at ingest** from the vendored table (no agent change, unlike A2). `compliance_verdict` is derived and safe to recompute on report; it is persisted for the queryable console filter. Legacy rows stay `NULL` → render "not determined" until re-scanned. Mirrors the `purpose`-column rollout (`schema.sql:63`, populated at every ingest site).
+A1 is **server-computed** from the vendored table (no agent change, unlike A2); as built it is computed on read (see the note above). `compliance_verdict` is derived and safe to recompute on report; it is persisted for the queryable console filter. Legacy rows stay `NULL` → render "not determined" until re-scanned. Mirrors the `purpose`-column rollout (`schema.sql:63`, populated at every ingest site).
 
 ### 7.2 No new table
 
@@ -280,7 +282,7 @@ Ordered so that **RFP-citable value ships before the hardest collection work**, 
 
 | Stage | Goal (buyer-facing exit criterion) | Builds | Prereq | Effort | Agent rebuild? |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **1 — Algorithm axis (A1)** ✅ | *"N algorithms are disallowed under SP 800-131A today; M are approved but sunset by \<date\>."* Visible to every tenant. | Versioned table `lib/fipsAlgorithmStatus.ts` (§5.1); pure `fipsAlgorithmStatus()` + DB-free tests; `fips_status`/`fips_standard`/`fips_transition_date` columns computed at every ingest site; per-asset chip + core counts tile (ungated); deadline-aware roadmap ordering (§6.1). | §5.1, §7.1 | **M** | No |
+| **1 — Algorithm axis (A1)** ✅ | *"N algorithms are disallowed under SP 800-131A today; M are approved but sunset by \<date\>."* Visible to every tenant. | Versioned table `lib/fipsAlgorithmStatus.ts` (§5.1); pure `fipsAlgorithmStatus()` + DB-free tests; status computed on read (not persisted, §7.1); per-asset chip + core counts tile (ungated); deadline-aware roadmap ordering (§6.1). | §5.1, §7.1 | **M** | No |
 | **2 — CBOM honesty fix** | CBOM `nistQuantumSecurityLevel` reflects the real FIPS parameter set (or is omitted), plus `quarkshield:fipsStatus`/`fipsStandard`/`transitionDate` properties. | Replace `cyclonedx.ts:61` binary `nqsl`; add crypto properties (§6.3). | Stage 1 | **S** | No |
 | **3 — CMVP via connectors (A2, cheapest/highest-confidence)** | *"This KMS/HSM-backed key is performed by CMVP cert #\<n\> (Active, FIPS 140-3)."* | Vendor `cmvp_modules.json` (§5.2) + offline refresh job; teach KMS/HSM connectors (`pkiConnectorController.ts`) to report module name/vendor/cert for AWS KMS FIPS, CloudHSM, Luna, nShield; populate `cmvp_*` fields on those assets. Prereqs **P-c, P-d, P-e**. | Stages 1, §3.1 | **M** (data curation) | No (connector-side) |
 | **4 — CMVP module identity on hosts (A2, P-a)** | *"OpenSSL FIPS Provider 3.0.0 on this host → cert #4282 (environment: RHEL 8 / x86-64)."* | Agent resolves providing module + version + operating environment per finding (extend `sbom_scanner.go` fingerprinting and tie it to the asset); new `AuditResult` module fields; `agent/cmvp.go` resolver with match-precedence gate. | Stage 3 | **M–L** | **Yes** |
@@ -291,16 +293,22 @@ Ordered so that **RFP-citable value ships before the hardest collection work**, 
 
 Axis A1 is built end to end, server-side, with **no agent rebuild**.
 
-- **Resolver:** `server/src/lib/fipsAlgorithmStatus.ts`, with `fipsAlgorithmStatus()`, `fipsColumns()` and `FIPS_TABLE_VERSION`. It is pure, deterministic, and the one source of truth (§5.1 lists the rules and honesty rules).
-- **Schema:** `assets.fips_status VARCHAR(24)`, `fips_standard VARCHAR(40)`, `fips_transition_date DATE` (hard sunset), plus `idx_assets_fips_status`. All are nullable `ADD COLUMN IF NOT EXISTS`, in `schema.sql`.
-- **All five ingest writes** spread `fipsColumns(...)`: endpoint `ingestTelemetry` (`fleetController.ts`), git scan (`gitScanController.ts`), KMS/PKI sync (`pkiConnectorController.ts`), and both PQC-proxy assets (`pqcProxyController.ts`).
-- **Legacy rows correct immediately:** the roadmap rollup and the console API *recompute* status from `algorithm/key_size/hash/purpose` with the same resolver, instead of reading the persisted column. Rows from before the change (NULL until re-scanned) are therefore assessed correctly on day one. The persisted column serves indexed querying.
-- **Roadmap:** `RoadmapReport.fipsCompliance` covers disallowed-now, approved-with-sunset ordered earliest first, not-determined, module rows, and the table version. Each priority carries `fipsStatus`. A group whose weakest instance is disallowed or non-FIPS gets a ×1.3 compliance-now bump, and its rationale names that weakest instance rather than implying the whole group fails. Mosca gains a compliance-now clause, and the narrative facts gain a FIPS line.
+- **Resolver:** `server/src/lib/fipsAlgorithmStatus.ts`, with `fipsAlgorithmStatus()` and `FIPS_TABLE_VERSION`. It is pure, deterministic, and the one source of truth (§5.1 lists the rules and honesty rules).
+- **No schema change, computed on read:** the roadmap rollup and the console API compute status from `algorithm/key_size/hash/purpose/type` with the one resolver, so every row, including legacy rows, is judged with the current table version. When `purpose` is missing, signature-bearing *types* (certificate, CA root, signature, SSH key, keystore) are treated as signatures, so a legacy SHA-1-signed certificate is still disallowed. Persistence is deferred (§7.1).
+- **Roadmap:** `RoadmapReport.fipsCompliance` covers disallowed-now, approved-with-sunset ordered earliest first, not-determined, module rows, and the table version. Each priority carries `fipsStatus`. A group gets a compliance-now bump of up to ×1.3, in proportion to the share of its instances that are disallowed or non-FIPS. Its rationale states that share ("N of M instances — weakest … — is disallowed") rather than implying the whole group fails. Mosca gains a compliance-now clause, and the narrative facts gain a FIPS line.
 - **Exec report:** a "FIPS Algorithm Compliance" section in HTML, PDF and DOCX (`reportController.ts`), with the honesty note.
 - **Console (ungated):** the portal-data API adds `fipsStatus/fipsStandard/fipsTransitionDate/fipsDraft` per asset. `TenantPortal.tsx` gets a per-row FIPS chip (tooltip shows the standard, sunset, draft flag and "CMVP not yet assessed") and a "FIPS Non-Compliant Algorithms" KPI tile.
 - **Wording discipline:** nothing says "validated" or "compliant" for an approved algorithm. Approved instances are counted as *"CMVP module validation not yet determined"* (`approvedModuleUndetermined`) until Stage 3–5 supply the module axis.
-- **Verified:** 18 new DB-free tests in `server/test/fipsAlgorithmStatus.test.ts` (resolver plus rollup), and the full server suite passes 91/91. Server and UI `tsc --noEmit` are clean, and `vite build` succeeds. An end-to-end run against a scratch Postgres checked that `schema.sql` applies and the proxy ingest persists the right statuses, and that legacy NULL rows are assessed correctly in `buildRoadmapReport`.
-- **Not verified:** the console chip and tile were not viewed in a running browser, because the portal needs a signed-in tenant session. The fleet, git and PKI INSERTs were checked by placeholder count and a mirrored INSERT, not by driving those endpoints.
+- **Review hardening (2026-11-14):** an independent review led to these fixes, each with a regression test:
+  - underscore-style IANA suite names are now tokenized, so `TLS_RSA_WITH_DES_CBC_SHA` is disallowed and RC4 suites are non-FIPS;
+  - a key-establishment finding with no identifiable key exchange is `unknown`, not approved on the strength of its cipher;
+  - a SHA-1-signed certificate with a NULL purpose is disallowed;
+  - in a `DHE-RSA-…` suite the RSA modulus is no longer read as the DH group size;
+  - "OpenSSL 3…" no longer matches the SSLv3 rule;
+  - the FIPS rollup is no longer capped at 5000 groups;
+  - the deck counts Shor-breakable public-key assets with `isClassicalAsymmetric()` rather than the scanner's broader `is_vulnerable` flag.
+- **Verified:** DB-free tests in `server/test/fipsAlgorithmStatus.test.ts` (resolver, rollup and deck facts); the full server suite passes; server and UI `tsc --noEmit` are clean; `vite build` succeeds. An end-to-end run against a scratch Postgres checked that legacy NULL-purpose rows are assessed correctly in `buildRoadmapReport`.
+- **Not verified:** the console chip and tile were not viewed in a running browser, because the portal needs a signed-in tenant session.
 
 ### 9.2 Sequencing rationale
 

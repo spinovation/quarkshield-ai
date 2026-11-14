@@ -3458,9 +3458,9 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       ORDER BY a.is_vulnerable DESC, a.created_at DESC;
     `, [tenantNameSearch]);
 
-    // FIPS algorithm-approval status (CMVP/FIPS Stage 1, axis A1). Computed with the one
-    // resolver rather than read from assets.fips_status so legacy rows (NULL until re-scanned)
-    // show the correct status immediately. Algorithm approval only — not CMVP validation.
+    // FIPS algorithm-approval status (CMVP/FIPS Stage 1, axis A1), computed on read with the one
+    // resolver (never persisted, so it always reflects the current FIPS table). Algorithm
+    // approval only — not CMVP module validation.
     const assets = assetsQuery.rows.map((a: any) => {
       const f = fipsAlgorithmStatus({ algorithm: a.algorithm, key_size: a.keySize, hash_algorithm: a.hashAlgorithm, purpose: a.purpose, type: a.type });
       return { ...a, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft };

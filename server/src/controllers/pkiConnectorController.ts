@@ -15,7 +15,6 @@ import {
   publicConnector,
 } from './pkiConnectorConfig';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
-import { fipsColumns } from '../lib/fipsAlgorithmStatus';
 
 // Re-export the pure config helpers so existing importers (and tests) can reach
 // them from the controller; their implementations live in pkiConnectorConfig.ts
@@ -529,21 +528,16 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
     ]);
 
     // Syndicate into central assets inventory for unified CBOM & source filtering
-    const keyPurpose = classifyPurpose({ type: a.type, name: a.name, algorithm: a.algo, key_size: a.size, description: a.threat });
     await pool.query(`
       INSERT INTO assets (
-        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose,
-        fips_status, fips_standard, fips_transition_date
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         path = EXCLUDED.path,
         algorithm = EXCLUDED.algorithm,
         tenant_name = EXCLUDED.tenant_name,
-        purpose = EXCLUDED.purpose,
-        fips_status = EXCLUDED.fips_status,
-        fips_standard = EXCLUDED.fips_standard,
-        fips_transition_date = EXCLUDED.fips_transition_date
+        purpose = EXCLUDED.purpose
     `, [
       cbomAssetId,
       a.type,
@@ -558,8 +552,7 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
       sourceType,
       connectorName,
       tenantName,
-      keyPurpose,
-      ...fipsColumns({ algorithm: a.algo, key_size: a.size, purpose: keyPurpose, type: a.type }),
+      classifyPurpose({ type: a.type, name: a.name, algorithm: a.algo, key_size: a.size, description: a.threat }),
     ]).catch(err => {
       console.warn('Failed to syndicate PKI asset to CBOM:', err);
     });

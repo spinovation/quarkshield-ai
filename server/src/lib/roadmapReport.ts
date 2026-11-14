@@ -188,17 +188,21 @@ export interface FipsGroupRow {
 }
 
 /**
- * Pure, DB-free FIPS algorithm-compliance rollup. Recomputes status from the row's
- * algorithm/key_size/hash/purpose with the ONE resolver (fipsAlgorithmStatus.ts) rather
- * than reading the persisted fips_status column — so legacy rows that pre-date the column
- * (NULL until re-scanned) are assessed correctly the moment this ships.
+ * Pure, DB-free FIPS algorithm-compliance rollup. Computes status from the row's
+ * algorithm/key_size/hash/purpose/type with the ONE resolver (fipsAlgorithmStatus.ts) — status
+ * is never persisted, so every row (including legacy rows with a NULL purpose) is assessed
+ * with the current FIPS_TABLE_VERSION.
  */
-export const summarizeFipsCompliance = (rows: FipsGroupRow[]): FipsCompliance => {
+export const summarizeFipsCompliance = (rows: FipsGroupRow[]): FipsCompliance => summarizeFipsComplianceIndexed(rows).fc;
+
+/** Same rollup plus algorithm → count of disallowed / non-FIPS instances (for priority scoring). */
+export const summarizeFipsComplianceIndexed = (rows: FipsGroupRow[]): { fc: FipsCompliance; nonCompliantByAlgorithm: Map<string, number> } => {
   const byStatus: Record<FipsStatus, number> = {
     pq_approved: 0, approved: 0, acceptable: 0, restricted: 0, disallowed: 0, non_fips: 0, not_applicable: 0, unknown: 0,
   };
   const disallowed = new Map<string, { algorithm: string; count: number; standard: string; rationale: string }>();
   const sunset = new Map<string, { algorithm: string; count: number; disallowedAfter: string; standard: string; draft: boolean }>();
+  const nonCompliantByAlgorithm = new Map<string, number>();
 
   for (const row of rows) {
     const n = Number(row.count) || 0;
@@ -210,6 +214,7 @@ export const summarizeFipsCompliance = (rows: FipsGroupRow[]): FipsCompliance =>
     const label = row.key_size && /RSA|DH|DSA/i.test(row.algorithm) && !/\d{3,}/.test(row.algorithm)
       ? `${row.algorithm}-${row.key_size}` : row.algorithm;
     if (res.status === 'disallowed' || res.status === 'non_fips') {
+      nonCompliantByAlgorithm.set(row.algorithm, (nonCompliantByAlgorithm.get(row.algorithm) || 0) + n);
       const d = disallowed.get(label) || { algorithm: label, count: 0, standard: res.standard, rationale: res.rationale };
       d.count += n; disallowed.set(label, d);
     } else if (res.status === 'acceptable' && res.disallowedAfter) {
@@ -234,13 +239,14 @@ export const summarizeFipsCompliance = (rows: FipsGroupRow[]): FipsCompliance =>
       (byStatus.acceptable ? `; ${byStatus.acceptable} are approved but on a published sunset${nextSunset ? ` (earliest: ${nextSunset.algorithm} after ${nextSunset.disallowedAfter}${nextSunset.draft ? ', draft' : ''})` : ''}` : '') +
       (byStatus.unknown ? `; ${byStatus.unknown} not determined (missing key size or unrecognized)` : '') + '.';
 
-  return {
+  const fc: FipsCompliance = {
     tableVersion: FIPS_TABLE_VERSION, assessed, moduleRows, byStatus, disallowedNow,
     approvedModuleUndetermined, topDisallowed, sunsetting, headline,
     note: `FIPS ALGORITHM approval only (SP 800-131A Rev. 2, FIPS 186-5, FIPS 203/204/205, SP 800-52 Rev. 2; table ${FIPS_TABLE_VERSION}). ` +
       `It does NOT establish that any algorithm runs in a CMVP-validated module: the ${approvedModuleUndetermined} approved instance(s) have CMVP module validation NOT YET DETERMINED. ` +
       'Dates marked "draft" come from NIST IR 8547 (initial public draft) and may change.',
   };
+  return { fc, nonCompliantByAlgorithm };
 };
 
 const severityRank = (s: string): number => SEVERITY_WEIGHT[(s || 'high').toLowerCase()] ?? 3;
@@ -272,6 +278,7 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
             MODE() WITHIN GROUP (ORDER BY COALESCE(source,'endpoint')) AS dominant_source,
             MODE() WITHIN GROUP (ORDER BY COALESCE(NULLIF(purpose,''),'unknown')) AS dominant_purpose,
             MIN(key_size) AS min_key_size,
+            MODE() WITHIN GROUP (ORDER BY type) AS dominant_type,
             MODE() WITHIN GROUP (ORDER BY hash_algorithm) AS dominant_hash,
             (ARRAY_AGG(DISTINCT COALESCE(risk_level,'high')))::text[] AS risks
      FROM assets ${where}${where ? ' AND' : 'WHERE'} is_vulnerable
@@ -289,8 +296,10 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     `SELECT COALESCE(algorithm,'') AS algorithm, key_size, hash_algorithm,
             NULLIF(purpose,'') AS purpose, type, COUNT(*)::int AS count
      FROM assets ${where}
-     GROUP BY 1, 2, 3, 4, 5 ORDER BY count DESC LIMIT 5000`, params);
-  const fipsCompliance = summarizeFipsCompliance(fipsQ.rows as FipsGroupRow[]);
+     GROUP BY 1, 2, 3, 4, 5`, params);
+  // No LIMIT: a capped GROUP BY silently dropped tail groups from every count while the headline
+  // still read "N of M" as if complete. The grouped result is bounded by distinct combinations.
+  const { fc: fipsCompliance, nonCompliantByAlgorithm } = summarizeFipsComplianceIndexed(fipsQ.rows as FipsGroupRow[]);
 
   // Remediation families present (vulnerable).
   const t = totalsQ.rows[0] || {};
@@ -315,10 +324,15 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     // Compliance-now: an algorithm already disallowed / non-FIPS is non-compliant TODAY,
     // independent of CRQC timing, so it outranks an equal quantum-only exposure. Judged on
     // the group's weakest instance (smallest key) — deterministic, from the one resolver.
-    const fips = fipsAlgorithmStatus({ algorithm: r.algorithm, key_size: r.min_key_size, hash_algorithm: r.dominant_hash, purpose });
-    const fipsMult = fips.status === 'disallowed' || fips.status === 'non_fips' ? 1.3 : 1.0;
+    // Pass the asset type too, so a legacy NULL-purpose certificate is still judged as a signature
+    // (keeps priorities consistent with the fipsCompliance rollup, which also passes type).
+    const fips = fipsAlgorithmStatus({ algorithm: r.algorithm, key_size: r.min_key_size, hash_algorithm: r.dominant_hash, purpose, type: r.dominant_type });
+    // Bump only by the SHARE of the group that is non-compliant: one RSA-1024 among 500 RSA-2048
+    // must not inflate all 501 as if every key were disallowed.
+    const nonCompliant = Math.min(r.count, nonCompliantByAlgorithm.get(r.algorithm) || 0);
+    const fipsMult = 1 + 0.3 * (r.count > 0 ? nonCompliant / r.count : 0);
     const score = Math.round(r.count * severityRank(sev) * exposureW * shorMult * hndlMult * fipsMult);
-    return { algorithm: r.algorithm, fam, count: r.count, sev, src, score, shorBreakable, purpose, fips, minKeySize: r.min_key_size as number | null };
+    return { algorithm: r.algorithm, fam, count: r.count, sev, src, score, shorBreakable, purpose, fips, nonCompliant, minKeySize: r.min_key_size as number | null };
   }).filter(x => x.fam !== 'PQC' && x.fam !== 'AES'); // exclude already-safe primitives
 
   scored.sort((a, b) => b.score - a.score);
@@ -327,13 +341,18 @@ export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapRe
     const purposeNote = x.purpose && x.purpose !== 'unknown' ? ` Purpose: ${meta.label.toLowerCase()} (${meta.urgencyLabel}).` : '';
     // The group is judged on its WEAKEST instance, so for multi-asset groups say exactly that
     // rather than implying every asset in the group is non-compliant.
-    const weakest = x.count > 1
-      ? `the weakest instance${x.minKeySize && !/\d{3,}/.test(x.algorithm) ? ` (${x.algorithm}-${x.minKeySize})` : ''} is `
-      : '';
+    // The group is judged on its WEAKEST instance; say how many instances that actually covers
+    // rather than implying every asset in the group fails.
+    const weakestKey = x.minKeySize && !/\d{3,}/.test(x.algorithm) ? `${x.algorithm}-${x.minKeySize}` : '';
+    const verb = x.fips.status === 'disallowed' ? 'disallowed' : 'not FIPS-approved';
     const fipsNote = x.fips.status === 'disallowed' || x.fips.status === 'non_fips'
-      ? ` FIPS: ${weakest}${x.fips.status === 'disallowed' ? 'disallowed' : 'not FIPS-approved'} under ${x.fips.standard} — non-compliant today.`
+      ? (x.count > 1 && x.nonCompliant
+          ? ` FIPS: ${x.nonCompliant} of ${x.count} instances are ${verb} under ${x.fips.standard}${weakestKey ? ` (weakest: ${weakestKey})` : ''} — non-compliant today.`
+          : x.count > 1
+            ? ` FIPS: the weakest instance${weakestKey ? ` (${weakestKey})` : ''} is ${verb} under ${x.fips.standard} — non-compliant today.`
+            : ` FIPS: ${verb} under ${x.fips.standard} — non-compliant today.`)
       : x.fips.status === 'acceptable' && x.fips.disallowedAfter
-        ? ` FIPS: ${weakest ? `${weakest}approved` : 'approved'} until ${x.fips.disallowedAfter}${x.fips.draft ? ' (NIST IR 8547 draft)' : ''}.` : '';
+        ? ` FIPS: approved until ${x.fips.disallowedAfter}${x.fips.draft ? ' (NIST IR 8547 draft)' : ''}.` : '';
     return {
       rank: i + 1,
       title: x.algorithm,
