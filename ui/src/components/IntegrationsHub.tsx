@@ -33,6 +33,21 @@ import {
   CheckCircle
 } from 'lucide-react';
 
+// Least-privilege setup for the Google Cloud KMS connector: a dedicated service account
+// holding only Cloud KMS Viewer (list/get key metadata). Kept in one place so the copy
+// button and the on-screen blueprint can never drift apart.
+const GCP_KMS_BLUEPRINT = `PROJECT_ID=your-project-id
+
+gcloud iam service-accounts create quarkshield-kms-reader \\
+  --project "$PROJECT_ID" --display-name "QuarkShield KMS reader"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \\
+  --member "serviceAccount:quarkshield-kms-reader@$PROJECT_ID.iam.gserviceaccount.com" \\
+  --role roles/cloudkms.viewer
+
+gcloud iam service-accounts keys create quarkshield-kms-reader.json \\
+  --iam-account "quarkshield-kms-reader@$PROJECT_ID.iam.gserviceaccount.com"`;
+
 export interface IntegrationsHubProps {
   tenantName?: string;
   licenseKey?: string;
@@ -44,7 +59,7 @@ export interface IntegrationsHubProps {
 
 interface ConnectorItem {
   id: string;
-  provider: 'aws_kms' | 'azure_keyvault' | 'hashicorp_vault' | 'ad_cs' | 'wire_tls' | 'fleet_endpoint' | 'git_repo';
+  provider: 'aws_kms' | 'azure_keyvault' | 'hashicorp_vault' | 'gcp_kms' | 'ad_cs' | 'wire_tls' | 'fleet_endpoint' | 'git_repo';
   tier: 'tier1' | 'tier2' | 'tier3';
   name: string;
   category: string;
@@ -160,6 +175,7 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
   const adcsConn = connectors.find(c => c.provider === 'ad_cs');
   const azureConn = connectors.find(c => c.provider === 'azure_keyvault');
   const vaultConn = connectors.find(c => c.provider === 'hashicorp_vault');
+  const gcpConn = connectors.find(c => c.provider === 'gcp_kms');
 
   const connectorCatalog: ConnectorItem[] = [
     {
@@ -213,6 +229,20 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
       vulnerableCount: vaultConn?.vulnerable_keys_count || 2,
       lastSync: vaultConn?.last_sync_at,
       dbConnectorId: vaultConn?.id
+    },
+    {
+      id: 'gcp_kms',
+      provider: 'gcp_kms',
+      tier: 'tier1',
+      name: 'Google Cloud KMS & Cloud HSM',
+      category: 'Cloud Infrastructure & KMS',
+      description: 'Read-only discovery of Cloud KMS key rings and crypto keys across all locations: algorithm, protection level (software / HSM / external) and rotation — including post-quantum ML-DSA, SLH-DSA and ML-KEM keys.',
+      status: gcpConn ? 'connected' : 'not_configured',
+      // Real counts only — 0 until a connector has actually synced.
+      discoveredCount: gcpConn?.total_keys_discovered || 0,
+      vulnerableCount: gcpConn?.vulnerable_keys_count || 0,
+      lastSync: gcpConn?.last_sync_at,
+      dbConnectorId: gcpConn?.id
     },
     {
       id: 'wire_tls',
@@ -341,6 +371,7 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
       case 'aws_kms':
       case 'azure_keyvault':
       case 'hashicorp_vault':
+      case 'gcp_kms':
         return 'cloud_kms';
       case 'ad_cs':
         return 'enterprise_pki';
@@ -929,6 +960,29 @@ export const IntegrationsHub: React.FC<IntegrationsHubProps> = ({
   }]
 }`}
                       </pre>
+                    </div>
+                  )}
+
+                  {selectedConnector.provider === 'gcp_kms' && (
+                    <div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
+                        <span style={{ fontSize: '0.8rem', fontWeight: 600, color: '#ffffff' }}>
+                          Google Cloud read-only service account (Cloud KMS Viewer):
+                        </span>
+                        <button
+                          onClick={() => copyToClipboard(GCP_KMS_BLUEPRINT, 'gcp-sa-modal')}
+                          style={{ background: 'transparent', border: 'none', color: '#00f2fe', cursor: 'pointer', fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.3rem' }}
+                        >
+                          {copiedKey === 'gcp-sa-modal' ? <Check size={13} color="#4ade80" /> : <Copy size={13} />}
+                          <span>{copiedKey === 'gcp-sa-modal' ? 'Copied Commands!' : 'Copy gcloud Commands'}</span>
+                        </button>
+                      </div>
+                      <pre style={{ background: 'rgba(0, 0, 0, 0.5)', border: '1px solid rgba(255, 255, 255, 0.08)', borderRadius: '8px', padding: '1rem', color: '#38bdf8', fontFamily: 'monospace', fontSize: '0.76rem', overflowX: 'auto', margin: 0 }}>
+{GCP_KMS_BLUEPRINT}
+                      </pre>
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginTop: '0.5rem', lineHeight: 1.5 }}>
+                        Then add the connector under Enterprise PKI &amp; Vaults → Google Cloud KMS and upload <code>quarkshield-kms-reader.json</code>. Metadata only — no key material, no cryptographic operations.
+                      </div>
                     </div>
                   )}
 

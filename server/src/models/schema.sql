@@ -472,7 +472,7 @@ CREATE TABLE IF NOT EXISTS pki_connectors (
   id VARCHAR(100) PRIMARY KEY,
   tenant_name VARCHAR(255) NOT NULL,
   name VARCHAR(255) NOT NULL,
-  provider VARCHAR(50) NOT NULL, -- 'aws_kms', 'azure_keyvault', 'hashicorp_vault', 'ad_cs'
+  provider VARCHAR(50) NOT NULL, -- 'aws_kms', 'azure_keyvault', 'hashicorp_vault', 'gcp_kms', 'ad_cs'
   endpoint_url VARCHAR(500),
   auth_type VARCHAR(50) DEFAULT 'token', -- 'iam_role', 'service_principal', 'token', 'kerberos'
   config_summary JSONB DEFAULT '{}'::jsonb,

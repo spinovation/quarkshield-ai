@@ -23,7 +23,7 @@ interface PkiConnector {
   id: string;
   tenant_name: string;
   name: string;
-  provider: 'aws_kms' | 'azure_keyvault' | 'hashicorp_vault' | 'ad_cs';
+  provider: 'aws_kms' | 'azure_keyvault' | 'hashicorp_vault' | 'gcp_kms' | 'ad_cs';
   endpoint_url: string;
   auth_type: string;
   config_summary: any;
@@ -64,7 +64,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
 
   // Form State for new connector
   const [connName, setConnName] = useState('');
-  const [connProvider, setConnProvider] = useState<'aws_kms' | 'azure_keyvault' | 'hashicorp_vault' | 'ad_cs'>('aws_kms');
+  const [connProvider, setConnProvider] = useState<'aws_kms' | 'azure_keyvault' | 'hashicorp_vault' | 'gcp_kms' | 'ad_cs'>('aws_kms');
   const [connEndpoint, setConnEndpoint] = useState('');
   const [connAuthType, setConnAuthType] = useState('iam_role');
   const [awsRegion, setAwsRegion] = useState('us-east-1');
@@ -78,6 +78,9 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
   const [vaultRoleId, setVaultRoleId] = useState('');
   const [vaultSecretId, setVaultSecretId] = useState('');
   const [vaultPkiMount, setVaultPkiMount] = useState('');
+  const [gcpProjectId, setGcpProjectId] = useState('');
+  const [gcpLocations, setGcpLocations] = useState('');
+  const [gcpServiceAccountJson, setGcpServiceAccountJson] = useState('');
   const [adCsCaName, setAdCsCaName] = useState('');
 
   // Clear any entered secrets from component state (hygiene: never keep plaintext
@@ -91,6 +94,9 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
     setAzureTenantId('');
     setAzureClientId('');
     setAzureClientSecret('');
+    setGcpProjectId('');
+    setGcpLocations('');
+    setGcpServiceAccountJson('');
     setVaultToken('');
     setVaultRoleId('');
     setVaultSecretId('');
@@ -216,6 +222,23 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
         // drives `trusts` edges to hosts (transit keys alone do not).
         if (vaultPkiMount.trim()) config.pkiMount = vaultPkiMount.trim();
         endpointUrl = connEndpoint.trim();
+      } else if (connProvider === 'gcp_kms') {
+        // Validate locally for a clear message; the server re-validates (incl. token_uri).
+        let sa: any;
+        try { sa = JSON.parse(gcpServiceAccountJson); } catch {
+          alert('The service-account key must be the JSON file downloaded from Google Cloud (IAM → Service accounts → Keys).');
+          return;
+        }
+        if (!sa?.client_email || !sa?.private_key) {
+          alert('That JSON is not a service-account key (missing client_email / private_key).');
+          return;
+        }
+        config.projectId = (gcpProjectId.trim() || sa.project_id || '').trim();
+        const locs = gcpLocations.split(',').map(l => l.trim()).filter(Boolean);
+        if (locs.length) config.locations = locs;
+        config.serviceAccountJson = gcpServiceAccountJson;
+        // Cloud KMS has one fixed global API endpoint (shown for reference only).
+        endpointUrl = 'https://cloudkms.googleapis.com';
       }
 
       const res = await fetch('/api/pki/connectors', {
@@ -272,6 +295,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
       case 'aws_kms': return <Cloud size={16} color="#f59e0b" />;
       case 'azure_keyvault': return <Cloud size={16} color="#0284c7" />;
       case 'hashicorp_vault': return <Lock size={16} color="#a855f7" />;
+      case 'gcp_kms': return <Cloud size={16} color="#34a853" />;
       case 'ad_cs': return <Server size={16} color="#3b82f6" />;
       default: return <Database size={16} color="var(--accent-cyan)" />;
     }
@@ -282,6 +306,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
       case 'aws_kms': return 'AWS KMS & Secrets';
       case 'azure_keyvault': return 'Azure Key Vault';
       case 'hashicorp_vault': return 'HashiCorp Vault';
+      case 'gcp_kms': return 'Google Cloud KMS';
       case 'ad_cs': return 'Microsoft AD CS';
       default: return provider;
     }
@@ -545,6 +570,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
               <option value="aws_kms">AWS KMS</option>
               <option value="azure_keyvault">Azure Key Vault</option>
               <option value="hashicorp_vault">HashiCorp Vault</option>
+              <option value="gcp_kms">Google Cloud KMS</option>
               <option value="ad_cs">Microsoft AD CS</option>
             </select>
           </div>
@@ -640,6 +666,7 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
                     { id: 'aws_kms', label: 'AWS KMS & Secrets' },
                     { id: 'azure_keyvault', label: 'Azure Key Vault' },
                     { id: 'hashicorp_vault', label: 'HashiCorp Vault' },
+                    { id: 'gcp_kms', label: 'Google Cloud KMS' },
                     { id: 'ad_cs', label: 'Microsoft AD CS · agent' }
                   ].map(p => (
                     <button
@@ -763,6 +790,47 @@ export const EnterprisePkiVaults: React.FC<{ tenantName?: string; onAssetsChange
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5, display: 'flex', gap: '0.4rem' }}>
                     <Info size={13} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
                     <span>Supply a <strong>Token</strong> or <strong>AppRole</strong> (Role ID + Secret ID). Transit-engine keys populate the inventory; add a <strong>PKI mount</strong> to also catalog issuer CA certificates — those are what link to hosts in the Threat &amp; Risk Graph. Token / Secret ID are AES-256-GCM encrypted at rest.</span>
+                  </div>
+                </>
+              )}
+
+              {connProvider === 'gcp_kms' && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Project ID (Optional)</label>
+                      <input type="text" autoComplete="off" placeholder="taken from the key file if blank" value={gcpProjectId} onChange={e => setGcpProjectId(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Locations (Optional)</label>
+                      <input type="text" autoComplete="off" placeholder="us-east1, global (blank = all)" value={gcpLocations} onChange={e => setGcpLocations(e.target.value)} style={{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }} />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.35rem' }}>Service-Account Key (JSON)</label>
+                    <input
+                      type="file"
+                      accept="application/json,.json"
+                      onChange={async e => {
+                        const file = e.target.files?.[0];
+                        if (file) setGcpServiceAccountJson(await file.text());
+                        e.target.value = '';
+                      }}
+                      style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.4rem' }}
+                    />
+                    <textarea
+                      rows={4}
+                      spellCheck={false}
+                      autoComplete="off"
+                      placeholder='…or paste the key file contents: {"type": "service_account", ...}'
+                      value={gcpServiceAccountJson}
+                      onChange={e => setGcpServiceAccountJson(e.target.value)}
+                      style={{ ...{ width: '100%', padding: '0.6rem', fontSize: '0.85rem', borderRadius: '6px', background: 'rgba(0,0,0,0.3)', border: '1px solid rgba(255, 255, 255, 0.1)', color: '#ffffff' }, fontFamily: 'monospace', fontSize: '0.72rem', resize: 'vertical' }}
+                    />
+                  </div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', lineHeight: 1.5, display: 'flex', gap: '0.4rem' }}>
+                    <Info size={13} style={{ flexShrink: 0, marginTop: '0.1rem' }} />
+                    <span>Create a dedicated service account with only the <code>Cloud KMS Viewer</code> role (<code>roles/cloudkms.viewer</code>) and upload its JSON key. QuarkShield reads key metadata only (algorithm, protection level, rotation) — never key material, and it performs no cryptographic operations. The key is AES-256-GCM encrypted at rest and never returned by the API.</span>
                   </div>
                 </>
               )}

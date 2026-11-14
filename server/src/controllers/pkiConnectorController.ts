@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { discoverKmsKeys, pingKms, DiscoveredAsset } from '../lib/awsKms';
 import { discoverVaultKeys, pingVault } from '../lib/hashiVault';
 import { discoverAzureKeys, pingAzure } from '../lib/azureKeyVault';
+import { discoverGcpKeys, pingGcp } from '../lib/gcpKms';
 import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
 import { assertPublicHost } from '../utils/ssrf';
 import {
@@ -12,6 +13,7 @@ import {
   parseKmsConfig,
   parseVaultConfig,
   parseAzureConfig,
+  parseGcpConfig,
   publicConnector,
 } from './pkiConnectorConfig';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
@@ -19,7 +21,7 @@ import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
 // Re-export the pure config helpers so existing importers (and tests) can reach
 // them from the controller; their implementations live in pkiConnectorConfig.ts
 // (dependency-light: no DB / cloud SDK load).
-export { sealConnectorSecrets, parseKmsConfig, parseVaultConfig, parseAzureConfig, publicConnector };
+export { sealConnectorSecrets, parseKmsConfig, parseVaultConfig, parseAzureConfig, parseGcpConfig, publicConnector };
 
 /**
  * Reject a connector endpoint URL that targets a non-public host (SSRF): a
@@ -40,7 +42,7 @@ const assertConnectorHostPublic = async (endpointUrl?: string): Promise<void> =>
 
 // Providers with a real backend implemented. Others return clearly-labeled
 // preview (simulated) data until their integrations land (DEF-51).
-const REAL_PROVIDERS = new Set(['aws_kms', 'hashicorp_vault', 'azure_keyvault']);
+const REAL_PROVIDERS = new Set(['aws_kms', 'hashicorp_vault', 'azure_keyvault', 'gcp_kms']);
 
 // Quantum-safe allow-list. Anything NOT matched here (RSA, ECC, DSA, DH,
 // Diffie-Hellman, X25519, Ed25519, ElGamal, or unknown asymmetric) is treated as
@@ -103,7 +105,7 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     const {
       tenantName = 'SPINOVATIONCORP',
       name,
-      provider, // 'aws_kms', 'azure_keyvault', 'hashicorp_vault', 'ad_cs'
+      provider, // 'aws_kms', 'azure_keyvault', 'hashicorp_vault', 'gcp_kms', 'ad_cs'
       endpointUrl,
       authType = 'token',
       config = {}
@@ -197,6 +199,7 @@ export const testPkiConnector = async (req: Request, res: Response) => {
         let r: { message: string; region?: string };
         if (c.provider === 'aws_kms') r = await pingKms(parseKmsConfig(c));
         else if (c.provider === 'hashicorp_vault') r = await pingVault(parseVaultConfig(c));
+        else if (c.provider === 'gcp_kms') r = await pingGcp(parseGcpConfig(c));
         else r = await pingAzure(parseAzureConfig(c));
         return res.json({
           success: true, connectorId: id, provider: c.provider, endpoint: c.endpoint_url,
@@ -429,6 +432,7 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
       if (provider === 'aws_kms') assets = await discoverKmsKeys(parseKmsConfig(row));
       else if (provider === 'hashicorp_vault') assets = await discoverVaultKeys(parseVaultConfig(row));
       else if (provider === 'azure_keyvault') assets = await discoverAzureKeys(parseAzureConfig(row));
+      else if (provider === 'gcp_kms') assets = await discoverGcpKeys(parseGcpConfig(row));
       return await persistAssets(connectorId, tenantName, provider, connectorName, assets);
     } catch (e: any) {
       await pool.query(
