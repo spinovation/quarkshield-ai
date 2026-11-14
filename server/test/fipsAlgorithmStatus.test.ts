@@ -174,3 +174,46 @@ test('a clean inventory yields NO invented gaps', () => {
   const g = buildComplianceGaps([{ algorithm: 'ML-KEM-768', is_vulnerable: false }, { algorithm: 'AES-256-GCM', is_vulnerable: false }]);
   assert.deepEqual(g.lines, []);
 });
+
+// ---- AI generators: tenant scope + deck facts --------------------------------
+
+import { resolveAssetScope, buildDeckFacts } from '../src/controllers/aiController';
+
+const req = (user: any, query: any = {}, body: any = {}) => ({ user, query, body } as any);
+
+test('tenant scope: tenant sessions are pinned to their own tenant; no fleet fall-through', () => {
+  assert.deepEqual(resolveAssetScope(req(undefined)), { ok: false, status: 401, error: 'Authentication required.' });
+  // A tenant user cannot widen scope via ?tenant / body.tenant.
+  assert.deepEqual(resolveAssetScope(req({ role: 'admin', tenant: 'acme' }, { tenant: 'othercorp' }, { tenant: 'othercorp' })), { ok: true, tenant: 'acme' });
+  // A non-super session with NO tenant must not see the whole fleet.
+  const noTenant = resolveAssetScope(req({ role: 'admin', tenant: '' }));
+  assert.equal(noTenant.ok, false);
+  assert.equal((noTenant as any).status, 403);
+});
+
+test('tenant scope: super sessions may target a tenant, else fleet', () => {
+  assert.deepEqual(resolveAssetScope(req({ role: 'superadmin' }, { tenant: 'acme' })), { ok: true, tenant: 'acme' });
+  assert.deepEqual(resolveAssetScope(req({ role: 'superadmin' }, { tenant: 'all' })), { ok: true, tenant: null });
+});
+
+test('deck facts: HNDL only for key establishment; no invented Mosca numbers; 0 assets = 0%', () => {
+  const f = buildDeckFacts([
+    { algorithm: 'RSA', key_size: 2048, is_vulnerable: true, purpose: 'key_establishment' },
+    { algorithm: 'ECDSA P-256', is_vulnerable: true, purpose: 'tls_certificate' },
+    { algorithm: 'RSA', key_size: 1024, is_vulnerable: true, purpose: 'code_or_data_signing' },
+    { algorithm: 'AES-256-GCM', is_vulnerable: false, purpose: 'symmetric' },
+    { algorithm: 'SHA-256', is_vulnerable: false, purpose: 'unknown' },
+  ]);
+  assert.equal(f.hndl, 1);
+  assert.equal(f.sig, 2);
+  assert.match(f.baseline, /3 of 5 assets \(60%\)/);
+  assert.match(f.baseline, /1 key-establishment asset/);
+  assert.match(f.tiers[0], /Non-compliant today: 1 .*RSA-1024/);
+  assert.ok(f.tiers.some(t => /RSA-2048 after 2035-12-31 \(NIST IR 8547 draft\)/.test(t)), 'RSA-2048 is a sunset, not a critical deficit');
+  assert.ok(f.tiers.every(t => !/SHA-256[^.]*vulnerable/i.test(t)), 'SHA-256 is never called quantum-vulnerable');
+  assert.ok(!/fully compliant/i.test(f.tiers.join(' ')));
+  assert.doesNotMatch(f.mosca, /\d+\s*>\s*\d+|= \d/, 'no invented shelf-life / CRQC numbers');
+  const empty = buildDeckFacts([]);
+  assert.equal(empty.vulnPct, 0);
+  assert.match(empty.baseline, /No cryptographic assets are in scope/);
+});

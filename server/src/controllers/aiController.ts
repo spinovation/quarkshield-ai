@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import { isSuperRole } from '../middleware/auth';
 import { summarizeFipsCompliance, FipsGroupRow, FipsCompliance } from '../lib/roadmapReport';
+import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
 
 // =============================================================================
 // PQC Copilot scope guardrail
@@ -1463,10 +1464,48 @@ function parseCmdbMetadata(desc: string) {
 }
 
 // POST /api/ai/correlate
+/**
+ * SECURITY: tenant read scope for the correlation / deck / report generators. These read
+ * the whole `assets` table and tenant BYO API keys, so they must never cross tenants:
+ *  - no session                              → 401
+ *  - non-super session                       → pinned to its OWN tenant (body/query ignored)
+ *  - non-super session with NO tenant        → 403 (never falls through to the whole fleet)
+ *  - super session                           → ?tenant / body.tenant, else fleet (tenant=null)
+ */
+type AssetScope = { ok: true; tenant: string | null } | { ok: false; status: number; error: string };
+export const resolveAssetScope = (req: Request): AssetScope => {
+  const user = (req as any).user;
+  if (!user) return { ok: false, status: 401, error: 'Authentication required.' };
+  const sessionTenant = String(user.tenant || '').trim();
+  if (!isSuperRole(user.role)) {
+    if (!sessionTenant) return { ok: false, status: 403, error: 'No tenant is associated with this session.' };
+    return { ok: true, tenant: sessionTenant };
+  }
+  const requested = String((req.query?.tenant as string) || (req.body && req.body.tenant) || '').trim();
+  return { ok: true, tenant: requested && requested.toLowerCase() !== 'all' ? requested : null };
+};
+
+/** Assets for the scope (fleet-wide only for a super session that asked for no tenant). */
+const scopedAssetsQuery = (tenant: string | null) => tenant
+  ? pool.query('SELECT * FROM assets WHERE LOWER(tenant_name) = LOWER($1) ORDER BY created_at DESC', [tenant])
+  : pool.query('SELECT * FROM assets ORDER BY created_at DESC');
+
+/**
+ * One tenant_settings value for the scope's OWN tenant. The previous queries had no tenant
+ * filter, so the first row of ANY tenant won — a deck/report could run on another tenant's
+ * BYO Gemini/Anthropic key or subscription tier. Fleet scope (tenant=null) returns no rows,
+ * so callers fall back to the platform env keys (same rule as roadmapReport.generateNarrative).
+ */
+const tenantSettingQuery = async (tenant: string | null, key: string): Promise<{ rows: any[] }> => tenant
+  ? pool.query('SELECT value FROM tenant_settings WHERE LOWER(tenant_name) = LOWER($1) AND key = $2 LIMIT 1', [tenant, key])
+  : { rows: [] };
+
 export const getAICorrelation = async (req: Request, res: Response) => {
   try {
-    // 1. Fetch all assets from database
-    const dbRes = await pool.query('SELECT * FROM assets ORDER BY created_at DESC');
+    const aiScope = resolveAssetScope(req);
+    if (!aiScope.ok) return res.status(aiScope.status).json({ error: aiScope.error });
+    // 1. Fetch the caller's assets (tenant-scoped)
+    const dbRes = await scopedAssetsQuery(aiScope.tenant);
     const assets = dbRes.rows.map(row => ({
       id: row.id,
       type: row.type,
@@ -1485,7 +1524,7 @@ export const getAICorrelation = async (req: Request, res: Response) => {
     let apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : '';
     if (!apiKey) {
       try {
-        const settingsRes = await pool.query("SELECT value FROM tenant_settings WHERE key = 'gemini_api_key'");
+        const settingsRes = await tenantSettingQuery(aiScope.tenant, 'gemini_api_key');
         if (settingsRes.rows.length > 0 && settingsRes.rows[0].value) {
           apiKey = settingsRes.rows[0].value.trim();
         }
@@ -1654,18 +1693,78 @@ export const buildComplianceGaps = (rows: any[]): { fc: FipsCompliance; lines: s
   return { fc, lines, recorded: Array.from(recorded) };
 };
 
+const HNDL_PURPOSES = new Set(['key_establishment', 'rsa_key_transport']);
+const SIGNATURE_PURPOSES = new Set(['tls_certificate', 'code_or_data_signing', 'ca_trust_anchor', 'ssh_authentication']);
+
+/**
+ * Every factual statement the board deck makes, computed once from the inventory so the AI
+ * prompt and the local fallback deck cannot disagree or invent numbers. Purpose (HNDL vs
+ * forgery) falls back to classifyPurpose() for legacy rows whose `purpose` column is NULL.
+ */
+export const buildDeckFacts = (rows: any[]) => {
+  const gaps = buildComplianceGaps(rows);
+  const { fc } = gaps;
+  const total = rows.length;
+  let vuln = 0, hndl = 0, sig = 0;
+  for (const r of rows) {
+    if (!r.is_vulnerable) continue;
+    vuln++;
+    const purpose = r.purpose || classifyPurpose({
+      type: r.type || '', name: r.name || '', algorithm: r.algorithm || '', key_size: r.key_size,
+      hash_algorithm: r.hash_algorithm, description: r.description, explainer: r.explainer,
+    });
+    if (HNDL_PURPOSES.has(purpose)) hndl++;
+    else if (SIGNATURE_PURPOSES.has(purpose)) sig++;
+  }
+  const otherVuln = vuln - hndl - sig;
+  const vulnPct = total > 0 ? Math.round((vuln / total) * 100) : 0;   // 0 assets ⇒ 0%, never 100%
+  const eg = fc.topDisallowed.slice(0, 3).map(d => `${d.algorithm} (${d.count})`).join(', ');
+  const first = fc.sunsetting[0];
+
+  const baseline = total === 0
+    ? 'No cryptographic assets are in scope for this deck yet. Run a discovery scan to populate the inventory before presenting risk findings.'
+    : `${vuln} of ${total} assets (${vulnPct}%) rely on quantum-vulnerable public-key cryptography` +
+      (hndl ? `, including ${hndl} key-establishment asset(s) exposed to Harvest-Now-Decrypt-Later collection today` : '') + '.' +
+      (fc.disallowedNow ? ` ${fc.disallowedNow} algorithm instance(s) are already disallowed or not FIPS-approved under NIST SP 800-131A — non-compliant regardless of the quantum timeline.` : '');
+
+  const tiers: string[] = [];
+  tiers.push(fc.disallowedNow
+    ? `Non-compliant today: ${fc.disallowedNow} algorithm instance(s) disallowed or not FIPS-approved (NIST SP 800-131A / SP 800-52)${eg ? ` — ${eg}` : ''}. Act now, independent of the quantum timeline.`
+    : 'Non-compliant today: none found under NIST SP 800-131A / SP 800-52.');
+  tiers.push(vuln
+    ? `Quantum-vulnerable: ${vuln} asset(s) on Shor-breakable public-key cryptography — ${hndl} key establishment (Harvest-Now-Decrypt-Later exposure today → ML-KEM, FIPS 203), ${sig} signature/trust (forgery risk once a CRQC exists → ML-DSA / SLH-DSA, FIPS 204/205)${otherVuln > 0 ? `, ${otherVuln} with an unclassified purpose` : ''}.`
+    : 'Quantum-vulnerable: no Shor-breakable public-key cryptography found in scope.');
+  if (fc.byStatus.acceptable) {
+    tiers.push(`Approved today, sunset scheduled: ${fc.byStatus.acceptable} instance(s)${first ? ` — earliest ${first.algorithm} after ${first.disallowedAfter}${first.draft ? ' (NIST IR 8547 draft)' : ''}` : ''}.`);
+  }
+  tiers.push(`Quantum-resistant: ${fc.byStatus.pq_approved} post-quantum instance(s) (FIPS 203/204/205, SP 800-208) and ${fc.byStatus.approved} FIPS-approved symmetric/hash instance(s) such as AES and SHA-2/SHA-3, which Shor's algorithm does not break. This is algorithm approval only; CMVP module validation has not been assessed.`);
+  if (fc.byStatus.unknown) tiers.push(`Not determined: ${fc.byStatus.unknown} instance(s) lack the key size or algorithm detail needed to assess.`);
+
+  const mosca = "Mosca's inequality (X + Y > Z): if your data's required secrecy lifetime (X) plus migration time (Y) exceeds the time until a cryptographically relevant quantum computer exists (Z), data encrypted today is already at risk. " +
+    (hndl ? `This applies to the ${hndl} key-establishment asset(s) above. Set X per data class — QuarkShield does not assume your data lifetime or a CRQC date.`
+          : 'No key-establishment (Harvest-Now-Decrypt-Later) assets were found in scope, so this risk is not currently indicated by the inventory.');
+
+  const retire = fc.topDisallowed.length
+    ? `Step 1: Retire Disallowed Algorithms — Replace ${eg}, which are not permitted under NIST SP 800-131A, then clean up weak, expired or unmanaged certificates.`
+    : 'Step 1: Certificate Lifecycle Cleanup — Revoke weak, expired or unmanaged (e.g. wildcard) certificates and confirm no SP 800-131A-disallowed algorithms remain.';
+
+  return { total, vuln, vulnPct, hndl, sig, gaps, fc, baseline, tiers, mosca, retire };
+};
+
 export const generatePresentation = async (req: Request, res: Response) => {
   try {
     const { scope, items, engine, customPrompt } = req.body;
+    const aiScope = resolveAssetScope(req);
+    if (!aiScope.ok) return res.status(aiScope.status).json({ error: aiScope.error });
     
-    // 1. Fetch assets from database to compile real risk statistics
-    const dbRes = await pool.query('SELECT * FROM assets ORDER BY created_at DESC');
+    // 1. Fetch the caller's assets (tenant-scoped) to compile real risk statistics
+    const dbRes = await scopedAssetsQuery(aiScope.tenant);
     const assets = dbRes.rows;
     
-    // Fetch subscription tier
+    // Fetch subscription tier (the scope's own tenant only)
     let subscriptionTier = 'growth';
     try {
-      const tierRes = await pool.query("SELECT value FROM tenant_settings WHERE key = 'subscription_tier'");
+      const tierRes = await tenantSettingQuery(aiScope.tenant, 'subscription_tier');
       if (tierRes.rows.length > 0) {
         subscriptionTier = tierRes.rows[0].value;
       }
@@ -1717,12 +1816,14 @@ export const generatePresentation = async (req: Request, res: Response) => {
       if (cmdb.businessService) services.add(cmdb.businessService);
     });
     
-    const appCount = apps.size || 1;
-    const serviceCount = services.size || 1;
-    
-    const riskPercentage = totalAssets > 0 ? Math.round((vulnerableAssets / totalAssets) * 100) : 100;
-    const calculatedDeficitRating = totalAssets > 0 ? Math.min(10, Math.max(1, Math.round((vulnerableAssets / totalAssets) * 10))) : 1;
-    const estimatedRunway = appCount > 10 ? '4' : '2';
+    // Real counts — the old `|| 1` reported one application/service when none were mapped.
+    const appCount = apps.size;
+    const serviceCount = services.size;
+
+    // Every factual claim in the deck comes from here (data-derived, tested).
+    const deckFacts = buildDeckFacts(filteredAssets);
+    const riskPercentage = deckFacts.vulnPct;
+    const calculatedDeficitRating = totalAssets > 0 ? Math.min(10, Math.max(1, Math.round((vulnerableAssets / totalAssets) * 10))) : 0;
 
     // Compile compliance violations context
     let complianceViolationsContext = "";
@@ -1734,7 +1835,7 @@ export const generatePresentation = async (req: Request, res: Response) => {
     });
     // Data-derived gaps only. The old fallback invented three gaps (incl. a misattributed
     // "NIST SP 800-208 discovery" one) whenever no violations were recorded.
-    const deckGaps = buildComplianceGaps(filteredAssets);
+    const deckGaps = deckFacts.gaps;
     const ctxLines = deckGaps.lines.map(l => `- ${l}`);
     if (violationsSet.size > 0) ctxLines.push(`- Standards flagged by the scanner on individual assets: ${Array.from(violationsSet).join(', ')}`);
     complianceViolationsContext = ctxLines.length
@@ -1762,9 +1863,10 @@ export const generatePresentation = async (req: Request, res: Response) => {
         "*   **Core KPI Block**: \n" +
         `    *   Total Assets: ${totalAssets}\n` +
         `    *   Vulnerable Inventory: ${riskPercentage}%\n` +
-        `    *   Cryptographic Deficit Score: ${calculatedDeficitRating}/10\n` +
-        `    *   Mosca's Threat Runway: ${estimatedRunway} Years\n` +
-        "*   **Executive Baseline Statement**: Write a high-impact 2-sentence executive summary stating that hidden legacy cryptographic tech debt is actively leaking future confidentiality through \"Harvest Now, Decrypt Later\" threat actors.\n\n" +
+        `    *   Cryptographic Deficit Score: ${calculatedDeficitRating}/10 (share of inventory quantum-vulnerable, scaled)\n` +
+        `    *   Key-establishment assets exposed to Harvest-Now-Decrypt-Later: ${deckFacts.hndl}\n` +
+        `    *   Non-compliant today (NIST SP 800-131A): ${deckFacts.fc.disallowedNow}\n` +
+        "*   **Executive Baseline Statement**: Write a 2-sentence executive summary using ONLY the statistics provided. Harvest-Now-Decrypt-Later applies only to key-establishment assets; do not claim exposure, urgency or findings the data does not show.\n\n" +
         "#### Slide 2: Executive Summary (The Big Picture)\n" +
         "*   **Layout**: Two unequal columns (60/40). Left column for the core narrative, right column for a highlighted warning box.\n" +
         "*   **Left Column (The Problem)**:\n" +
@@ -1773,18 +1875,9 @@ export const generatePresentation = async (req: Request, res: Response) => {
         "*   **Right Column (The Strategy)**:\n" +
         "    *   Moving from reactive certificate replacement to proactive Cryptographic Agility.\n\n" +
         "#### Slide 3: Cryptographic Risk & Deficit Assessment\n" +
-        "*   **Layout**: Three vertical columns comparing asset classifications side-by-side. Include a distinct callout section at the bottom for Mosca's Theorem.\n" +
-        "*   **Column 1: High Risk (Critical Deficit)**\n" +
-        "    *   Legacy algorithms: RSA-1024/2048, SHA-1, Triple-DES.\n" +
-        "    *   Action: Immediate deprecation and isolation.\n" +
-        "*   **Column 2: Medium Risk (Transition Required)**\n" +
-        "    *   Algorithms: RSA-4096, ECC (ECDSA/ECDH), SHA-256.\n" +
-        "    *   Status: Vulnerable to future Cryptanalytically Relevant Quantum Computers (CRQCs).\n" +
-        "*   **Column 3: Low Risk (Quantum-Resistant / Compliant)**\n" +
-        "    *   Algorithms: AES-256, ML-KEM, ML-DSA, stateful hash-based signatures.\n" +
-        "    *   Status: Agile and fully compliant.\n" +
-        "*   **Deficit Calculus Callout**: \n" +
-        `    *   "Mosca's Theorem: If U + V > Y (Shelf Life + Migration Time > Time to CRQC), your encrypted data is already at risk of offline decryption. Our deficit status: Active Risk (Score ${calculatedDeficitRating}/10 - ${riskPercentage}% of inventory is vulnerable to quantum decryption)."\n\n` +
+        "*   **Layout**: Stacked tier cards (worst first) with a distinct callout at the bottom for Mosca's inequality.\n" +
+        "*   **Content**: Use the 'Data-derived risk tiers' lines from the data verbatim, one per bullet, then the 'Mosca statement' as the final bullet. Do not add algorithms, counts or dates that are not in the data.\n" +
+        "*   **Accuracy rules**: SHA-2/SHA-3 and AES-256 are NOT broken by quantum computers. RSA-2048 is FIPS-approved today (it is quantum-vulnerable, not classically broken). Approved algorithms are not 'compliant' or 'validated' — CMVP module validation is not assessed. Never assert a data shelf-life or a CRQC date.\n\n" +
         "#### Slide 4: Compliance Gaps (NIST SP 800-131A & CNSA 2.0)\n" +
         "*   **Layout**: Simple 3-column table matrix.\n" +
         "*   **Table Headers**: Target Compliance Standard | Discovered Organizational Gap | Remediation Deadline\n" +
@@ -1792,12 +1885,12 @@ export const generatePresentation = async (req: Request, res: Response) => {
         "#### Slide 5: Short-Term Remediation Steps (0-90 Days)\n" +
         "*   **Layout**: Horizontal progressive timeline layout (3 steps).\n" +
         "*   **Step 1: Certificate Lifecycle Cleanup** (Revoking weak, expired, or unmanaged wildcard certificates).\n" +
-        "*   **Step 2: Cipher Suite Hardening** (Disabling legacy TLS CBC and Diffie-Hellman key exchanges in web servers and APIs).\n" +
+        "*   **Step 2: Cipher Suite Hardening** (Disabling TLS 1.0/1.1, CBC-mode suites and finite-field Diffie-Hellman groups below 2048 bits; enforcing TLS 1.2+, TLS 1.3 preferred).\n" +
         "*   **Step 3: Network Isolation** (Quarantining legacy systems that cannot support modern TLS 1.3 wrappers).\n\n" +
         "#### Slide 6: Long-Term Strategic PQC Migration Plan (90+ Days)\n" +
         "*   **Layout**: Phased roadmapping layout (3 strategic waves).\n" +
-        "*   **Wave 1: Hybrid Agility Testing** (Deploying dual-key certificate authorities combining classic ECC and ML-KEM).\n" +
-        "*   **Wave 2: Hardware Infrastructure Upgrades** (Updating HSMs and cryptographic coprocessors to natively support quantum-resistant algorithms).\n" +
+        "*   **Wave 1: Hybrid Rollout** (Enable hybrid key exchange X25519MLKEM768 — FIPS 203 — on TLS 1.3 endpoints first, since key establishment carries the HNDL risk; pilot composite certificates ECDSA + ML-DSA — FIPS 204 — in a test PKI. ML-KEM is a key-establishment mechanism, not a signature, so it does not go in certificates.)\n" +
+        "*   **Wave 2: Hardware Infrastructure Upgrades** (Updating HSMs and cryptographic coprocessors to natively support ML-KEM / ML-DSA, plus SLH-DSA or LMS/XMSS for firmware roots of trust).\n" +
         "*   **Wave 3: CI/CD Guardrails** (Deploying OPA policies to block weak cryptographic dependencies at build-time).\n\n" +
         "#### Slide 7: Next Steps & Continuous Posture Monitoring\n" +
         "*   **Layout**: Card-style grid (2x2) with clear next action items.\n" +
@@ -1821,12 +1914,12 @@ export const generatePresentation = async (req: Request, res: Response) => {
         "}\n" +
         "Do not include markdown code block wrapping (like ```json) in your response, just the raw JSON object. Ensure there are exactly 7 slides in the slides array.\n" +
         "The bullets array for each slide MUST be formatted as follows:\n" +
-        "- Slide 1: Exactly one bullet containing the 'Executive Baseline Statement' (a high-impact 2-sentence summary starting with 'Hidden legacy cryptographic...').\n" +
+        "- Slide 1: Exactly one bullet containing the 'Executive Baseline Statement' (a 2-sentence, data-only summary).\n" +
         "- Slide 2: Exactly three bullets. The first two are the left column ('The Problem'), and the third is the right column ('The Strategy').\n" +
-        "- Slide 3: Exactly four bullets. Bullet 1: Column 1 ('High Risk (Critical Deficit)'). Bullet 2: Column 2 ('Medium Risk (Transition Required)'). Bullet 3: Column 3 ('Low Risk (Quantum-Resistant)'). Bullet 4: 'Deficit Calculus Callout' (including Mosca's Theorem threat modeling stating the active risk level based on our statistics).\n" +
-        "- Slide 4: Exactly three bullets, each formatted as 'Target Compliance Standard | Discovered Organizational Gap | Remediation Deadline' (with pipe characters separating the three columns) to represent the compliance gaps. Use the real compliance gaps provided in the prompt context.\n" +
+        "- Slide 3: One bullet per 'Data-derived risk tiers' line (verbatim), then the 'Mosca statement' as the final bullet.\n" +
+        "- Slide 4: One bullet per gap line in 'Compliance Violations/Gaps Context', formatted 'Target Compliance Standard | Discovered Organizational Gap | Remediation Deadline'. If no gaps were recorded, a single bullet saying so. Never pad with invented gaps.\n" +
         "- Slide 5: Exactly three bullets, each formatted as 'Title — Description' (e.g. 'Step 1: Certificate Lifecycle Cleanup — Revoking weak, expired, or unmanaged wildcard certificates').\n" +
-        "- Slide 6: Exactly three bullets, each formatted as 'Title — Description' (e.g. 'Wave 1: Hybrid Agility Testing — Deploying dual-key certificate authorities').\n" +
+        "- Slide 6: Exactly three bullets, each formatted as 'Title — Description' (e.g. 'Wave 1: Hybrid Rollout — Enable X25519MLKEM768 key exchange on TLS 1.3 endpoints').\n" +
         "- Slide 7: Exactly four bullets, each representing an Action item.";
   
       let customPromptContext = "";
@@ -1836,9 +1929,12 @@ export const generatePresentation = async (req: Request, res: Response) => {
 
       const prompt = `Here are the organization's real cryptographic CMDB statistics and compliance context to use in your slide generation:
 - Total Cryptographic Assets Monitored: ${totalAssets}
-- Vulnerable classical keys (RSA/ECC) negotiating traffic: ${vulnerableAssets}
-- Secure quantum-resistant keys (ML-KEM/ML-DSA): ${secureAssets}
-- Active Policy Compliance Violations (NIST/CNSA): ${totalViolations}
+- Quantum-vulnerable assets (Shor-breakable public-key crypto): ${deckFacts.vuln} (${riskPercentage}%) — key establishment / HNDL: ${deckFacts.hndl}; signature / trust: ${deckFacts.sig}
+- Assets not flagged quantum-vulnerable (PQC, symmetric, hash, other): ${secureAssets}
+- Standards flags recorded on individual assets: ${totalViolations}
+- Data-derived risk tiers (use verbatim on Slide 3):
+${deckFacts.tiers.map(t => `  - ${t}`).join('\n')}
+- Mosca statement (use verbatim as Slide 3's final bullet): ${deckFacts.mosca}
 - Monitored Enterprise Applications: ${appCount}
 - Mapped Business Services: ${serviceCount}
 - Report Scope: ${activeScope} (Selected pillars: ${JSON.stringify(activeItems)})${customPromptContext}
@@ -1851,7 +1947,7 @@ Please generate the structured 7-slide board presentation JSON following the exa
         let apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : '';
         if (!apiKey) {
           try {
-            const settingsRes = await pool.query("SELECT value FROM tenant_settings WHERE key = 'gemini_api_key'");
+            const settingsRes = await tenantSettingQuery(aiScope.tenant, 'gemini_api_key');
             if (settingsRes.rows.length > 0 && settingsRes.rows[0].value) {
               apiKey = settingsRes.rows[0].value.trim();
             }
@@ -1910,7 +2006,7 @@ Please generate the structured 7-slide board presentation JSON following the exa
       } else if (isClaude) {
         let anthropicKey = process.env.ANTHROPIC_API_KEY;
         try {
-          const settingsRes = await pool.query("SELECT value FROM tenant_settings WHERE key = 'anthropic_api_key'");
+          const settingsRes = await tenantSettingQuery(aiScope.tenant, 'anthropic_api_key');
           if (settingsRes.rows.length > 0 && settingsRes.rows[0].value && settingsRes.rows[0].value.trim() !== '') {
             anthropicKey = settingsRes.rows[0].value.trim();
           }
@@ -1971,31 +2067,25 @@ Please generate the structured 7-slide board presentation JSON following the exa
       {
         id: 1,
         title: 'State of Cryptographic Risk & Post-Quantum Readiness',
-        bullets: [
-          `Hidden legacy cryptographic tech debt is actively leaking future confidentiality through 'Harvest Now, Decrypt Later' (HNDL) threat actors. Immediate modernization is required to secure corporate endpoints.`
-        ],
-        speakerNotes: `Good morning, members of the board. Today we are presenting our strategic roadmap to secure our enterprise infrastructure against the upcoming quantum computing threat. A cryptanalytically useful quantum computer will be capable of breaking the mathematical foundations of our current asymmetric cryptography. To address this, we have executed a comprehensive cryptographic audit. This presentation outlines our current risk exposure, our central database inventory findings, and our concrete timeline to transition our assets to post-quantum secure algorithms.`
+        bullets: [deckFacts.baseline],
+        speakerNotes: `Good morning, members of the board. Today we are presenting our strategic roadmap to secure our enterprise infrastructure against the upcoming quantum computing threat. A cryptographically relevant quantum computer would be capable of breaking the mathematical foundations of our current asymmetric cryptography. To address this, we have executed a comprehensive cryptographic audit. This presentation outlines our current risk exposure, our central database inventory findings, and our concrete timeline to transition our assets to post-quantum secure algorithms.`
       },
       {
         id: 2,
         title: 'Executive Summary (The Big Picture)',
         bullets: [
-          'Cryptographic Deficit vs. Software Bugs: Traditional vulnerability scanners identify software defects but completely miss algorithm-level weaknesses where active, fully patched connections rely on legacy mathematical assumptions.',
+          'Cryptographic Deficit vs. Software Bugs: Traditional vulnerability scanners identify software defects but typically do not assess algorithm-level weaknesses, where fully patched systems still rely on quantum-vulnerable public-key cryptography.',
           'The Cost of Inaction: Retaining legacy cryptography leads to proprietary cryptographic lock-in, manual certificate overhead, and severe exposure to retrospective decryption.',
-          'Strategic Transition: We must migrate from reactive certificate replacement to proactive Cryptographic Agility, establishing automated inventory controls and lattice-based algorithms.'
+          'Strategic Transition: We must migrate from reactive certificate replacement to proactive Cryptographic Agility, establishing automated inventory controls and NIST post-quantum algorithms (FIPS 203/204/205).'
         ],
         speakerNotes: `Let us look at our executive baseline. Traditional security tools look for expired certificates or unpatched code, but they fail to flag these algorithm-level risks where active cryptographic connections rely on mathematically vulnerable foundations. Standard scanners look for bugs; we are looking at the math itself. Moving forward, our strategy transitions from reactive certificate replacement to proactive Cryptographic Agility, allowing us to swap out underlying algorithms without disrupting business services.`
       },
       {
         id: 3,
         title: 'Cryptographic Risk & Deficit Assessment',
-        bullets: [
-          'High Risk (Critical Deficit): Legacy RSA-1024/2048, Triple-DES, MD5, and SHA-1 signatures require immediate deprecation and isolation.',
-          'Medium Risk (Transition Required): RSA-4096, ECC (ECDSA/ECDH), and SHA-256 are safe from classical attacks but highly vulnerable to future quantum computers.',
-          'Low Risk (Quantum-Resistant / Compliant): AES-256, ML-KEM, ML-DSA, and stateful hash-based signatures (LMS/XMSS) are quantum-resistant and fully compliant.',
-          `Mosca's Theorem: If U + V > Y (Shelf Life + Migration Time > Time to CRQC), your encrypted data is already at risk. Our deficit status: Active Risk (U + V = ${5 + Number(estimatedRunway)} > Y = 8).`
-        ],
-        speakerNotes: `Our risk classification categorizes our assets into three tiers. The High Risk tier contains legacy algorithms that must be deprecated immediately. The Medium Risk tier contains ciphers like RSA-4096 and ECC that are safe from classical attacks but highly vulnerable to future quantum computers. The Low Risk tier consists of quantum-resistant algorithms. Under Mosca's Theorem, since our data shelf-life plus our migration runway exceeds the estimated time to a quantum computer, we are currently in an active data-leakage state, making this migration an immediate priority.`
+        // Data-derived tiers + an honest, assumption-free Mosca statement (buildDeckFacts).
+        bullets: [...deckFacts.tiers, deckFacts.mosca],
+        speakerNotes: `These tiers come straight from the scanned inventory, worst first. Algorithms in the first tier are already disallowed under NIST SP 800-131A, so they need action regardless of when quantum computers arrive. Quantum-vulnerable assets split into two problems: key establishment, which an adversary can harvest today and decrypt later, and signatures, which only become forgeable once a cryptographically relevant quantum computer exists. Symmetric ciphers such as AES-256 and hashes such as SHA-256 are not broken by quantum computers. Mosca's inequality tells us whether today's encrypted data is at risk; it depends on how long our data must stay secret, which we set per data class rather than assume.`
       },
       {
         id: 4,
@@ -2010,21 +2100,21 @@ Please generate the structured 7-slide board presentation JSON following the exa
         id: 5,
         title: 'Short-Term Remediation Steps (0-90 Days)',
         bullets: [
-          'Step 1: Certificate Lifecycle Cleanup — Revoking weak, expired, or unmanaged wildcard certificates across internal web portals.',
-          'Step 2: Cipher Suite Hardening — Disabling legacy TLS CBC and Diffie-Hellman key exchanges in web servers and APIs, enforcing TLS 1.3.',
+          deckFacts.retire,
+          'Step 2: Cipher Suite Hardening — Disable TLS 1.0/1.1, CBC-mode suites and finite-field Diffie-Hellman groups below 2048 bits; enforce TLS 1.2+ with TLS 1.3 preferred.',
           'Step 3: Network Isolation — Quarantining legacy systems that cannot support modern TLS 1.3 wrappers using localized IPsec gateways.'
         ],
-        speakerNotes: `In the short term, our 90-day playbook focuses on tactical cleanup. First, we will clean up legacy certificate tech debt by revoking RSA-1024 keys and wildcard certificates. Second, we will disable weak CBC/DH ciphers globally and enforce TLS 1.3 across all public ingress load balancers. Third, we will isolate legacy internal databases using strict subnet routing or localized IPsec gateways to prevent unauthorized classical negotiations.`
+        speakerNotes: `In the short term, our 90-day playbook focuses on tactical cleanup. First, we will retire any algorithms the inventory shows are already disallowed and clean up weak or unmanaged certificates. Second, we will disable legacy TLS versions, CBC-mode suites and weak Diffie-Hellman groups, and enforce TLS 1.2 or later. Third, we will isolate legacy internal databases using strict subnet routing or localized IPsec gateways to prevent unauthorized classical negotiations.`
       },
       {
         id: 6,
         title: 'Long-Term Strategic PQC Migration Plan (90+ Days)',
         bullets: [
-          'Wave 1: Hybrid Agility Testing — Deploying dual-key certificate authorities combining classic ECC and ML-KEM to ensure backward compatibility.',
-          'Wave 2: Hardware Infrastructure Upgrades — Updating HSMs and cryptographic coprocessors to natively support quantum-resistant lattice standards.',
+          'Wave 1: Hybrid Rollout — Enable hybrid key exchange (X25519MLKEM768, FIPS 203) on TLS 1.3 endpoints first, and pilot composite certificates (ECDSA + ML-DSA, FIPS 204) in a test PKI.',
+          'Wave 2: Hardware Infrastructure Upgrades — Update HSMs and cryptographic coprocessors to natively support ML-KEM / ML-DSA, plus SLH-DSA or LMS/XMSS for firmware roots of trust.',
           'Wave 3: CI/CD Guardrails — Deploying Open Policy Agent (OPA) declarative rules in pipelines to block weak cryptographic dependencies before build.'
         ],
-        speakerNotes: `For the long term, our strategic roadmap focuses on complete post-quantum migration. Wave 1 involves deploying dual-key hybrid certificates to test compatibility. Wave 2 focuses on upgrading our physical Hardware Security Modules, or HSMs, to support lattice-based cryptography natively. Finally, Wave 3 integrates OPA policy checks directly into our developer pipelines, preventing engineers from committing code that introduces obsolete, non-compliant classical ciphers.`
+        speakerNotes: `For the long term, our strategic roadmap focuses on complete post-quantum migration. Wave 1 enables hybrid post-quantum key exchange on our TLS endpoints first, because key establishment is what an adversary can harvest today, and pilots composite ML-DSA certificates in a test PKI. Wave 2 upgrades our Hardware Security Modules, or HSMs, to support the NIST post-quantum algorithms natively, including hash-based signatures for firmware roots of trust. Finally, Wave 3 integrates OPA policy checks directly into our developer pipelines, preventing engineers from committing code that introduces obsolete, non-compliant classical ciphers.`
       },
       {
         id: 7,
@@ -2070,14 +2160,17 @@ export const generateReport = async (req: Request, res: Response) => {
       day: 'numeric'
     });
 
-    // 1. Fetch assets from database to compile real risk statistics
-    const dbRes = await pool.query('SELECT * FROM assets ORDER BY created_at DESC');
+    const aiScope = resolveAssetScope(req);
+    if (!aiScope.ok) return res.status(aiScope.status).json({ error: aiScope.error });
+
+    // 1. Fetch the caller's assets (tenant-scoped) to compile real risk statistics
+    const dbRes = await scopedAssetsQuery(aiScope.tenant);
     const assets = dbRes.rows;
     
     const totalAssets = assets.length;
     const vulnerableAssets = assets.filter(r => r.is_vulnerable).length;
     const secureAssets = totalAssets - vulnerableAssets;
-    const riskPercentage = totalAssets > 0 ? Math.round((vulnerableAssets / totalAssets) * 100) : 100;
+    const riskPercentage = totalAssets > 0 ? Math.round((vulnerableAssets / totalAssets) * 100) : 0; // 0 assets ⇒ 0%, never 100%
     
     // Calculate compliance violations and build lists
     let totalViolations = 0;
@@ -2240,7 +2333,7 @@ Please generate the complete report following the exact system instructions and 
         let apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : '';
         if (!apiKey) {
           try {
-            const settingsRes = await pool.query("SELECT value FROM tenant_settings WHERE key = 'gemini_api_key'");
+            const settingsRes = await tenantSettingQuery(aiScope.tenant, 'gemini_api_key');
             if (settingsRes.rows.length > 0 && settingsRes.rows[0].value) {
               apiKey = settingsRes.rows[0].value.trim();
             }
@@ -2294,7 +2387,7 @@ Please generate the complete report following the exact system instructions and 
       } else if (isClaude) {
         let anthropicKey = process.env.ANTHROPIC_API_KEY;
         try {
-          const settingsRes = await pool.query("SELECT value FROM tenant_settings WHERE key = 'anthropic_api_key'");
+          const settingsRes = await tenantSettingQuery(aiScope.tenant, 'anthropic_api_key');
           if (settingsRes.rows.length > 0 && settingsRes.rows[0].value && settingsRes.rows[0].value.trim() !== '') {
             anthropicKey = settingsRes.rows[0].value.trim();
           }
@@ -2409,7 +2502,7 @@ Please generate the complete report following the exact system instructions and 
     2. Disable weak CBC/DH ciphers globally and enforce TLS 1.3 across all public ingress load balancers.
     3. Isolate legacy internal databases using strict subnet routing or localized IPsec gateways.
 *   **Long-Term Strategic Migration (90+ Days)**:
-    1. Formulate a centralized enterprise roadmap to roll out dual-key hybrid post-quantum certificates (X25519 + ML-KEM).
+    1. Formulate a centralized enterprise roadmap to roll out hybrid post-quantum key exchange (X25519MLKEM768, FIPS 203) on TLS, and composite certificates (ECDSA + ML-DSA, FIPS 204) — ML-KEM is a key-establishment mechanism, not a certificate signature.
     2. Conduct PILOT testing of ML-KEM and ML-DSA implementations across internal Active Directory CA hosts.
     3. Coordinate with HSM vendors to upgrade firmware to support NIST lattice-based standards.
     4. Integrate Open Policy Agent (OPA) declarative rules in CI/CD pipelines to block any commits introducing non-compliant classical ciphers.
