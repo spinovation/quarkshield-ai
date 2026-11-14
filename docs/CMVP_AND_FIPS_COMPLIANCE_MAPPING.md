@@ -72,6 +72,44 @@ The product of the two axes is a single, honest **compliance verdict** (§4.2) t
 
 Both axes **reuse the existing `assets` row and the deterministic roadmap engine**; no parallel store.
 
+### 3.1 Prerequisites to capture a CMVP certificate
+
+A CMVP certificate is **not** a property of any artifact QuarkShield discovers today (a cert file, a PEM key, a TLS endpoint, an SBOM package). It is a property of the **cryptographic module** — the library/build — that *performs* the operation. `RTC.der` tells us "RSA-2048"; it tells us nothing about whether OpenSSL, Windows CNG, BoringCrypto, or an HSM generated or uses that key, and only that module can carry a cert #. So the prerequisite is **observing the module, not the artifact** — the capability QuarkShield mostly lacks today. Five pillars, all required before a cert # can be honestly asserted:
+
+| # | Prerequisite | What it means | Today (verified) | Build |
+| :-- | :--- | :--- | :--- | :--- |
+| **P-a** | **Module identity: library + exact version + operating environment** | A CMVP validation is scoped to a *specific module version on a specific tested platform* (e.g. "OpenSSL FIPS Provider 3.0.0, cert #4282, tested on RHEL 8 / x86-64"). All three are needed to name a cert. | Partial, **package-level only**: OpenSSL version→PURL `agent/sbom_scanner.go:150-162`; Windows Schannel / AD CS scanners. **Not linked to the asset that uses it.** | **Largest item.** Resolve a providing module per finding, with OS/arch/platform as the operating environment. |
+| **P-b** | **FIPS-mode confirmation (the "provider gate")** | A validated module being *installed* ≠ the crypto *running through it in approved mode*. Must detect the module is selected and active: OpenSSL `fips` provider loaded (`fips=yes`) + `fipsmodule.cnf` wired; Windows CNG FIPS policy flag + self-test; Java BC-FIPS approved-only. | **None.** Only a crypto-policy *recommendation* exists (`agent/linux_store.go:301`). No FIPS-mode state is read. | Agent probes per platform. Absent → status `unverified`, never `active`. |
+| **P-c** | **Reference data: NIST CMVP validated-modules list** | Versioned map (module name, version, environment) → cert #, vendor, **status (Active / Historical / Revoked)**, sunset date. | **Not in repo.** Scoped as `agent/data/cmvp_modules.json` in the capture note; no file committed. | Vendored, offline-refreshed, air-gap-safe, `version`-stamped (§5.2). |
+| **P-d** | **Correlation logic + honesty gate** | Match precedence: exact module+version+environment+provider → version-range → name-only ⇒ `unverified`, **never a guessed cert id**; carry confidence + evidence. | — | `agent/cmvp.go` resolver (capture note). |
+| **P-e** | **Transport** | Optional `AuditResult` fields (ModuleName/ModuleVersion/CmvpCertId/CmvpStatus/FipsLevel) → ingest → columns → report. | `AuditResult` has no module fields (`agent/auditor.go:16-44`). | Additive fields + columns (capture note + §7.1). |
+
+**The honest caveat (state it to buyers):** for many discovered assets **there is no providing module to find** — a lone cert file, a PEM private key, an SSH key are *data*, not running modules. Real CMVP correlation is only strong where QuarkShield can see the module, in descending order of confidence and ascending order of effort:
+
+1. **KMS/HSM connectors** — AWS KMS FIPS endpoints, CloudHSM, Luna, nShield publish their *own* CMVP certs; the connector reports them with little inference. `pkiConnectorController.ts:43,106` already tracks provider type and today captures **no module metadata** — the **lowest-effort, highest-confidence** path.
+2. **Agent host scans** — library present on the box (strongest for endpoints, needs P-a + P-b).
+3. **SBOM/package scans** — version-only, usually `unverified`.
+
+Everywhere else the correct, non-overclaiming value is `cmvp_status = none` ("no owning validated module observed") — itself a reportable compliance fact, not a blank.
+
+### 3.2 CAVP extension — the algorithm-implementation layer (A2′)
+
+CMVP and **CAVP** (Cryptographic Algorithm Validation Program) are distinct and must never be conflated:
+
+- **CMVP (A2, this spec)** validates a **module** → one cert # per module/version/environment.
+- **CAVP (A2′, extension)** validates a **single algorithm implementation** (e.g. "AES-256-GCM, cert #A1234") against the NIST test vectors (ACVP). A CMVP module cert **bundles** the CAVP algorithm certs of every algorithm it was validated for.
+
+Why the extension is worth having: a module can be CMVP-validated yet the *specific algorithm or mode* an asset uses may not be on that module's CAVP list (e.g. a validated module that never had SHA-3 or a particular curve tested). CAVP correlation lets QuarkShield answer the sharper question *"is the exact algorithm + mode this asset uses covered by the module's validation?"* — the difference between "the module is validated" and "**this operation** is validated."
+
+Design: additive, layered on A2, **never blocking the CMVP verdict**.
+- Each `cmvp_modules.json` entry gains an optional `cavpAlgorithms: [{algo, mode, certId}]` list (populated from the module's CAVP references on the CMVP record).
+- A1's resolved algorithm+mode is checked against that list → a sub-status `cavp_covered ∈ {covered, not_covered, unknown}`.
+- Surfaces as a refinement on the verdict: `compliant` (CMVP active **and** `cavp_covered`) vs `compliant_module_algo_unverified` (module validated, this algorithm not confirmed on its CAVP list).
+- **Data source:** the NIST CAVP Algorithm Validation lists, vendored alongside the CMVP map and refreshed by the same offline job (§5.2).
+- **Honesty:** absent CAVP data ⇒ `cavp_covered = unknown`, which **does not downgrade** a CMVP `compliant` verdict — it only adds precision when present. CAVP is additive evidence, never a new failure mode invented from missing data.
+
+CAVP is the **last** stage of the roadmap (§9, Stage 6): it has no value until CMVP module capture (P-a…P-e) exists to attach it to.
+
 ---
 
 ## 4. The two-axis compliance model
@@ -239,17 +277,41 @@ Recommendation: **counts are core; the attestation + drill-down are the upsell**
 
 ---
 
-## 9. Phased delivery
+## 9. Implementation roadmap — CMVP, then CAVP, step by step
 
-| Phase | Scope | Depends on | Effort | Ships as |
-| :--- | :--- | :--- | :--- | :--- |
-| **P0 — A1 reference table + resolver** | Vendor `fips_algorithm_status.json`; pure `fipsAlgorithmStatus()` + unit tests (DB-free). No schema, no UI. | — | **S** | Internal: deterministic FIPS-status function |
-| **P1 — Persist A1 + core counts** | `fips_*` columns; compute at all ingest sites; scope-level counts in `roadmapReport.ts`; per-asset chip + counts tile (core, ungated). | P0 | **M** | "N disallowed now / M approved-but-unvalidated" visible to every tenant |
-| **P2 — A2 correlation** | The module axis — **delivered by `CMVP_CERT_CAPTURE_DESIGN.md`** (agent fields, `cmvp_modules.json`, resolver, provider gate, ingest columns). | capture note | **M** (data curation) | Cert # + validation status per asset |
-| **P3 — Verdict + posture view + CBOM fix** | Cross-product `compliance_verdict`; full posture view + filters (gated); FIPS-aware `nistQuantumSecurityLevel` + new CBOM properties. | P1, P2 | **M** | The two-axis verdict end-to-end |
-| **P4 — Attestation export + refresh job** | Gated PDF/CSV attestation; offline CMVP/800-131A re-vendor job + provenance stamping. | P3 | **S–M** | The artifact a federal buyer asks for |
+Ordered so that **RFP-citable value ships before the hardest collection work**, and the module axis is built cheapest-first. Each stage has a clear exit criterion; a stage is "done" only when a buyer-facing fact is true and demo-safe. Stages 1–2 are server-only (no agent rebuild); Stages 3–6 need agent/connector work.
 
-**Recommended first slice:** P0 + P1. It is server-only, needs no agent rebuild, and immediately produces the *regulatory-deadline* and *approved-but-unvalidated-count* facts — demo-safe and RFP-citable — while A2 (P2) proceeds in parallel under the capture note.
+### 9.1 The six stages
+
+| Stage | Goal (buyer-facing exit criterion) | Builds | Prereq | Effort | Agent rebuild? |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1 — Algorithm axis (A1)** | *"N algorithms are disallowed under SP 800-131A today; M are approved but sunset by \<date\>."* Visible to every tenant. | Vendor `fips_algorithm_status.json` (§5.1); pure `fipsAlgorithmStatus()` + DB-free tests; `fips_status`/`fips_standard`/`fips_transition_date` columns computed at every ingest site; per-asset chip + core counts tile (ungated); deadline-aware roadmap ordering (§6.1). | §5.1, §7.1 | **M** | No |
+| **2 — CBOM honesty fix** | CBOM `nistQuantumSecurityLevel` reflects the real FIPS parameter set (or is omitted), plus `quarkshield:fipsStatus`/`fipsStandard`/`transitionDate` properties. | Replace `cyclonedx.ts:61` binary `nqsl`; add crypto properties (§6.3). | Stage 1 | **S** | No |
+| **3 — CMVP via connectors (A2, cheapest/highest-confidence)** | *"This KMS/HSM-backed key is performed by CMVP cert #\<n\> (Active, FIPS 140-3)."* | Vendor `cmvp_modules.json` (§5.2) + offline refresh job; teach KMS/HSM connectors (`pkiConnectorController.ts`) to report module name/vendor/cert for AWS KMS FIPS, CloudHSM, Luna, nShield; populate `cmvp_*` fields on those assets. Prereqs **P-c, P-d, P-e**. | Stages 1, §3.1 | **M** (data curation) | No (connector-side) |
+| **4 — CMVP module identity on hosts (A2, P-a)** | *"OpenSSL FIPS Provider 3.0.0 on this host → cert #4282 (environment: RHEL 8 / x86-64)."* | Agent resolves providing module + version + operating environment per finding (extend `sbom_scanner.go` fingerprinting and tie it to the asset); new `AuditResult` module fields; `agent/cmvp.go` resolver with match-precedence gate. | Stage 3 | **M–L** | **Yes** |
+| **5 — Verdict + posture view + FIPS-mode gate (A2, P-b)** | *"Approved algorithm **and** validated module in confirmed FIPS mode → compliant"* vs `approved_unvalidated`. Full posture view + filters (gated); FIPS attestation export (§6.4). | Agent FIPS-mode probes per platform (OpenSSL provider state, CNG policy, BC-FIPS) → confidence `measured` vs `unverified`; cross-product `compliance_verdict` (§4.2); gated posture view + attestation PDF/CSV; provenance stamping. | Stage 4 | **M** | **Yes** |
+| **6 — CAVP extension (A2′)** | *"The exact algorithm + mode this asset uses is on the module's CAVP list"* → `compliant` vs `compliant_module_algo_unverified`. | Vendor CAVP lists; add `cavpAlgorithms[]` to `cmvp_modules.json`; compute `cavp_covered`; surface as verdict refinement (§3.2). | Stage 5 | **M** (data curation) | No (data + server) |
+
+### 9.2 Sequencing rationale
+
+- **Ship Stages 1–2 first.** Server-only, no agent rebuild, and they produce the *regulatory-deadline* and *approved-but-unvalidated-count* facts that are demo-safe and RFP-citable **now** — the GSA/Army/FDA asks can be partially answered before any module work exists.
+- **Stage 3 before Stage 4.** Connector-reported CMVP certs are high-confidence with almost no inference and no agent rebuild, so they prove the module axis end-to-end on KMS/HSM assets while the harder host-side identification (Stage 4) is built. This is the lowest-risk way to get a real cert # on screen.
+- **Stage 4 then Stage 5 (never skip the gate).** Module *identity* (P-a) and FIPS-*mode* (P-b) are separate; identity without the mode gate can only yield `unverified`. Stage 5 is what turns `approved_unvalidated` into `compliant`, and it is where the honesty discipline matters most — ship them in order, never fold the gate into Stage 4.
+- **Stage 6 (CAVP) last.** It is pure refinement with no value until Stages 3–5 attach a module to the finding; it must never block or downgrade a CMVP verdict when its data is absent.
+
+### 9.3 Dependency view
+
+```
+Stage 1 (A1) ──┬─▶ Stage 2 (CBOM fix)
+               │
+               └─▶ Stage 3 (CMVP via connectors) ─▶ Stage 4 (host module identity, P-a)
+                                                      │
+                                                      └─▶ Stage 5 (FIPS-mode gate + verdict, P-b)
+                                                            │
+                                                            └─▶ Stage 6 (CAVP, A2′)
+```
+
+**Recommended first slice:** Stages 1 + 2 + 3 — the full picture *minus* host-side identification — covers the algorithm axis for the whole fleet and real CMVP certs for all KMS/HSM-backed keys, with zero agent rebuild.
 
 ---
 
