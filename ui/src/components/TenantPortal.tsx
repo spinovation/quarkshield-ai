@@ -1664,7 +1664,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         properties: [
           { name: "quantumVulnerability", value: a.isVulnerable ? "Vulnerable (Shor's Algorithm)" : "Post-Quantum Ready" },
           { name: "riskLevel", value: a.riskLevel },
-          { name: "complianceStandards", value: Array.isArray(a.complianceViolations) ? a.complianceViolations.join(', ') : (a.complianceViolations || 'NIST SP 800-208') },
+          // Never default to a standard name: an absent value would read as a compliance claim in the exported CBOM.
+          { name: "complianceStandards", value: (Array.isArray(a.complianceViolations) ? a.complianceViolations.join(', ') : a.complianceViolations) || 'None recorded' },
           { name: "hostMachine", value: a.hostname || "Workstation" },
           { name: "assetSource", value: a.source || "endpoint" },
           { name: "sourceReference", value: a.sourceRef || a.hostname || "Workstation" }
@@ -4840,7 +4841,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                   {Array.isArray(a.complianceViolations) && a.complianceViolations.length > 0 ? (
                                     <span style={{ color: '#f87171' }}>{a.complianceViolations.join(', ')}</span>
                                   ) : (
-                                    <span>NIST SP 800-208 / CNSA 2.0</span>
+                                    // No recorded violations is NOT a compliance attestation — say only what we know.
+                                    <span title="The scanner recorded no standards violations for this asset. This is not an attestation of compliance; see the FIPS status below.">
+                                      No violations recorded
+                                    </span>
                                   )}
                                   {a.fipsStatus && FIPS_CHIP[a.fipsStatus] && (
                                     <div style={{ marginTop: '0.3rem' }}>
