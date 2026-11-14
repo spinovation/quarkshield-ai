@@ -37,7 +37,7 @@ export interface DiscoveredAsset {
 }
 
 /** Map an AWS KMS KeySpec to algorithm metadata and quantum-vulnerability. */
-const mapKeySpec = (keySpec: string): { type: string; algo: string; size: number; vuln: boolean; risk: string; threat: string } => {
+export const mapKeySpec = (keySpec: string): { type: string; algo: string; size: number; vuln: boolean; risk: string; threat: string } => {
   const s = keySpec || 'SYMMETRIC_DEFAULT';
   if (s.startsWith('RSA_')) {
     const size = parseInt(s.replace('RSA_', ''), 10) || 2048;
@@ -47,7 +47,10 @@ const mapKeySpec = (keySpec: string): { type: string; algo: string; size: number
   }
   if (s.startsWith('ECC_')) {
     const size = s.includes('P256') || s.includes('P256K1') ? 256 : s.includes('P384') ? 384 : s.includes('P521') ? 521 : 256;
-    return { type: 'asymmetric_key', algo: `ECDSA-P${size === 521 ? '521' : size}`, size, vuln: true, risk: 'critical',
+    // ECC_SECG_P256K1 is secp256k1 (the blockchain curve), NOT NIST P-256. Collapsing it to
+    // "ECDSA-P256" recorded the wrong curve in the inventory and made it read as FIPS-approved.
+    const algo = s.includes('P256K1') ? 'ECDSA-secp256k1' : `ECDSA-P${size === 521 ? '521' : size}`;
+    return { type: 'asymmetric_key', algo, size, vuln: true, risk: 'critical',
       threat: "Elliptic-curve discrete log solved by Shor's algorithm; signatures/key-agreement compromised." };
   }
   if (s.startsWith('HMAC_')) {

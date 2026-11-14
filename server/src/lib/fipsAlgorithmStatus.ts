@@ -100,7 +100,8 @@ const ifcStrength = (bits: number): number =>
 
 /** Curve → field size in bits (≈ 2× security strength). null = not a NIST-approved curve we know. */
 const curveBits = (a: string, keySize?: number | null): { bits: number | null; approved: boolean } => {
-  if (/SECP256K1/.test(a)) return { bits: 256, approved: false };
+  // secp256k1 is not a NIST curve, however it is written: 'secp256k1', Azure 'P-256K', 'P256K1'.
+  if (/SECP256K1|P-?256K/.test(a)) return { bits: 256, approved: false };
   if (/BRAINPOOL/.test(a)) return { bits: null, approved: false };
   // P-192 is a NIST curve that is merely too weak — the strength check makes it "disallowed".
   const m = a.match(/(?:P-?|SECP|PRIME)(192|224|256|384|521)/);
@@ -117,7 +118,10 @@ const evalPrimitive = (aRaw: string, f: FipsInput): FipsResult | null => {
   const purpose = String(f.purpose || 'unknown');
   const isSig = SIGNATURE_PURPOSES.has(purpose) ||
     (purpose === 'unknown' && SIGNATURE_TYPES.has(String(f.type || '').toLowerCase()));
-  const ks = f.key_size && f.key_size > 0 ? f.key_size : null;
+  // Prefer the recorded key_size; otherwise read a size written into the token itself
+  // ("RSA-2048", "RSA 4096", "ECDSA-256", "DH-2048") — never guessed beyond that.
+  const embedded = a.match(/(?:RSA|DSA|DHE?|DIFFIE-HELLMAN|ECDSA|ECDH|ECC)[- _]?(\d{3,5})\b/);
+  const ks = f.key_size && f.key_size > 0 ? f.key_size : (embedded ? Number(embedded[1]) : null);
 
   // ---- Post-quantum (check first: hybrid names also contain classical tokens) ----
   if (/ML-?KEM|MLKEM/.test(a)) {

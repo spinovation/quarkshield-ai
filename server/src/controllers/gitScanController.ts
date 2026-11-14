@@ -409,7 +409,10 @@ function auditFileContent(filePath: string, content: string, relPath: string): G
           lineNumber: i + 1,
           lineContent: line.trim(),
           assetName: 'Deprecated TLS Protocol (TLSv1.0 / TLSv1.1)',
-          algorithm: 'Legacy TLS Protocol',
+          // Only emitted after matching ssl_protocols TLSv1 / TLSv1.1, so name the versions (same label
+          // the agent uses). A bare 'Legacy TLS Protocol' was unclassifiable: FIPS status "not determined"
+          // and no TLS_LEGACY remediation family.
+          algorithm: 'Legacy TLS Protocol (TLS 1.0/1.1)',
           isVulnerable: true,
           riskLevel: 'critical',
           status: 'Cryptographically Broken & Quantum Vulnerable',

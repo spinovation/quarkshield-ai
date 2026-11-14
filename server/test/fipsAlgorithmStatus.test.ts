@@ -275,3 +275,29 @@ test('review #7: the rollup indexes non-compliant instances per algorithm (propo
   ]);
   assert.equal(nonCompliantByAlgorithm.get('RSA'), 1, 'only the RSA-1024 instance is non-compliant');
 });
+
+// ---- Corpus dry-run regressions (2026-11-14) --------------------------------
+// From running the resolver over every algorithm string the agent, connectors and git scan emit.
+
+import { mapKeySpec } from '../src/lib/awsKms';
+
+test('dry run #1: secp256k1 is never read as NIST P-256 (AWS mapping + Azure "P-256K")', () => {
+  assert.equal(mapKeySpec('ECC_SECG_P256K1').algo, 'ECDSA-secp256k1', 'AWS must keep the real curve identity');
+  assert.equal(mapKeySpec('ECC_NIST_P256').algo, 'ECDSA-P256');
+  assert.equal(s({ algorithm: mapKeySpec('ECC_SECG_P256K1').algo, key_size: 256 }).status, 'non_fips');
+  assert.equal(s({ algorithm: 'ECDSA-P-256K', key_size: 256 }).status, 'non_fips', 'Azure secp256k1 label');
+  assert.equal(s({ algorithm: 'ECDSA-P-256', key_size: 256 }).status, 'acceptable', 'real NIST P-256 unchanged');
+});
+
+test('dry run #2: a key size written into the string is used when key_size is empty', () => {
+  assert.equal(s({ algorithm: 'RSA-2048' }).status, 'acceptable');
+  assert.equal(s({ algorithm: 'RSA-1024' }).status, 'disallowed');
+  assert.equal(s({ algorithm: 'ECDSA-256' }).status, 'acceptable');
+  assert.equal(s({ algorithm: 'RSA-2048 / HMAC-SHA256 / ECDSA (JWT)' }).status, 'unknown', 'unsized ECDSA part still undetermined');
+  assert.equal(s({ algorithm: 'RSA', key_size: 4096 }).status, 'acceptable', 'recorded key_size still preferred');
+  assert.equal(s({ algorithm: 'DHE-RSA-AES256-SHA', key_size: 2048 }).status, 'unknown', 'suite DH group still not guessed');
+});
+
+test('dry run #3: the git scanner\'s legacy-TLS finding is disallowed', () => {
+  assert.equal(s({ algorithm: 'Legacy TLS Protocol (TLS 1.0/1.1)', type: 'config' }).status, 'disallowed');
+});
