@@ -283,7 +283,7 @@ func auditOpenSshPackage() (AuditResult, bool) {
 			"Deprecate RSA and DSA host keys in /etc/ssh/sshd_config.",
 		}
 		res.Explainer = "OpenSSH versions prior to 9.8 suffer from regreSSHion (CVE-2024-6387) and do not enable post-quantum ML-KEM key exchange by default."
-		res.ComplianceViolations = []string{"CNSA 2.0", "NIST SP 800-208", "CISA KEV"}
+		res.ComplianceViolations = []string{"CNSA 2.0", "NIST FIPS 203 (ML-KEM)", "CISA KEV"}
 	} else if isPqcReady {
 		res.IsVulnerable = false
 		res.RiskLevel = "secure"

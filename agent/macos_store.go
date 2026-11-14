@@ -138,7 +138,8 @@ func AuditMacOSKeychains() []AuditResult {
 
 			funcTag := "General macOS TLS Certificate"
 			quantumThreat := "Shor's Algorithm (Asymmetric Factorization/DLP)"
-			complianceViolations := []string{"CNSA 2.0", "NIST SP 800-208", "EO 14028"}
+			// Default when KeyUsage sets neither flag: certificates are signed objects → FIPS 204.
+			complianceViolations := []string{"CNSA 2.0", "NIST FIPS 204 (ML-DSA)", "EO 14028"}
 
 			if isKeyEstablishment && !isSignature {
 				funcTag = "Key Establishment / Encryption"
