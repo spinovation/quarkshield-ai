@@ -253,7 +253,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
     const isAttested = attestation === 'true' || cdxa === 'true';
     let query = `
       SELECT 
-        a.id, a.type, a.name, a.path, a.algorithm, a.key_size, a.hash_algorithm,
+        a.id, a.type, a.name, a.path, a.algorithm, a.key_size, a.hash_algorithm, a.purpose,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.created_at,
         a.machine_id, a.source, a.source_ref as "sourceRef",
@@ -336,6 +336,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         algorithm: r.algorithm,
         keySize: r.key_size,
         hashAlgorithm: r.hash_algorithm,
+        purpose: r.purpose,
         isVulnerable: r.is_vulnerable,
         assetKind: r.type,
         status: r.status,
