@@ -29,6 +29,36 @@ echo "======================================================================"
 
 cd "$AGENT_DIR"
 
+# Proves a Windows file really carries our publicly trusted Authenticode signature
+# (Azure Trusted Signing: CN=Fedmitigate LLC issued by a Microsoft ID Verified CA)
+# and that the signed digest matches the file. The signing tool's exit status alone
+# is not proof. osslsigncode's own exit status is unusable on macOS — without the
+# Microsoft root in a CA bundle it reports the chain as "Failed" even for a good
+# signature — so this reads the signer and the digests from its output instead.
+verify_trusted_signature() {
+  local f="$1" out cur calc
+  if ! command -v osslsigncode >/dev/null 2>&1; then
+    echo "   ❌ osslsigncode is not installed — cannot prove $f is signed (brew install osslsigncode)." >&2
+    return 1
+  fi
+  out="$(osslsigncode verify -in "$f" 2>&1 || true)"
+  if ! printf '%s\n' "$out" | grep -q "Subject: CN=Fedmitigate LLC,"; then
+    echo "   ❌ $f has no Fedmitigate LLC signature." >&2
+    return 1
+  fi
+  if ! printf '%s\n' "$out" | grep -q "Issuer : CN=Microsoft ID Verified"; then
+    echo "   ❌ $f is not signed by a Microsoft ID Verified CA (self-signed fallback?)." >&2
+    return 1
+  fi
+  cur="$(printf '%s\n' "$out" | awk -F': ' '/^Current message digest/ {print $2; exit}' | tr -d '[:space:]')"
+  calc="$(printf '%s\n' "$out" | awk -F': ' '/^Calculated message digest/ {print $2; exit}' | tr -d '[:space:]')"
+  if [ -z "$cur" ] || [ "$cur" != "$calc" ]; then
+    echo "   ❌ $f signature digest does not match the file." >&2
+    return 1
+  fi
+  return 0
+}
+
 # ------------------------------------------------------------------------------
 # 1. WINDOWS BUILD & AZURE TRUSTED SIGNING
 # ------------------------------------------------------------------------------
@@ -95,12 +125,19 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     if [ -f installer/Output/QuarkShield-Setup.exe ]; then
       cp -f installer/Output/QuarkShield-Setup.exe QuarkShield-Setup.exe
       # Sign the installer itself so it shows "Fedmitigate LLC" (not "Unknown Publisher").
-      if [ -f ".env.signing" ] || [ -n "$AZURE_CLIENT_ID" ]; then
-        python3 sign_azure.py QuarkShield-Setup.exe && \
-          echo "   ✓ Installer signed (Fedmitigate LLC / Microsoft Root CA)!" || \
-          echo "   ⚠️  Installer built but signing failed — check Azure creds."
+      # An unsigned installer must never reach the download directories: the 2.3.0
+      # one did (signing failed, the build only warned) and antivirus heuristics
+      # flagged it for a prospect. So a signing failure stops the build here.
+      if python3 sign_azure.py QuarkShield-Setup.exe && verify_trusted_signature QuarkShield-Setup.exe; then
+        echo "   ✓ Installer signed and verified (Fedmitigate LLC / Microsoft ID Verified CA)!"
+      elif [ "${ALLOW_UNSIGNED_INSTALLER:-}" = "1" ]; then
+        echo "   ⚠️  Installer is NOT signed — kept only because ALLOW_UNSIGNED_INSTALLER=1. Local testing only; do not publish."
       else
-        echo "   ⚠️  Installer built but UNSIGNED (no .env.signing / AZURE_CLIENT_ID)."
+        rm -f QuarkShield-Setup.exe installer/Output/QuarkShield-Setup.exe
+        echo "❌ Installer signing failed — build stopped, nothing staged." >&2
+        echo "   Check agent/.env.signing (Azure client secret may have expired), jsign and osslsigncode, then re-run." >&2
+        echo "   For a local, never-published test build only: ALLOW_UNSIGNED_INSTALLER=1." >&2
+        exit 1
       fi
     fi
   else
