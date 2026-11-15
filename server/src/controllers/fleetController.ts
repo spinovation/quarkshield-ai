@@ -8,6 +8,7 @@ import { geoLocateMachine } from '../lib/downloadTracker';
 import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTargets';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
 import { canonicalizeAlgorithmLabel } from '../lib/algorithmLabel';
+import { loadAgentRelease, upgradeStateFor, cmpAgentVersion, AgentRelease } from '../lib/agentRelease';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
 // Requires the query to alias fleet_machines as m and LEFT JOIN fleet_tokens as t.
@@ -196,7 +197,31 @@ export const getFleetMachines = async (req: Request, res: Response) => {
     }
     query += ` ORDER BY m.last_seen DESC;`;
     const result = await pool.query(query, params);
-    res.json(result.rows);
+
+    // Push-upgrade: tell the console which endpoints are behind the published
+    // release and whether each can upgrade itself (see lib/agentRelease.ts).
+    const release = loadAgentRelease();
+    let upgrading = new Set<string>();
+    if (release && result.rows.length > 0) {
+      try {
+        const inFlight = await pool.query(
+          `SELECT DISTINCT machine_id FROM fleet_commands
+            WHERE command = 'upgrade' AND status IN ('pending', 'dispatched')
+              AND created_at > NOW() - ($2 || ' minutes')::interval
+              AND machine_id = ANY($1)`,
+          [result.rows.map(r => r.id), String(UPGRADE_IN_FLIGHT_MIN)]
+        );
+        upgrading = new Set(inFlight.rows.map(r => r.machine_id));
+      } catch (e) {
+        console.warn('Could not read in-flight upgrades:', e);
+      }
+    }
+    res.json(result.rows.map(r => ({
+      ...r,
+      latestVersion: release?.version || null,
+      upgradeState: upgradeStateFor(release, r),
+      upgradeInFlight: upgrading.has(r.id),
+    })));
   } catch (err: any) {
     console.error('Error fetching fleet machines:', err);
     res.status(500).json({ error: 'Failed to retrieve fleet machines.' });
@@ -1285,6 +1310,24 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       console.warn('Could not close out pull commands:', cmdErr);
     }
 
+    // Push-upgrade: telemetry from an agent now running the version an upgrade
+    // command asked for (or newer) proves that upgrade was applied — close it.
+    // `details` holds the target version (plain text) for upgrade commands.
+    try {
+      const open = await pool.query(
+        "SELECT id, details FROM fleet_commands WHERE machine_id = $1 AND command = 'upgrade' AND status = 'dispatched'",
+        [machineId]
+      );
+      const done = open.rows
+        .filter(c => cmpAgentVersion((agent_version || '').toString(), (c.details || '').toString()) >= 0)
+        .map(c => c.id);
+      if (done.length > 0) {
+        await pool.query("UPDATE fleet_commands SET status = 'completed', completed_at = NOW() WHERE id = ANY($1)", [done]);
+      }
+    } catch (cmdErr) {
+      console.warn('Could not close out upgrade commands:', cmdErr);
+    }
+
     // Tenant resolved from the fleet token, for the Threat & Risk Graph rebuild hook.
     res.locals.tenant = assignedTenant;
     res.status(201).json({
@@ -1426,6 +1469,172 @@ export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('Error queuing bulk pull command:', err);
     res.status(500).json({ error: 'Failed to queue bulk pull.' });
+  }
+};
+
+// ==========================================
+// PUSH-UPGRADE (remote agent upgrade from the console)
+// ==========================================
+// An admin asks out-of-date endpoints to upgrade themselves. The server only
+// forwards the published release manifest and its signature; every agent verifies
+// that signature against the release key it was built with, then the download's
+// SHA-256, the OS code signature and a self-test, before swapping. See
+// lib/agentRelease.ts and agent/updater.go.
+
+// An upgrade counts as "in flight" for this long after it is queued. Agents poll
+// every 2 minutes and roll back an unconfirmed upgrade after 10, so by then it
+// has either been applied (and closed by the next telemetry) or abandoned.
+const UPGRADE_IN_FLIGHT_MIN = 30;
+
+const recordUpgradeAudit = async (
+  actor: string, scope: string, tenant: string, version: string, machineIds: string[], force: boolean, ip?: string
+): Promise<void> => {
+  try {
+    await pool.query(
+      `INSERT INTO audit_logs (id, action, actor, details, ip_address)
+       VALUES ($1, 'fleet_upgrade_enqueue', $2, $3, $4)`,
+      [
+        'aud-' + crypto.randomBytes(8).toString('hex'),
+        actor || 'unknown',
+        JSON.stringify({ scope, tenant, version, force, machineCount: machineIds.length, machineIds: machineIds.slice(0, 200) }),
+        ip || null,
+      ]
+    );
+  } catch (e) {
+    console.warn('Could not record upgrade audit log:', e);
+  }
+};
+
+// Queue one upgrade command unless one is already in flight for the machine.
+// Returns the command id, or null if skipped as a duplicate.
+const enqueueUpgradeForMachine = async (
+  machineId: string, release: AgentRelease, force: boolean, issuedBy: string, scope: 'machine' | 'group' | 'all'
+): Promise<string | null> => {
+  const commandId = 'cmd-' + crypto.randomBytes(8).toString('hex');
+  const ins = await pool.query(
+    `INSERT INTO fleet_commands (id, machine_id, command, status, details, args, issued_by, scope)
+     SELECT $1, $2, 'upgrade', 'pending', $3, $4::jsonb, $5, $6
+      WHERE NOT EXISTS (
+        SELECT 1 FROM fleet_commands fc
+         WHERE fc.machine_id = $2 AND fc.command = 'upgrade'
+           AND fc.status IN ('pending', 'dispatched')
+           AND fc.created_at > NOW() - ($7 || ' minutes')::interval
+      )
+     RETURNING id`,
+    [
+      commandId, machineId, release.version,
+      JSON.stringify({ manifest: release.manifest, signature: release.signature, force }),
+      issuedBy, scope, String(UPGRADE_IN_FLIGHT_MIN),
+    ]
+  );
+  return ins.rowCount && ins.rowCount > 0 ? commandId : null;
+};
+
+const UPGRADE_REFUSALS: Record<string, { code: number; error: (latest: string, current: string) => string }> = {
+  current: { code: 409, error: (l, c) => `This endpoint is already running the latest agent (${c || l}).` },
+  manual: { code: 409, error: (l, c) => `Agent ${c || '(unknown version)'} is too old to upgrade itself. Install ${l} on this endpoint once; later releases can then be pushed from here.` },
+  unsupported: { code: 422, error: (l) => `Release ${l} has no build for this endpoint's platform.` },
+};
+
+// POST /api/fleet/machines/:machineId/upgrade   { force?: boolean }
+export const enqueueUpgradeCommand = async (req: Request, res: Response) => {
+  try {
+    const { machineId } = req.params;
+    const force = req.body?.force === true;
+    const m = await pool.query(
+      `SELECT m.os, m.arch, m.agent_version AS "agentVersion",
+              COALESCE(NULLIF(m.tenant_name, ''), NULLIF(t.tenant_name, ''), t.name) AS tenant
+         FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE m.id = $1`,
+      [machineId]
+    );
+    // 404 (not 403) so another tenant's machine id is never confirmed to exist.
+    if (m.rowCount === 0 || !canAccessTenant(req, m.rows[0].tenant)) {
+      return res.status(404).json({ error: 'Fleet machine not found.' });
+    }
+    const release = loadAgentRelease();
+    if (!release) {
+      return res.status(503).json({ error: 'No signed agent release is published on this server yet.' });
+    }
+    const row = m.rows[0];
+    const state = upgradeStateFor(release, row, force);
+    if (state !== 'pushable') {
+      const r = UPGRADE_REFUSALS[state];
+      return res.status(r.code).json({ error: r.error(release.version, row.agentVersion || ''), upgradeState: state });
+    }
+    const commandId = await enqueueUpgradeForMachine(machineId, release, force, req.user?.email || '', 'machine');
+    if (!commandId) {
+      return res.json({ success: true, machineId, alreadyQueued: true, version: release.version, message: 'An upgrade is already in progress for this endpoint.' });
+    }
+    await recordUpgradeAudit(req.user?.email || '', 'machine', row.tenant, release.version, [machineId], force, req.ip);
+    res.json({ success: true, commandId, machineId, version: release.version, message: `Upgrade to ${release.version} queued.` });
+  } catch (err: any) {
+    console.error('Error queuing upgrade command:', err);
+    res.status(500).json({ error: 'Failed to queue upgrade.' });
+  }
+};
+
+// POST /api/fleet/upgrade-bulk   { group?: string }
+// Queues an upgrade for every endpoint in the tenant (optionally one group) that
+// is behind the published release and able to upgrade itself.
+export const enqueueBulkUpgradeCommand = async (req: Request, res: Response) => {
+  try {
+    const tenant = getEffectiveTenant(req);
+    if (!tenant || !canAccessTenant(req, tenant)) {
+      return res.status(403).json({ error: 'Tenant could not be resolved for bulk upgrade.' });
+    }
+    const release = loadAgentRelease();
+    if (!release) {
+      return res.status(503).json({ error: 'No signed agent release is published on this server yet.' });
+    }
+    const group = (req.body?.group || '').toString().trim() || null;
+    const params: any[] = [tenant];
+    let groupClause = '';
+    if (group) { params.push(group); groupClause = ` AND LOWER(${EFFECTIVE_GROUP}) = LOWER($${params.length})`; }
+    const machines = await pool.query(
+      `SELECT m.id, m.os, m.arch, m.agent_version AS "agentVersion"
+         FROM fleet_machines m
+         LEFT JOIN fleet_tokens t ON m.token_id = t.id
+        WHERE (LOWER(m.tenant_name) = LOWER($1)
+            OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+            OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+          ${groupClause}`,
+      params
+    );
+
+    const scope = group ? 'group' : 'all';
+    const queuedIds: string[] = [];
+    const skipped = { current: 0, manual: 0, unsupported: 0, alreadyQueued: 0 };
+    for (const row of machines.rows) {
+      const state = upgradeStateFor(release, row);
+      if (state !== 'pushable') {
+        if (state === 'current' || state === 'manual' || state === 'unsupported') skipped[state]++;
+        continue;
+      }
+      const id = await enqueueUpgradeForMachine(row.id, release, false, req.user?.email || '', scope);
+      if (id) queuedIds.push(row.id); else skipped.alreadyQueued++;
+    }
+    if (queuedIds.length > 0) {
+      await recordUpgradeAudit(req.user?.email || '', scope, tenant, release.version, queuedIds, false, req.ip);
+    }
+    const notes: string[] = [];
+    if (skipped.manual) notes.push(`${skipped.manual} too old to upgrade themselves (install ${release.version} once)`);
+    if (skipped.alreadyQueued) notes.push(`${skipped.alreadyQueued} already in progress`);
+    if (skipped.unsupported) notes.push(`${skipped.unsupported} with no build for their platform`);
+    res.json({
+      success: true,
+      queued: queuedIds.length,
+      skipped,
+      version: release.version,
+      group,
+      message: (queuedIds.length === 0
+        ? 'No endpoints were queued for upgrade'
+        : `Upgrade to ${release.version} queued for ${queuedIds.length} endpoint(s)${group ? ' in group ' + group : ''}`)
+        + (notes.length ? ` — ${notes.join('; ')}.` : '.'),
+    });
+  } catch (err: any) {
+    console.error('Error queuing bulk upgrade command:', err);
+    res.status(500).json({ error: 'Failed to queue bulk upgrade.' });
   }
 };
 

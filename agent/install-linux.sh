@@ -45,9 +45,27 @@ else
   SUDO=""
 fi
 
-echo "📦 Installing binary to: $INSTALL_DIR/quarkshield-scanner..."
-$SUDO cp -f "$BINARY_SOURCE" "$INSTALL_DIR/quarkshield-scanner"
-$SUDO chmod +x "$INSTALL_DIR/quarkshield-scanner"
+# System-wide installs keep the binary in its own root-only directory and link it
+# into PATH. The daemon is sandboxed (ProtectSystem=full → /usr is read-only to
+# it), so a console push-upgrade can only swap the binary if it lives in a
+# directory the unit explicitly allows: ReadWritePaths=$APP_DIR below.
+APP_DIR="/opt/quarkshield"
+if [ "$INSTALL_DIR" = "/usr/local/bin" ]; then
+  echo "📦 Installing binary to: $APP_DIR/quarkshield-scanner (linked from $INSTALL_DIR)..."
+  $SUDO mkdir -p "$APP_DIR"
+  $SUDO chown root:root "$APP_DIR"
+  $SUDO chmod 755 "$APP_DIR"
+  # Install via a temp name + rename so a running daemon is never half-overwritten.
+  $SUDO cp -f "$BINARY_SOURCE" "$APP_DIR/quarkshield-scanner.install"
+  $SUDO chmod 755 "$APP_DIR/quarkshield-scanner.install"
+  $SUDO mv -f "$APP_DIR/quarkshield-scanner.install" "$APP_DIR/quarkshield-scanner"
+  $SUDO rm -f "$INSTALL_DIR/quarkshield-scanner"
+  $SUDO ln -s "$APP_DIR/quarkshield-scanner" "$INSTALL_DIR/quarkshield-scanner"
+else
+  echo "📦 Installing binary to: $INSTALL_DIR/quarkshield-scanner..."
+  cp -f "$BINARY_SOURCE" "$INSTALL_DIR/quarkshield-scanner"
+  chmod +x "$INSTALL_DIR/quarkshield-scanner"
+fi
 
 # Install Desktop Entry if GUI environment exists
 if [ -n "$XDG_CURRENT_DESKTOP" ] || [ -d "$HOME/.local/share/applications" ]; then
@@ -109,6 +127,9 @@ StandardError=journal
 NoNewPrivileges=true
 ProtectSystem=full
 PrivateTmp=true
+# The one place the sandboxed daemon may write outside its state directory: its
+# own install directory, so a verified console push-upgrade can swap the binary.
+ReadWritePaths=$APP_DIR
 
 [Install]
 WantedBy=multi-user.target

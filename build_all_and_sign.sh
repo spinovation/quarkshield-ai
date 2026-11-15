@@ -288,6 +288,88 @@ tar -czf "$AGENT_DIR/quarkshield-scanner-linux.tar.gz" -C "$LINUX_STAGE" .
 rm -rf "$LINUX_STAGE"
 
 # ------------------------------------------------------------------------------
+# 3b. SIGNED RELEASE MANIFEST (console push-upgrade)
+# ------------------------------------------------------------------------------
+# Agents only apply a pushed upgrade whose manifest is signed by the release key
+# they were built to trust (agent/release_keys.go). The private key stays on this
+# machine (agent/.env.release-key, git-ignored) and is never deployed.
+# SKIP_RELEASE_MANIFEST=1 builds without one (that release cannot be pushed).
+rm -f agent-manifest.json agent-manifest.json.sig
+if [ "${SKIP_RELEASE_MANIFEST:-}" = "1" ]; then
+  echo "⚠️  SKIP_RELEASE_MANIFEST=1 — no signed manifest; this build cannot be pushed from the console."
+else
+  echo "🧾 Building the signed release manifest (agent-manifest.json)..."
+  RELEASE_KEY_FILE="${RELEASE_SIGNING_KEY_FILE:-$AGENT_DIR/.env.release-key}"
+  if [ ! -f "$RELEASE_KEY_FILE" ]; then
+    echo "❌ Release signing key not found at $RELEASE_KEY_FILE." >&2
+    echo "   Restore it from your backup. (SKIP_RELEASE_MANIFEST=1 builds without push-upgrade.)" >&2
+    exit 1
+  fi
+  # Everything an agent will check must already be true here, or the push would
+  # be refused on every endpoint.
+  HOST_BIN="quarkshield-scanner-$(go env GOHOSTOS)-$(go env GOHOSTARCH)"
+  BUILT_VERSION="$(./"$HOST_BIN" --agent-version 2>/dev/null || true)"
+  if [ "$BUILT_VERSION" != "$APP_VERSION" ]; then
+    echo "❌ $HOST_BIN reports version '$BUILT_VERSION' but the release is '$APP_VERSION'." >&2
+    exit 1
+  fi
+  if ! verify_trusted_signature quarkshield-scanner-windows-amd64.exe; then
+    echo "❌ The Windows agent is not Azure-signed — agents would refuse this upgrade." >&2
+    exit 1
+  fi
+  APP_CHECK="/tmp/manifest_app_check_$$"
+  rm -rf "$APP_CHECK" && mkdir -p "$APP_CHECK"
+  unzip -q quarkshield-scanner-macos.zip -d "$APP_CHECK"
+  if ! spctl -a -t exec "$APP_CHECK/QuarkShield.app" 2>/dev/null; then
+    rm -rf "$APP_CHECK"
+    echo "❌ QuarkShield.app in the macOS zip is not notarized — agents would refuse this upgrade." >&2
+    exit 1
+  fi
+  rm -rf "$APP_CHECK"
+
+  python3 - "$APP_VERSION" <<'PYEOF'
+import hashlib, json, os, sys, datetime
+version = sys.argv[1]
+artifacts = {
+    "windows/amd64": "quarkshield-scanner-windows-amd64.exe",
+    "linux/amd64":   "quarkshield-scanner-linux-amd64",
+    "linux/arm64":   "quarkshield-scanner-linux-arm64",
+    "darwin/amd64":  "quarkshield-scanner-darwin-amd64",
+    "darwin/arm64":  "quarkshield-scanner-darwin-arm64",
+    "darwin/app":    "quarkshield-scanner-macos.zip",
+}
+out = {}
+for key, name in artifacts.items():
+    h = hashlib.sha256()
+    with open(name, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    out[key] = {"path": "/downloads/" + name, "sha256": h.hexdigest(), "size": os.path.getsize(name)}
+manifest = {
+    "product": "quarkshield-agent",
+    "version": version,
+    "generatedAt": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "artifacts": out,
+}
+with open("agent-manifest.json", "w") as f:
+    json.dump(manifest, f, indent=2, sort_keys=True)
+    f.write("\n")
+PYEOF
+  go run ./tools/relsign sign "$RELEASE_KEY_FILE" agent-manifest.json
+  # The signature must verify against a key the agents actually trust.
+  MANIFEST_OK=false
+  for PUB in $(grep -oE '"[A-Za-z0-9+/]{43}="' release_keys.go | tr -d '"'); do
+    if go run ./tools/relsign verify "$PUB" agent-manifest.json >/dev/null 2>&1; then MANIFEST_OK=true; fi
+  done
+  if [ "$MANIFEST_OK" != true ]; then
+    rm -f agent-manifest.json agent-manifest.json.sig
+    echo "❌ The manifest signature does not match any key in agent/release_keys.go (wrong key file?)." >&2
+    exit 1
+  fi
+  echo "   ✓ Release manifest for ${APP_VERSION} signed and verified."
+fi
+
+# ------------------------------------------------------------------------------
 # 4. SYNCHRONIZE ALL ARTIFACTS ACROSS DOWNLOAD DIRECTORIES
 # ------------------------------------------------------------------------------
 echo "🔄 [4/4] Synchronizing release artifacts to all distribution targets..."
@@ -310,6 +392,9 @@ cp -f install-linux.sh binaries/
 cp -f uninstall-linux.sh binaries/
 cp -f quarkshield.service binaries/
 cp -f README-linux.txt binaries/
+# Signed release manifest: replace it, or remove a stale one from an older release.
+rm -f binaries/agent-manifest.json binaries/agent-manifest.json.sig
+[ -f agent-manifest.json.sig ] && cp -f agent-manifest.json agent-manifest.json.sig binaries/
 
 # Aliases for backwards compatibility
 cp -f quarkshield-scanner-darwin-arm64 binaries/pqc-scanner-darwin-arm64
@@ -343,6 +428,8 @@ for DL_DIR in "$SCRIPT_DIR/ui/public/downloads" "$SCRIPT_DIR/ui/dist/downloads" 
     cp -f uninstall-linux.sh "$DL_DIR/"
     cp -f quarkshield.service "$DL_DIR/"
     cp -f README-linux.txt "$DL_DIR/"
+    rm -f "$DL_DIR/agent-manifest.json" "$DL_DIR/agent-manifest.json.sig"
+    [ -f agent-manifest.json.sig ] && cp -f agent-manifest.json agent-manifest.json.sig "$DL_DIR/"
     cp -f quarkshield-scanner-darwin-arm64 "$DL_DIR/pqc-scanner-darwin-arm64"
     cp -f quarkshield-scanner-darwin-amd64 "$DL_DIR/pqc-scanner-darwin-amd64"
     cp -f quarkshield-scanner-macos.zip "$DL_DIR/pqc-scanner-macos.zip"

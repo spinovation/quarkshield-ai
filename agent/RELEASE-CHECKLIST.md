@@ -34,6 +34,11 @@ classification-accuracy + trust-anchor + remediation-messaging fixes).
 - [ ] **Windows Azure code-signing** on `quarkshield-scanner-windows-amd64.exe`.
 - [ ] Linux: no signing (plain build is fine).
 
+## 2b. Signed release manifest (console push-upgrade)
+- [ ] `agent/.env.release-key` is present on the build machine (restore from the offline backup if not). The build stops without it.
+- [ ] After the build: `agent-manifest.json` + `agent-manifest.json.sig` exist, and the build printed "Release manifest for <version> signed and verified".
+- [ ] Publish both files with the binaries (step 5). A release without them cannot be pushed from the console. See `PUSH-UPGRADE-PLAN.md`.
+
 ## 3. Windows installer
 - [ ] Rebuild `QuarkShield-Setup.exe` from `agent/installer/quarkshield.iss` (Dockerized Inno Setup) with the **signed** windows binary embedded.
 - [ ] Azure-sign the `QuarkShield-Setup.exe` itself.

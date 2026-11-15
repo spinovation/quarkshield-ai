@@ -63,7 +63,8 @@ import {
   Package,
   Network,
   CreditCard,
-  MapPin
+  MapPin,
+  ArrowUpCircle
 } from 'lucide-react';
 import { TenantUserManagement } from './TenantUserManagement';
 import { EnterprisePkiVaults } from './EnterprisePkiVaults';
@@ -167,6 +168,10 @@ interface FleetMachine {
   geoCountry?: string;
   group?: string;
   agentVersion: string;
+  // Push-upgrade (server-computed against the published signed release).
+  latestVersion?: string | null;
+  upgradeState?: 'current' | 'pushable' | 'manual' | 'unsupported' | 'unknown';
+  upgradeInFlight?: boolean;
   status: string;
   riskLevel: string;
   quantumRiskScore: number;
@@ -1193,6 +1198,56 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       setTimeout(() => setPullToast(null), 5000);
     } finally {
       setPullingMachineId(null);
+    }
+  };
+
+  // Push-upgrade: ask an endpoint to upgrade itself to the published release. The
+  // agent verifies the release signature before changing anything, then restarts.
+  const [upgradingMachineId, setUpgradingMachineId] = useState<string | null>(null);
+  const handlePushUpgrade = async (machineId: string, hostname: string, toVersion?: string | null) => {
+    if (!window.confirm(`Update the agent on ${hostname}${toVersion ? ' to v' + toVersion : ''}?\n\nThe endpoint downloads the release, verifies its signature, and restarts the agent. If the new version cannot reach the server it rolls back automatically.`)) return;
+    setUpgradingMachineId(machineId);
+    try {
+      const res = await fetch(`/api/fleet/machines/${machineId}/upgrade`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(`${d.message || `Update queued for ${hostname}.`} The agent picks it up at its next check-in (within about 2 minutes) and reports the new version after it restarts.`);
+        fetchTenantData();
+      } else {
+        alert(`Could not queue the update for ${hostname}: ${d.error || res.status}`);
+      }
+    } catch (e) {
+      alert(`Update error: ${e}`);
+    } finally {
+      setUpgradingMachineId(null);
+    }
+  };
+
+  const [bulkUpgrading, setBulkUpgrading] = useState(false);
+  const handleUpgradeBulk = async (count: number, toVersion?: string | null) => {
+    if (!window.confirm(`Update ${count} endpoint(s)${toVersion ? ' to agent v' + toVersion : ''}?\n\nEach endpoint verifies the release signature before changing anything and rolls back automatically if the new version cannot reach the server. Endpoints already up to date are skipped.`)) return;
+    setBulkUpgrading(true);
+    try {
+      const res = await fetch(`/api/fleet/upgrade-bulk`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        alert(`${d.message || 'Update queued.'} Endpoints update as they check in.`);
+        fetchTenantData();
+      } else {
+        alert(`Could not queue the update: ${d.error || res.status}`);
+      }
+    } catch (e) {
+      alert(`Update error: ${e}`);
+    } finally {
+      setBulkUpgrading(false);
     }
   };
 
@@ -3726,6 +3781,35 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                       >
                         <RefreshCw size={14} className={bulkPulling === 'ALL' ? 'animate-spin' : ''} /> Pull All
                       </button>
+                      {(() => {
+                        // Only shown when at least one endpoint can actually take a pushed update.
+                        const pushable = machines.filter(m => m.upgradeState === 'pushable' && !m.upgradeInFlight);
+                        if (pushable.length === 0) return null;
+                        const latest = pushable[0].latestVersion;
+                        return (
+                          <button
+                            onClick={() => handleUpgradeBulk(pushable.length, latest)}
+                            disabled={bulkUpgrading}
+                            title={`Update ${pushable.length} out-of-date endpoint(s)${latest ? ' to agent v' + latest : ''}`}
+                            style={{
+                              background: 'rgba(74, 222, 128, 0.12)',
+                              border: '1px solid rgba(74, 222, 128, 0.3)',
+                              color: '#4ade80',
+                              padding: '0.4rem 0.85rem',
+                              borderRadius: '6px',
+                              fontSize: '0.8rem',
+                              fontWeight: 600,
+                              cursor: bulkUpgrading ? 'wait' : 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.4rem'
+                            }}
+                          >
+                            <ArrowUpCircle size={14} className={bulkUpgrading ? 'animate-spin' : ''} />
+                            Update agents ({pushable.length})
+                          </button>
+                        );
+                      })()}
                       <button
                         onClick={() => openProbeDialog(groupFilter ? { scope: 'group', group: groupFilter } : { scope: 'all' })}
                         disabled={machines.length === 0}
@@ -3870,6 +3954,27 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                         {m.hostname}
                                       </div>
                                     )}
+                                    <div style={{ fontSize: '0.68rem', color: '#64748b', marginTop: '0.1rem', display: 'flex', alignItems: 'center', gap: '0.35rem', fontWeight: 500 }}>
+                                      <span>Agent v{m.agentVersion || '—'}</span>
+                                      {m.upgradeInFlight ? (
+                                        <span style={{ color: '#fbbf24' }} title="An update was queued; waiting for the agent to apply it and report back">
+                                          updating…
+                                        </span>
+                                      ) : (m.upgradeState === 'pushable' || m.upgradeState === 'manual' || m.upgradeState === 'unsupported') && (
+                                        <span
+                                          title={
+                                            m.upgradeState === 'pushable'
+                                              ? `Agent v${m.latestVersion} is available`
+                                              : m.upgradeState === 'manual'
+                                                ? `Agent v${m.latestVersion} is available, but this version is too old to update itself. Install v${m.latestVersion} on the endpoint once; later releases can be pushed from here.`
+                                                : `Agent v${m.latestVersion} is available, but it has no build for this platform.`
+                                          }
+                                          style={{ color: m.upgradeState === 'pushable' ? '#4ade80' : '#94a3b8' }}
+                                        >
+                                          {m.upgradeState === 'pushable' ? `v${m.latestVersion} available` : m.upgradeState === 'manual' ? `v${m.latestVersion} available — reinstall needed` : `v${m.latestVersion} available — no build`}
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </div>
                               </td>
@@ -3989,6 +4094,31 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                   <RefreshCw size={12} className={pullingMachineId === m.id ? 'animate-spin' : ''} />
                                   {pullingMachineId === m.id ? 'Pulling...' : 'Pull Telemetry'}
                                 </button>
+                                {m.upgradeState === 'pushable' && !m.upgradeInFlight && (
+                                  <button
+                                    disabled={upgradingMachineId === m.id}
+                                    onClick={() => handlePushUpgrade(m.id, displayName, m.latestVersion)}
+                                    title={`Update this endpoint to agent v${m.latestVersion}. The agent verifies the release signature, restarts, and rolls back if the new version cannot reach the server.`}
+                                    style={{
+                                      marginLeft: '0.4rem',
+                                      background: 'rgba(74, 222, 128, 0.1)',
+                                      border: '1px solid rgba(74, 222, 128, 0.3)',
+                                      color: '#4ade80',
+                                      padding: '0.3rem 0.6rem',
+                                      borderRadius: '5px',
+                                      fontSize: '0.74rem',
+                                      fontWeight: 600,
+                                      cursor: upgradingMachineId === m.id ? 'not-allowed' : 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '0.35rem',
+                                      opacity: upgradingMachineId === m.id ? 0.6 : 1
+                                    }}
+                                  >
+                                    <ArrowUpCircle size={12} className={upgradingMachineId === m.id ? 'animate-spin' : ''} />
+                                    {upgradingMachineId === m.id ? 'Queuing...' : 'Update agent'}
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => openProbeDialog({ scope: 'machine', machineId: m.id, hostname: displayName })}
                                   style={{

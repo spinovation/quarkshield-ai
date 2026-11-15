@@ -377,6 +377,19 @@ func RunScanWithProgress(ctx context.Context, quick bool, customPath string, onP
 }
 
 func main() {
+	// Internal push-upgrade entry points (updater.go), handled before anything else:
+	//   --agent-version     print the version and exit (self-test of a staged build)
+	//   --upgrade-watchdog  roll back an upgrade that is never confirmed
+	if len(os.Args) == 2 {
+		switch os.Args[1] {
+		case "--agent-version":
+			fmt.Println(AgentReleaseVersion)
+			return
+		case "--upgrade-watchdog":
+			runUpgradeWatchdog()
+			return
+		}
+	}
 	tightenLocalPermissions()
 	// 1. Define Command-Line Flags
 	pathFlag := flag.String("path", ".", "Target local directory path to scan")
@@ -525,9 +538,12 @@ func main() {
 			}
 		}
 
+		recordSelfIdentity()
 		ticker := time.NewTicker(2 * time.Minute)
 		for {
-			// 1. On-demand commands queued by an admin (Pull Telemetry / bulk pull / probe).
+			// 0. Another process (GUI upgrade, rollback, re-install) replaced our binary.
+			restartIfBinaryReplaced()
+			// 1. On-demand commands queued by an admin (Pull Telemetry / bulk pull / probe / upgrade).
 			if cmds, err := FetchAgentCommands(server, token); err == nil {
 				for _, c := range cmds {
 					switch c.Command {
@@ -536,6 +552,13 @@ func main() {
 						lastSync = time.Now()
 					case "probe":
 						runProbe(c.Args.Targets)
+					case "upgrade":
+						// Verified download → swap → restart (updater.go). On success this
+						// process restarts into the new build and never returns here.
+						fmt.Println("⬆️  Agent upgrade requested by server — verifying...")
+						if err := PerformUpgrade(server, c.Args); err != nil {
+							fmt.Printf("❌ Upgrade not applied: %v\n", err)
+						}
 					}
 				}
 			}
@@ -577,6 +600,13 @@ func main() {
 				wantScan = true
 			case "probe":
 				probeTargets = append(probeTargets, c.Args.Targets...)
+			case "upgrade":
+				// One-shot poll mode (Intune/Jamf/cron): apply the verified upgrade.
+				// On success the process restarts into the new build.
+				fmt.Println("⬆️  Agent upgrade requested by server — verifying...")
+				if err := PerformUpgrade(*serverFlag, c.Args); err != nil {
+					fmt.Printf("❌ Upgrade not applied: %v\n", err)
+				}
 			}
 		}
 		if !wantScan && len(probeTargets) == 0 {
