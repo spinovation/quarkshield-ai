@@ -500,12 +500,6 @@ export const requireTenantAccess = (req: Request, res: Response, next: NextFunct
     void superAdminSupportGate(req, res, next);
     return;
   }
-  const requested =
-    (req.params.tenant as string) ||
-    (req.query.tenant as string) ||
-    (req.headers['x-tenant-id'] as string) ||
-    (req.headers['x-tenant-slug'] as string) ||
-    '';
   // SECURITY: a NON-super session with no tenant must never reach a tenant-data route.
   // Previously, with no tenant requested, this fell through to next() WITHOUT pinning
   // anything, so controllers resolved no tenant and queried ALL tenants (e.g. /fleet/cbom
@@ -516,18 +510,58 @@ export const requireTenantAccess = (req: Request, res: Response, next: NextFunct
     res.status(403).json({ error: 'No tenant is associated with this session.' });
     return;
   }
-  if (!requested) {
-    // No explicit tenant requested: pin the query to the session's own tenant so
-    // downstream controllers cannot fall back to "all tenants" or a hardcoded default.
-    req.query.tenant = req.user.tenant;
-    next();
-    return;
+  // EVERY place the request names a tenant must name the session's own tenant. The
+  // check used to stop at the first one it found (:tenant, else ?tenant, else a header),
+  // while controllers read ?tenant first — so `/tenant/<mine>/…?tenant=<other>` or
+  // `?tenant=<mine>` with `X-Tenant-Id: <other>` passed the check on one name and could
+  // be answered for the other. "all", arrays and objects are not the session tenant.
+  const own = normTenant(req.user.tenant);
+  const named: unknown[] = [
+    req.params?.tenant, req.query?.tenant,
+    req.headers['x-tenant-id'], req.headers['x-tenant-slug'],
+  ];
+  for (const v of named) {
+    if (v === undefined || v === null || v === '') continue;
+    if (typeof v !== 'string' || normTenant(v) !== own) {
+      res.status(403).json({ error: 'Access to this tenant is not permitted' });
+      return;
+    }
   }
-  if (req.user.tenant && normTenant(requested) === normTenant(req.user.tenant)) {
-    next();
-    return;
+  // Pin what is left unnamed, so no controller can fall back to "all tenants", to the
+  // Host header, or to a default. A body-supplied tenant is never a way to pick one:
+  // overwrite it with the session's own.
+  if (!req.query.tenant) req.query.tenant = req.user.tenant;
+  delete req.headers['x-tenant-id'];
+  delete req.headers['x-tenant-slug'];
+  if (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) {
+    const body = req.body as Record<string, unknown>;
+    for (const k of ['tenantName', 'tenant', 'tenant_name']) {
+      if (body[k] !== undefined && body[k] !== null && body[k] !== '' &&
+          (typeof body[k] !== 'string' || normTenant(body[k] as string) !== own)) {
+        body[k] = req.user.tenant;
+      }
+    }
   }
-  res.status(403).json({ error: 'Access to this tenant is not permitted' });
+  next();
+};
+
+/**
+ * The single tenant a tenant-data read is scoped to, or null when there is none. Read
+ * handlers must refuse a null scope instead of running the query without a tenant
+ * filter: requireTenantAccess always pins one, so "no tenant" means the route was wired
+ * without the guard, and the safe answer is nothing, never every tenant's rows.
+ */
+export const scopedTenant = (req: Request): string | null => {
+  const t = req.query?.tenant;
+  if (typeof t !== 'string') return null;
+  const v = t.trim();
+  if (!v || v.toLowerCase() === 'all') return null;
+  return v;
+};
+
+/** Standard refusal for a tenant-data read that has no tenant scope. */
+export const denyUnscoped = (res: Response): void => {
+  res.status(400).json({ error: 'A tenant is required for this request.' });
 };
 
 /**

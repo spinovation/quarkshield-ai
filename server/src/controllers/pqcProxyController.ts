@@ -4,7 +4,7 @@ import crypto from 'crypto';
 import tls from 'tls';
 import net from 'net';
 import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
-import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
+import { canAccessTenant, resolveWriteTenant, scopedTenant, denyUnscoped } from '../middleware/auth';
 
 /**
  * Derive real KEM crypto metadata from the gateway's CONFIGURED tls curve.
@@ -138,17 +138,12 @@ export const syndicateProxyToAssets = async (
 
 export const getProxies = async (req: Request, res: Response) => {
   try {
-    const { tenant } = req.query;
-    let query = 'SELECT * FROM pqc_proxies';
-    const params: any[] = [];
-
-    if (tenant && typeof tenant === 'string' && tenant.trim()) {
-      query += ' WHERE LOWER(tenant_name) = LOWER($1)';
-      params.push(tenant.trim());
-    }
-
-    query += ' ORDER BY created_at DESC';
-    const result = await pool.query(query, params);
+    const tenant = scopedTenant(req);
+    if (!tenant) return denyUnscoped(res);
+    const result = await pool.query(
+      'SELECT * FROM pqc_proxies WHERE LOWER(tenant_name) = LOWER($1) ORDER BY created_at DESC',
+      [tenant]
+    );
 
     // Auto-syndicate all active proxies into CBOM assets
     for (const p of result.rows) {
@@ -165,7 +160,7 @@ export const getProxies = async (req: Request, res: Response) => {
 export const createProxy = async (req: Request, res: Response) => {
   try {
     const {
-      tenantName = 'SPINOVATIONCORP',
+      tenantName = '',
       name,
       listenPort = 8443,
       upstreamUrl = 'http://127.0.0.1:8080',
@@ -178,7 +173,7 @@ export const createProxy = async (req: Request, res: Response) => {
 
     const id = 'prx-' + crypto.randomUUID().substring(0, 8);
     // Pin to the session's tenant; a body tenantName cannot target another tenant.
-    // M4: reject empty-tenant writes rather than silently defaulting to SPINOVATIONCORP.
+    // M4: reject empty-tenant writes rather than silently defaulting to any tenant.
     const cleanTenant = (resolveWriteTenant(req, tenantName) || '').toUpperCase().trim();
     if (!cleanTenant) return res.status(400).json({ error: 'Unable to resolve a tenant for this request.' });
 

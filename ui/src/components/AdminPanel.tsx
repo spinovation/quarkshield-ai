@@ -102,9 +102,6 @@ export interface LicenseInfo {
 
 function getSanitizedPrefix(email: string): string {
   const clean = email.toLowerCase().trim();
-  if (clean === 'democlient@example.com') return 'democlient';
-  if (clean === 'locked_client@example.com') return 'lockedclient';
-  if (clean === 'pending_client@example.com') return 'pendingclient';
 
   const parts = email.split('@');
   const username = parts[0].toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -2256,7 +2253,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Apex Defense Labs, Northrop, Lockheed"
+                      placeholder="e.g. Example Defense Labs"
                       value={onboardOrg}
                       onChange={e => setOnboardOrg(e.target.value)}
                       required
@@ -2300,7 +2297,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                     </label>
                     <input
                       type="email"
-                      placeholder="e.g. m.vance@apexdefense.com"
+                      placeholder="e.g. admin@example.com"
                       value={onboardAdminEmail}
                       onChange={e => setOnboardAdminEmail(e.target.value)}
                       required
@@ -7284,7 +7281,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                     <input
                       type="text"
                       required
-                      placeholder="e.g. Apex Defense MSSP"
+                      placeholder="e.g. Example MSSP"
                       value={customDealForm.companyName}
                       onChange={(e) => setCustomDealForm(prev => ({ ...prev, companyName: e.target.value }))}
                       style={{

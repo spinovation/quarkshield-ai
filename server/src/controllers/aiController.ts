@@ -106,10 +106,13 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
       return res.json({ text: SCOPE_REFUSAL, code: undefined, language: 'text' });
     }
 
-    // SECURITY: scope all context to the caller's tenant. A non-super session is pinned
-    // to its own tenant; a super (fleet) session may target ?tenant, else sees all.
+    // SECURITY: the Copilot sees ONE tenant's data or none. A tenant session is pinned to
+    // its own tenant; a platform session gets a tenant only under that tenant's active
+    // support grant. There is no "all tenants" context: `allowed` is true only together
+    // with a concrete tenant, and every query below carries the tenant filter.
     const inventoryScope = chatInventoryScope(req);
     const scopeTenant = inventoryScope.tenant || '';
+    const hasInventoryScope = inventoryScope.allowed && !!scopeTenant;
 
     // Build a COMPACT inventory context. Dumping every asset as pretty-printed JSON made
     // the prompt enormous for large fleets (e.g. 7k+ assets => hundreds of thousands of
@@ -117,12 +120,12 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
     // breakdown, and a small sample of the most critical/vulnerable assets. The model can
     // ask the user to narrow down for host-level detail.
     const ASSET_SAMPLE = 40;
-    const whereTenant = scopeTenant ? 'WHERE LOWER(tenant_name) = LOWER($1)' : '';
-    const tenantParams = scopeTenant ? [scopeTenant] : [];
+    const whereTenant = 'WHERE LOWER(tenant_name) = LOWER($1)';
+    const tenantParams = [scopeTenant];
     const riskRank = "CASE LOWER(COALESCE(risk_level,'')) WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END";
     let assetsContext = '';
     // A session with no tenant gets NO inventory (never the unfiltered fleet).
-    if (!inventoryScope.allowed) assetsContext = NO_TENANT_INVENTORY_NOTE;
+    if (!hasInventoryScope) assetsContext = NO_TENANT_INVENTORY_NOTE;
     else try {
       const summary = await pool.query(
         `SELECT COUNT(*)::int AS total,
@@ -212,7 +215,7 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
       "5. Mosca's Theorem: X + Y > Z (Shelf-life X + Migration time Y > Threat timeline Z). " +
       "6. Complete QuarkShield.ai Platform Processes, Workflows, and Next Steps: " +
       "   • TENANT ONBOARDING & 'NEXT STEPS' WORKFLOW: " +
-      "     - Step 1 (Admin Login & Initial Credentials): After onboarding and license assignment, the Corporate Admin / Partner Admin receives their Welcome & 'Next Steps' email from support@quarkshield.ai. They log in at https://quarkshield.ai/?view=console or their dedicated tenant workspace (e.g., https://quarkshield.ai/?tenant=YOURTENANT or /tenant/spinovation). Initial credentials include their corporate admin email and initial password (e.g. QS-Amberoon7033! or customer-assigned secure password). Admins establish 2FA/MFA and verify allocated seats. " +
+      "     - Step 1 (Admin Login & Initial Credentials): After onboarding and license assignment, the Corporate Admin / Partner Admin receives their Welcome & 'Next Steps' email from support@quarkshield.ai. They log in at https://quarkshield.ai/?view=console or their dedicated tenant workspace (e.g., https://quarkshield.ai/?tenant=YOURTENANT or /tenant/YOURTENANT). Initial credentials include their corporate admin email and initial password (a customer-assigned secure password). Admins establish 2FA/MFA and verify allocated seats. " +
       "     - Step 2 (First Host / Endpoint PQC Scan): Go to Fleet Overview or Settings > Deployment. Download macOS DMG or run 1-click curl command (curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | bash -s -- --token YOUR_TOKEN); on Windows run PowerShell installer with FedMitigate code-signing certs; on Linux run linux-amd64 binary. The scanner audits local certificate stores, private keys (PEM/DER/PKCS#12), SSH host/user keys, browser keychains, and OpenSSL configs, publishing a CycloneDX 1.6+ CBOM inventory back to the dashboard with zero host reboots. " +
       "     - Step 3 (Staff Onboarding & Seat Allocation): Go to Settings > Users & Access (or Tenant Portal > Users & Access), click '+ Invite User', enter corporate email, assign RBAC role (Corporate Admin, Cryptographer, Auditor, Viewer), track license seat count, and set tenant 2FA enforcement policies. " +
       "     - Step 4 (Documentation & Online Help): Access downloadable guides under Downloads & Resources (Enterprise PQC Deployment Guide, Customer PQC Readiness Guide DOCX, OS User Guides, root CAs) or contact support@quarkshield.ai. " +
@@ -535,10 +538,10 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
              "| **4** | **Documentation & Help** | Review deployment guides or contact 24/7 support | **Downloads & Resources** / PQC Copilot |\n\n" +
              "#### Step 1: Admin First Login & Credential Verification\n" +
              "1. **Welcome Email**: The Corporate Admin / Partner Admin receives an official onboarding email dispatched from `support@quarkshield.ai`.\n" +
-             "2. **Access Portal**: Open **https://quarkshield.ai/?view=console** or your dedicated tenant workspace (e.g., `https://quarkshield.ai/?tenant=YOUR_TENANT` or `/tenant/spinovation`).\n" +
+             "2. **Access Portal**: Open **https://quarkshield.ai/?view=console** or your dedicated tenant workspace (e.g., `https://quarkshield.ai/?tenant=YOUR_TENANT` or `/tenant/YOUR_TENANT`).\n" +
              "3. **Initial Credentials**:\n" +
              "   - **Username / Email**: Your corporate administrator email address.\n" +
-             "   - **Initial Password**: Supplied securely in your Welcome Email (e.g. `QS-Amberoon7033!` or your customer-assigned secure password).\n" +
+             "   - **Initial Password**: Supplied securely in your Welcome Email (or your customer-assigned secure password).\n" +
              "4. **Security Hardening**: Log in, establish **Phishing-Resistant MFA (TOTP / FIDO2 WebAuthn)**, and verify your allocated seat count under *License & Seats*.\n\n" +
              "#### Step 2: Run Your First Host / Workstation PQC Scan\n" +
              "Deploy the QuarkShield lightweight scanner to establish your baseline Cryptographic Bill of Materials (CBOM):\n" +
@@ -1379,14 +1382,12 @@ func main() {
       query.includes('vulnerable') || query.includes('list') || query.includes('assets') || query.includes('dashboard') || query.includes('inventory') || query.includes('cmdb')
     ) {
       try {
-        // SECURITY: tenant-scope this inventory lookup too (local-fallback reply path). The
-        // unfiltered query is reachable ONLY by a super (fleet) session that chose no tenant.
-        if (!inventoryScope.allowed) {
+        // SECURITY: tenant-scope this inventory lookup too (local-fallback reply path).
+        // There is no unfiltered variant of this query.
+        if (!hasInventoryScope) {
           return res.json({ text: "No tenant is associated with your session, so I can't show inventory data. Ask your administrator to assign your account to a tenant.", code: undefined, language: 'text' });
         }
-        const assetsRes = scopeTenant
-          ? await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets WHERE LOWER(tenant_name) = LOWER($1)', [scopeTenant])
-          : await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets');
+        const assetsRes = await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets WHERE LOWER(tenant_name) = LOWER($1)', [scopeTenant]);
         const total = assetsRes.rows.length;
         const vulnerable = assetsRes.rows.filter(r => r.is_vulnerable);
         
@@ -1521,10 +1522,10 @@ export const resolveAssetScope = (req: Request): AssetScope => {
   return { ok: false, status: 403, error: 'Support access required: the tenant has not granted an active support-access window.' };
 };
 
-/** Assets for the scope (fleet-wide only for a super session that asked for no tenant). */
-const scopedAssetsQuery = (tenant: string | null) => tenant
+/** Assets of ONE tenant. No tenant → no rows; there is no fleet-wide variant. */
+const scopedAssetsQuery = async (tenant: string | null): Promise<{ rows: any[] }> => tenant
   ? pool.query('SELECT * FROM assets WHERE LOWER(tenant_name) = LOWER($1) ORDER BY created_at DESC', [tenant])
-  : pool.query('SELECT * FROM assets ORDER BY created_at DESC');
+  : { rows: [] };
 
 /**
  * One tenant_settings value for the scope's OWN tenant. The previous queries had no tenant

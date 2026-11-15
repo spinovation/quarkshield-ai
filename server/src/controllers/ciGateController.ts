@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
+import { scopedTenant, denyUnscoped } from '../middleware/auth';
 
 // Reusable crypto rules for CI file analysis
 const CI_CRYPTO_RULES = [
@@ -60,7 +61,7 @@ const CI_CRYPTO_RULES = [
 export const evaluateCIGate = async (req: Request, res: Response) => {
   try {
     const {
-      tenantName = 'SPINOVATIONCORP',
+      tenantName = '',
       provider = 'github',
       repoName = 'unknown-repo',
       repoUrl = '',
@@ -240,14 +241,12 @@ export const evaluateCIGate = async (req: Request, res: Response) => {
 
 export const getCIGateHistory = async (req: Request, res: Response) => {
   try {
-    const { tenant, limit = 50 } = req.query;
-    let query = 'SELECT * FROM ci_security_gates';
-    const params: any[] = [];
-
-    if (tenant && typeof tenant === 'string' && tenant.trim()) {
-      query += ' WHERE LOWER(tenant_name) = LOWER($1)';
-      params.push(tenant.trim());
-    }
+    const { limit = 50 } = req.query;
+    // No tenant scope → no rows (this used to list every tenant's pipeline runs).
+    const tenant = scopedTenant(req);
+    if (!tenant) return denyUnscoped(res);
+    let query = 'SELECT * FROM ci_security_gates WHERE LOWER(tenant_name) = LOWER($1)';
+    const params: any[] = [tenant];
 
     query += ' ORDER BY created_at DESC LIMIT $' + (params.length + 1);
     params.push(Number(limit) || 50);
@@ -263,8 +262,8 @@ export const getCIGateHistory = async (req: Request, res: Response) => {
 export const getCIGatePolicies = async (req: Request, res: Response) => {
   try {
     // requireTenantAccess pins ?tenant to the session tenant for non-super sessions.
-    const tenant = String(req.query.tenant || req.user?.tenant || '');
-    if (!tenant) return res.status(400).json({ error: 'A tenant is required.' });
+    const tenant = scopedTenant(req);
+    if (!tenant) return denyUnscoped(res);
     // A tenant sees its own policies plus the platform's 'global' templates — never
     // another tenant's rows, even if they were flagged is_default.
     const result = await pool.query(

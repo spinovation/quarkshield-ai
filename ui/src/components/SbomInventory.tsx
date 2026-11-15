@@ -68,8 +68,8 @@ interface SbomInventoryProps {
   isSuperAdmin?: boolean;
 }
 
-export default function SbomInventory({ tenant = 'SPINOVATIONCORP', apiUrl = '', isSuperAdmin = false }: SbomInventoryProps) {
-  const activeTenant = tenant || 'SPINOVATIONCORP';
+export default function SbomInventory({ tenant = '', apiUrl = '', isSuperAdmin = false }: SbomInventoryProps) {
+  const activeTenant = tenant || '';
   // The super-admin banner previously always claimed "quarkshield.ai Core Stack"
   // even while the table below showed a customer tenant's inventory. Reflect what
   // is actually being displayed: the platform's own stack vs a tenant SBOM.

@@ -117,7 +117,7 @@ export interface TenantBreakdown {
 }
 
 export interface RoadmapReport {
-  scopeLabel: string;       // "SPINOVATIONCORP" or "All Tenants (Fleet)"
+  scopeLabel: string;       // the tenant name, or "All Tenants (Fleet)"
   collective: boolean;
   generatedAt: string;
   reportId: string;         // short human reference for the document
@@ -255,10 +255,10 @@ const worstSeverity = (a: string, b: string): string => (severityRank(a) >= seve
 /** Gather + compute the full roadmap report for a scope. */
 export const buildRoadmapReport = async (scope: RoadmapScope): Promise<RoadmapReport> => {
   // SECURITY: EXACT tenant match (was `%tenant%` LIKE → a tenant whose slug is a substring
-  // of another's would pull that tenant's assets/machines into this roadmap/report). The
-  // spinovation/engg alias stays gated to that operator's own session.
+  // of another's would pull that tenant's assets/machines into this roadmap/report). No
+  // per-tenant aliases: every tenant is matched by its own name.
   const tenantPred = (col: string) =>
-    `WHERE (LOWER(COALESCE(${col}, '')) = LOWER($1) OR (LOWER($1) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(${col}, '')) LIKE '%spinovation%'))`;
+    `WHERE (LOWER(COALESCE(${col}, '')) = LOWER($1))`;
   const where = scope.collective ? '' : tenantPred('tenant_name');
   const params: any[] = scope.collective ? [] : [scope.tenant];
   const mWhere = scope.collective ? '' : tenantPred('tenant_name');

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
 import { signSession, setSessionCookie, clearSessionCookie, setConsoleSessionCookie, clearConsoleSessionCookie, isSuperRole, isPlatformAdmin, superNeedsGrant, sanitizeTenantRole, revokeUserSessions, forgetUserState, localTenantEntitlement, RISK_ASSURANCE_ADDON } from '../middleware/auth';
 import { getTenantAggregates, totalsOf } from '../lib/tenantAggregates';
+import { tenantNameProblem, newCustomerId, sqlTenantKey, tenantKey } from '../lib/tenantNames';
 
 /** Escape untrusted text for inclusion in HTML email bodies. */
 const escapeHtml = (v: unknown): string => String(v ?? '')
@@ -309,7 +310,9 @@ export const updateClientPlan = async (req: Request, res: Response) => {
 export const deployInlineClient = async (req: Request, res: Response) => {
   try {
     const { email, workspace } = req.body;
-    const sanitizedName = (workspace || email.split('@')[0]).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const sanitizedName = String(workspace || String(email || '').split('@')[0]).toLowerCase().replace(/[^a-z0-9]/g, '');
+    const nameProblem = await tenantNameProblem(sanitizedName);
+    if (nameProblem) return res.status(400).json({ error: nameProblem });
     const id = 'client-' + crypto.randomUUID().substring(0, 8);
     const portQuery = await pool.query('SELECT MAX(app_port) as max_app, MAX(db_port) as max_db FROM admin_clients');
     const nextAppPort = (portQuery.rows[0]?.max_app || 5020) + 1;
@@ -345,20 +348,22 @@ export const createClient = async (req: Request, res: Response) => {
     // so "acme-corp" and "acmecorp" would be the SAME tenant to the auth layer. Refuse
     // to create a second client that collapses to an existing one.
     const clash = await pool.query(
-      "SELECT name FROM admin_clients WHERE LOWER(REPLACE(name, '-', '')) = LOWER(REPLACE($1, '-', '')) LIMIT 1",
-      [sanitizedName]
+      `SELECT name FROM admin_clients WHERE ${sqlTenantKey('name')} = $1 LIMIT 1`,
+      [tenantKey(sanitizedName)]
     );
     if (clash.rowCount) {
       return res.status(409).json({ error: `A tenant with an equivalent name already exists (${clash.rows[0].name}).` });
     }
+    // Platform bucket names (system, global, community, …) can never be a tenant.
+    const nameProblem = await tenantNameProblem(sanitizedName);
+    if (nameProblem) return res.status(400).json({ error: nameProblem });
     const id = 'client-' + crypto.randomUUID().substring(0, 8);
 
     const portQuery = await pool.query('SELECT MAX(app_port) as max_app, MAX(db_port) as max_db FROM admin_clients');
     const nextAppPort = (portQuery.rows[0]?.max_app || 5020) + 1;
     const nextDbPort = (portQuery.rows[0]?.max_db || 5440) + 1;
 
-    const customerPrefix = accountType === 'partner' ? 'PART-' : 'CORP-';
-    const customerId = customerPrefix + Math.floor(1000 + Math.random() * 9000);
+    const customerId = await newCustomerId(accountType === 'partner' ? 'PART-' : 'CORP-');
 
     const query = `
       INSERT INTO admin_clients (id, name, display_name, app_port, db_port, status, subscription_tier, mca_limit, user_count, asset_count, account_type, customer_id, stripe_payment_status)
@@ -1071,7 +1076,7 @@ export const generateLicense = async (req: Request, res: Response) => {
     );
     let customerId = clientRes.rows[0]?.customer_id;
     if (!customerId) {
-      customerId = (cleanTier === 'PARTNER' ? 'PART-' : 'CORP-') + Math.floor(1000 + Math.random() * 9000);
+      customerId = await newCustomerId(cleanTier === 'PARTNER' ? 'PART-' : 'CORP-');
       await pool.query(
         `UPDATE admin_clients SET customer_id = $1 
          WHERE LOWER(name) = LOWER($2) OR LOWER(display_name) = LOWER($3)`,
@@ -2512,6 +2517,8 @@ export const onboardPartnerTenant = async (req: Request, res: Response) => {
     if (cleanTenant.length < 3) {
       return res.status(400).json({ error: 'Organization slug must be at least 3 characters.' });
     }
+    const nameProblem = await tenantNameProblem(cleanTenant);
+    if (nameProblem) return res.status(400).json({ error: nameProblem });
 
     const cleanTier = tier.toUpperCase() === 'CORPORATE' ? 'CORP' : 'PARTNER';
     const days = parseInt(durationDays, 10) || 30;
@@ -2602,6 +2609,8 @@ export const onboardUser = async (req: Request, res: Response) => {
     if (cleanTenant.length < 2) {
       return res.status(400).json({ error: 'Organization name must contain alphanumeric characters.' });
     }
+    const nameProblem = await tenantNameProblem(cleanTenant);
+    if (nameProblem) return res.status(400).json({ error: nameProblem });
 
     const clientId = 'client-' + crypto.randomUUID().substring(0, 8);
     const portQuery = await pool.query('SELECT MAX(app_port) as max_app, MAX(db_port) as max_db FROM admin_clients');
@@ -2609,8 +2618,7 @@ export const onboardUser = async (req: Request, res: Response) => {
     const nextDbPort = (portQuery.rows[0]?.max_db || 5448) + 1;
 
     // Generate unique Customer ID (e.g. PART-9148 or CORP-4821)
-    const customerPrefix = accountType === 'partner' ? 'PART-' : 'CORP-';
-    const customerId = customerPrefix + Math.floor(1000 + Math.random() * 9000);
+    const customerId = await newCustomerId(accountType === 'partner' ? 'PART-' : 'CORP-');
 
     // Stripe credit card link is strictly OPTIONAL (corporate & enterprise clients pay via Check or ACH)
     const cleanStripeLink = stripePaymentLink && stripePaymentLink.trim() ? stripePaymentLink.trim() : '';
@@ -3180,16 +3188,12 @@ export const forgotPassword = async (req: Request, res: Response) => {
     // Does an account exist? (Do NOT create one as a side effect.)
     const adminRes = await pool.query(
       `SELECT id FROM admin_users 
-       WHERE LOWER(email) = LOWER($1) 
-          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.com', '@algomeld.ai')) 
-          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.ai', '@algomeld.com'))`,
+       WHERE LOWER(email) = LOWER($1)`,
       [cleanEmail]
     );
     const tenantRes = await pool.query(
       `SELECT id FROM tenant_users 
-       WHERE LOWER(email) = LOWER($1) 
-          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.com', '@algomeld.ai')) 
-          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.ai', '@algomeld.com'))`,
+       WHERE LOWER(email) = LOWER($1)`,
       [cleanEmail]
     );
     if (adminRes.rowCount === 0 && tenantRes.rowCount === 0) {
@@ -3287,9 +3291,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     for (const r of affectedAdmins.rows) forgetUserState('admin', r.id);
     const affectedTenantUsers = await pool.query(
       `UPDATE tenant_users SET password_hash = $1, salt = NULL, must_change_password = false, sessions_revoked_at = CURRENT_TIMESTAMP
-       WHERE LOWER(email) = LOWER($2) 
-          OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.com', '@algomeld.ai')) 
-          OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.ai', '@algomeld.com')) RETURNING id`,
+       WHERE LOWER(email) = LOWER($2) RETURNING id`,
       [newHash, row.email]
     );
     for (const r of affectedTenantUsers.rows) forgetUserState('tenant', r.id);
@@ -3368,11 +3370,9 @@ const aggregatePortalData = async (cleanTenant: string, tenantNameSearch: string
              tier, duration_days as "durationDays", seats, expires_at as "expiresAt",
              customer_id as "customerId", status, created_at as "createdAt"
         FROM admin_licenses
-       WHERE LOWER(tenant_name) = LOWER($1)
-          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-          OR (customer_id IS NOT NULL AND ($2::text != '') AND customer_id = $2::text)
+       WHERE ${sqlTenantKey('tenant_name')} = $1
        ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, created_at DESC`,
-      [tenantNameSearch, client?.customerId || '']),
+      [tenantKey(tenantNameSearch)]),
     pool.query(`
       SELECT id, TO_CHAR(snapshot_date, 'YYYY-MM-DD') as "date",
              active_workstations as "activeWorkstations", total_assets as "totalAssets",
@@ -3450,15 +3450,14 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         account_type as "accountType", stripe_payment_link as "stripePaymentLink",
         stripe_payment_status as "stripePaymentStatus", created_at as "createdAt"
       FROM admin_clients
-      WHERE LOWER(name) = $1 
-         OR LOWER(REPLACE(name, '-', '')) = $1
-         OR LOWER(REPLACE(display_name, ' ', '')) = $1
-         OR LOWER(customer_id) = $1
-         OR LOWER(admin_email) = $1
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(name) IN ('spinovation', 'spinovationcorp'))
+      WHERE LOWER(name) = $1
+         OR ${sqlTenantKey('name')} = $2
       ORDER BY CASE WHEN LOWER(name) = $1 THEN 0 ELSE 1 END, created_at ASC
       LIMIT 1;
-    `, [cleanTenant]);
+    `, [cleanTenant, tenantKey(cleanTenant)]);
+    // The client is found by its NAME only. Matching on display name, customer id or
+    // admin email let a workspace that has no client row of its own resolve to ANOTHER
+    // client that merely shares a display name, and then load that client's inventory.
 
     let client = clientQuery.rows[0];
 
@@ -3508,7 +3507,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE LOWER(m.tenant_name) = LOWER($1)
          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg'))
       ORDER BY m.last_seen DESC;
     `, [tenantNameSearch, client?.displayName || tenantNameSearch]);
 
@@ -3530,11 +3528,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($1)
          OR LOWER(REPLACE(COALESCE(a.tenant_name, m.tenant_name, ''), ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (
-               LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) LIKE '%spinovation%'
-               OR LOWER(t.name) = 'engg'
-               OR (a.tenant_name IS NULL AND m.id IS NOT NULL)
-            ))
       ORDER BY a.is_vulnerable DESC, a.created_at DESC;
     `, [tenantNameSearch]);
 
@@ -3553,14 +3546,13 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         tier, duration_days as "durationDays", seats, expires_at as "expiresAt",
         customer_id as "customerId", status, created_at as "createdAt"
       FROM admin_licenses
-      WHERE LOWER(tenant_name) = LOWER($1)
-         OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(tenant_name) LIKE '%spinovation%')
-         OR (customer_id IS NOT NULL AND ($2::text != '') AND customer_id = $2::text)
+      WHERE ${sqlTenantKey('tenant_name')} = $1
       ORDER BY 
         CASE WHEN status = 'active' THEN 0 ELSE 1 END,
         created_at DESC;
-    `, [tenantNameSearch, client?.customerId || '']);
+    `, [tenantKey(tenantNameSearch)]);
+    // Licences belong to the tenant they name. The old `customer_id =` arm also returned
+    // any other tenant's licence keys that happened to carry the same customer id.
 
     const licenses = licensesQuery.rows;
 
@@ -3572,7 +3564,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       FROM fleet_tokens
       WHERE LOWER(tenant_name) = LOWER($1)
          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(tenant_name) LIKE '%spinovation%' OR LOWER(name) = 'engg'))
       ORDER BY created_at DESC;
     `, [tenantNameSearch]);
     // Enrollment tokens are bearer credentials: only tenant admins / platform roles
@@ -3591,7 +3582,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       FROM fleet_daily_snapshots
       WHERE LOWER(tenant_name) = LOWER($1)
          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(tenant_name) LIKE '%spinovation%')
       ORDER BY snapshot_date ASC
       LIMIT 30;
     `, [tenantNameSearch]);
@@ -3618,8 +3608,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
     try {
       const gitScansRes = await pool.query(`
         SELECT quantum_risk_score FROM git_scans 
-        WHERE LOWER(COALESCE(tenant_name, '')) = LOWER($1) 
-           OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(COALESCE(tenant_name, '')) LIKE '%spinovation%')
+        WHERE LOWER(COALESCE(tenant_name, '')) = LOWER($1)
         ORDER BY created_at DESC LIMIT 5
       `, [tenantNameSearch]);
       for (const row of gitScansRes.rows) {
