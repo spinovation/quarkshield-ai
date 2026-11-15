@@ -389,12 +389,33 @@ export default function App() {
           sessionStorage.setItem('quarkshield_account_type', 'superadmin');
           localStorage.setItem('quarkshield_role', 'Super Admin');
           sessionStorage.setItem('quarkshield_role', 'Super Admin');
-        } else if (currentAccountType === 'superadmin') {
-          // Stored state claims superadmin but the server disagrees: demote.
-          setCurrentAccountType(u.accountType || 'user');
-          setCurrentUserRole('Security Operator');
-          localStorage.setItem('quarkshield_account_type', u.accountType || 'user');
-          sessionStorage.setItem('quarkshield_account_type', u.accountType || 'user');
+        } else {
+          if (currentAccountType === 'superadmin') {
+            // Stored state claims superadmin but the server disagrees: demote, and
+            // drop the super admin identity left over from an earlier sign-in on
+            // this browser (it was being shown next to the tenant user's email).
+            setCurrentAccountType(u.accountType || 'user');
+            setCurrentUserRole('Security Operator');
+            setCurrentCustomerId('');
+            setCurrentCustomerName('');
+            localStorage.setItem('quarkshield_account_type', u.accountType || 'user');
+            sessionStorage.setItem('quarkshield_account_type', u.accountType || 'user');
+            ['quarkshield_role', 'quarkshield_customer_id', 'quarkshield_customer_name', 'quarkshield_license_tier']
+              .forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
+          }
+          // The central console is the Super Admin's. A tenant (Fleet Admin) session
+          // that reaches it — a bookmarked ?view=console, or a browser that last
+          // signed in as super admin — belongs in its own tenant portal, which is
+          // where its licence, users, groups and Copilot live.
+          // (Platform operators have no tenant and stay where they are.)
+          const slug = String(u.tenant || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+          if (viewMode === 'console' && slug) {
+            try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+            setTenantSlug(slug);
+            localStorage.setItem('quarkshield_tenant_slug', slug);
+            sessionStorage.setItem('quarkshield_tenant_slug', slug);
+            setViewMode('tenant');
+          }
         }
         if (u.email && u.email !== currentUserEmail) setCurrentUserEmail(u.email);
       } catch { /* offline: keep whatever the server last told us */ }
