@@ -7,7 +7,12 @@ import { ShieldCheck, ShieldAlert, Clock } from 'lucide-react';
  * SBOM for troubleshooting; otherwise they see only aggregate metrics. Every
  * super-admin access during the window is audit-logged.
  */
-export default function SupportAccessCard({ apiUrl = '', canManage = true }: { apiUrl?: string; canManage?: boolean }) {
+/**
+ * `viewTenant` — set only when QuarkShield support is looking at this card through the
+ * support mirror: it shows that tenant's window read-only (support can never open or
+ * extend a window; only the tenant's own administrator can).
+ */
+export default function SupportAccessCard({ apiUrl = '', canManage = true, viewTenant }: { apiUrl?: string; canManage?: boolean; viewTenant?: string }) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [active, setActive] = useState(false);
@@ -19,11 +24,15 @@ export default function SupportAccessCard({ apiUrl = '', canManage = true }: { a
 
   const refresh = async () => {
     try {
-      const r = await fetch(`${apiUrl}/api/support-access/status`, { credentials: 'include' });
+      const qs = viewTenant ? `?tenant=${encodeURIComponent(viewTenant)}` : '';
+      const r = await fetch(`${apiUrl}/api/support-access/status${qs}`, { credentials: 'include' });
       if (r.ok) {
         const d = await r.json();
-        setActive(!!d.active);
-        setExpiresAt(d.grant?.expires_at || null);
+        // A window is always time-boxed: only a boolean `active` WITH an expiry counts.
+        // (A platform session used to get a list here, which rendered "ACTIVE · Expires —".)
+        const exp = d.grant?.expires_at || null;
+        setActive(d.active === true && !!exp);
+        setExpiresAt(exp);
         setGrantedBy(d.grant?.granted_by || null);
       }
     } catch { /* ignore */ } finally {
@@ -31,7 +40,7 @@ export default function SupportAccessCard({ apiUrl = '', canManage = true }: { a
     }
   };
 
-  useEffect(() => { refresh(); }, []);
+  useEffect(() => { refresh(); }, [viewTenant]);
 
   const grant = async () => {
     setBusy(true); setError(null);
@@ -85,7 +94,7 @@ export default function SupportAccessCard({ apiUrl = '', canManage = true }: { a
       ) : active ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', color: '#bbf7d0' }}>
-            <Clock size={14} /> Expires {expiresAt ? new Date(expiresAt).toLocaleString() : '—'}
+            <Clock size={14} /> Expires {expiresAt ? new Date(expiresAt).toLocaleString() : ''}
             {grantedBy ? ` · by ${grantedBy}` : ''}
           </span>
           {canManage && (
@@ -117,7 +126,11 @@ export default function SupportAccessCard({ apiUrl = '', canManage = true }: { a
           }}>{busy ? 'Enabling…' : 'Enable support access'}</button>
         </div>
       ) : (
-        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Only a tenant administrator can enable support access.</div>
+        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+          {viewTenant
+            ? 'Not granted. Only this tenant\'s own administrator can enable support access — ask them to open a window from this card.'
+            : 'Only a tenant administrator can enable support access.'}
+        </div>
       )}
 
       {error && <div style={{ marginTop: '0.6rem', fontSize: '0.78rem', color: '#fca5a5' }}>{error}</div>}

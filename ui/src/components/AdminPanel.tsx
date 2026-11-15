@@ -44,6 +44,7 @@ import {
   FileText
 } from 'lucide-react';
 import { TenantUserManagement } from './TenantUserManagement';
+import { TenantAggregate } from '../lib/supportScope';
 
 export interface PlatformOperator {
   id: string;
@@ -440,7 +441,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
   // License Management State
   const [licenses, setLicenses] = useState<LicenseInfo[]>([]);
-  const [fleetMachines, setFleetMachines] = useState<EnrolledMachine[]>([]);
+  const [fleetAggregates, setFleetAggregates] = useState<TenantAggregate[]>([]);
   const [loadingLicenses, setLoadingLicenses] = useState(false);
   const [licenseOrg, setLicenseOrg] = useState('');
   const [licenseTier, setLicenseTier] = useState<'partner' | 'corporate'>('partner');
@@ -600,6 +601,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
       overallStatus: 'active' | 'expired' | 'revoked';
       nearestExpiry: string;
       machines: EnrolledMachine[];
+      seatsByKey: Record<string, number>;
       usedSeats: number;
       macCount: number;
       winCount: number;
@@ -629,6 +631,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
           overallStatus: isActive ? 'active' : isRevoked ? 'revoked' : 'expired',
           nearestExpiry: lic.expiresAt,
           machines: [],
+          seatsByKey: {},
           usedSeats: 0,
           macCount: 0,
           winCount: 0,
@@ -658,32 +661,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
     // Populate assigned enrolled machines for each organization
     map.forEach(group => {
-      const orgMachines = fleetMachines.filter(m => {
-        const mKey = (m.licenseKey || '').trim().toUpperCase();
-        const mTenant = (m.tenantName || '').trim().toUpperCase();
-        const keyMatch = group.subLicenses.some(s => (s.licenseKey || '').trim().toUpperCase() === mKey);
-        const tenantMatch = mTenant === group.orgKey || mTenant.replace(/[\s\-_]/g, '') === group.orgKey.replace(/[\s\-_]/g, '');
-        return keyMatch || tenantMatch;
+      // Aggregates only: count endpoints per licence key and per tenant; no host rows.
+      const keys = new Set(group.subLicenses.map(s => (s.licenseKey || '').trim().toUpperCase()).filter(Boolean));
+      const osCount = (agg: TenantAggregate, test: (os: string) => boolean) =>
+        Object.entries(agg.osCounts || {}).reduce((sum, [os, n]) => sum + (test(os.toLowerCase()) ? n : 0), 0);
+      const isMac = (os: string) => os.includes('darwin') || os.includes('mac') || os.includes('apple');
+      const isWin = (os: string) => os.includes('win') && !os.includes('darwin');
+      const isLinux = (os: string) => os.includes('linux') || os.includes('ubuntu') || os.includes('debian') || os.includes('rhel');
+      group.machines = [];
+      group.seatsByKey = {};
+      group.usedSeats = 0; group.macCount = 0; group.winCount = 0; group.linuxCount = 0;
+      fleetAggregates.forEach(agg => {
+        const aTenant = (agg.tenantName || '').trim().toUpperCase();
+        const tenantMatch = aTenant === group.orgKey || aTenant.replace(/[\s\-_]/g, '') === group.orgKey.replace(/[\s\-_]/g, '');
+        let keyed = 0;
+        Object.entries(agg.seatsByLicense || {}).forEach(([k, n]) => {
+          const K = k.trim().toUpperCase();
+          if (keys.has(K)) { group.seatsByKey[K] = (group.seatsByKey[K] || 0) + n; keyed += n; }
+        });
+        if (tenantMatch) {
+          group.usedSeats += agg.machineCount;
+          group.macCount += osCount(agg, isMac);
+          group.winCount += osCount(agg, isWin);
+          group.linuxCount += osCount(agg, isLinux);
+        } else {
+          group.usedSeats += keyed; // another tenant name enrolled under this org's licence key
+        }
       });
-
-      group.machines = orgMachines;
-      group.usedSeats = orgMachines.length;
-      group.macCount = orgMachines.filter(m => {
-        const os = (m.os || '').toLowerCase();
-        return os.includes('darwin') || os.includes('mac') || os.includes('apple');
-      }).length;
-      group.winCount = orgMachines.filter(m => {
-        const os = (m.os || '').toLowerCase();
-        return os.includes('win');
-      }).length;
-      group.linuxCount = orgMachines.filter(m => {
-        const os = (m.os || '').toLowerCase();
-        return os.includes('linux') || os.includes('ubuntu') || os.includes('debian') || os.includes('rhel');
-      }).length;
     });
 
     return Array.from(map.values());
-  }, [licenses, fleetMachines]);
+  }, [licenses, fleetAggregates]);
 
   const toggleLicenseOrg = (orgKey: string) => {
     setExpandedLicenseOrgs(prev => ({
@@ -861,7 +869,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
         fetch('/api/admin/licenses', {
           headers: { 'Authorization': `Bearer ${token}` }
         }),
-        fetch('/api/fleet/machines', {
+        // Seat usage comes from per-tenant AGGREGATES. Host rows (hostname / IP) are tenant
+        // data and are not available to the platform console without a support grant.
+        fetch('/api/admin/fleet/summary', {
           headers: { 'Authorization': `Bearer ${token}` }
         })
       ]);
@@ -875,13 +885,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
 
       if (machRes.status === 'fulfilled' && machRes.value.ok) {
         const mData = await machRes.value.json();
-        setFleetMachines(mData);
+        setFleetAggregates(Array.isArray(mData?.tenants) ? mData.tenants : []);
       }
     } catch (err: any) {
       // Never show simulated licenses/machines: an operator would act on fake data.
       console.warn('Backend licenses endpoint failed:', err);
       setLicenses([]);
-      setFleetMachines([]);
+      setFleetAggregates([]);
       setErrorMessage(`Could not load licenses: ${err?.message || 'server unavailable'}`);
     }
   };
@@ -2785,7 +2795,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                   </span>
                 </div>
                 <p style={{ margin: '0.25rem 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                  Launch an impersonated diagnostic mirror into any customer tenant portal in real time without tenant credentials. Inspect live CBOMs, machines, and sync telemetry.
+                  Open a tenant's portal for troubleshooting. Without the tenant's support-access grant the mirror shows aggregate metrics only; machines, CBOM assets and findings unlock while the tenant's time-boxed window is open, and every request is audit-logged.
                 </p>
               </div>
             </div>
@@ -5445,7 +5455,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                                             </td>
                                             <td style={{ padding: '0.6rem 0.5rem', color: 'var(--text-primary)', fontWeight: 500 }}>
                                               {(() => {
-                                                const licMachines = group.machines.filter(m => (m.licenseKey || '').trim().toUpperCase() === (lic.licenseKey || '').trim().toUpperCase());
+                                                const licMachines = { length: group.seatsByKey[(lic.licenseKey || '').trim().toUpperCase()] || 0 };
                                                 return (
                                                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                                                     <span style={{ fontWeight: 600, color: licMachines.length > 0 ? '#38bdf8' : 'var(--text-primary)' }}>
@@ -5611,7 +5621,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                                             }}
                                           />
                                           <Laptop size={14} />
-                                          <span>ENROLLED WORKSTATIONS CONSUMING SEATS ({group.machines.length} Active Device{group.machines.length !== 1 ? 's' : ''})</span>
+                                          <span>ENROLLED WORKSTATIONS CONSUMING SEATS ({group.usedSeats} Active Device{group.usedSeats !== 1 ? 's' : ''})</span>
                                         </div>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                                           <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
@@ -5762,7 +5772,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                                             border: '1px dashed rgba(255, 255, 255, 0.08)',
                                             fontSize: '0.8rem'
                                           }}>
-                                            No endpoint machines currently enrolled for {group.tenantName}. Launch QuarkShield Desktop Scanner on Mac, Windows, or Linux and scan with the license key above to automatically register endpoints.
+                                            {group.usedSeats > 0
+                                              ? `${group.usedSeats} endpoint${group.usedSeats !== 1 ? 's' : ''} enrolled for ${group.tenantName}. Hostnames, IPs and per-device detail are tenant data — visible only through the Support Mirror while the tenant has granted support access.`
+                                              : `No endpoint machines currently enrolled for ${group.tenantName}.`}
                                           </div>
                                         )
                                       )}

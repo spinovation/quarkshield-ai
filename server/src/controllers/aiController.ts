@@ -78,9 +78,13 @@ export const chatInventoryScope = (req: Request): { allowed: boolean; tenant: st
   const user = (req as any).user;
   const sessionTenant = String(user?.tenant || '').trim();
   if (isSuperRole(user?.role)) {
-    const requested = String((req.query?.tenant as string) || '').trim();
-    const t = requested && requested.toLowerCase() !== 'all' ? requested : sessionTenant;
-    return { allowed: true, tenant: t || null };
+    // A platform session gets a tenant's inventory in the prompt ONLY under that tenant's
+    // active support-access grant (req.supportScope, set by requireTenantAccess). Without
+    // one — including "no tenant named", which used to mean the whole fleet — the chat
+    // answers general questions with no inventory at all.
+    const scope = (req as any).supportScope;
+    if (scope?.mode === 'granted' && scope.tenant) return { allowed: true, tenant: String(scope.tenant) };
+    return { allowed: false, tenant: null };
   }
   return sessionTenant ? { allowed: true, tenant: sessionTenant } : { allowed: false, tenant: null };
 };
@@ -1511,8 +1515,10 @@ export const resolveAssetScope = (req: Request): AssetScope => {
     if (!sessionTenant) return { ok: false, status: 403, error: 'No tenant is associated with this session.' };
     return { ok: true, tenant: sessionTenant };
   }
-  const requested = String((req.query?.tenant as string) || (req.body && req.body.tenant) || '').trim();
-  return { ok: true, tenant: requested && requested.toLowerCase() !== 'all' ? requested : null };
+  // Platform session: only the tenant it holds an active support-access grant for.
+  const scope = (req as any).supportScope;
+  if (scope?.mode === 'granted' && scope.tenant) return { ok: true, tenant: String(scope.tenant) };
+  return { ok: false, status: 403, error: 'Support access required: the tenant has not granted an active support-access window.' };
 };
 
 /** Assets for the scope (fleet-wide only for a super session that asked for no tenant). */

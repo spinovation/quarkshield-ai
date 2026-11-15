@@ -81,6 +81,7 @@ import {
   probeEndpoint,
   unifiedLogin,
   getTenantPortalData,
+  getFleetSummary,
   getOperators,
   inviteOperator,
   resetOperatorPassword,
@@ -248,6 +249,8 @@ router.delete('/service-tokens/:id', requireAuth, requireTenantAccess, requireTe
 // ==========================================
 // ADMIN PANEL ROUTES (super admin only)
 // ==========================================
+// Aggregate-only fleet metadata per tenant (no host/asset rows) for the central console.
+router.get('/admin/fleet/summary', requireSuperAdmin, getFleetSummary);
 router.get('/admin/clients', requireSuperAdmin, getClients);
 router.get('/admin/clients/:name/stats', requireSuperAdmin, getClientStats);
 router.post('/admin/clients/deploy-inline', requirePlatformAdmin, deployInlineClient);

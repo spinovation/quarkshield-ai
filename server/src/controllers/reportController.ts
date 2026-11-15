@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import PDFDocument from 'pdfkit';
 import { Document, Packer, Paragraph, HeadingLevel, Table, TableRow, TableCell, TextRun, WidthType, AlignmentType } from 'docx';
 import pool from '../config/db';
-import { isSuperRole } from '../middleware/auth';
+import { isSuperRole, superNeedsGrant, denySupportAccess } from '../middleware/auth';
 import { sendSupportEmail } from './adminController';
 import { buildRoadmapReport, generateNarrative, RoadmapReport, Priority } from '../lib/roadmapReport';
 
@@ -353,6 +353,9 @@ export const exportExecutiveReport = async (req: Request, res: Response) => {
     }
     const tenant = collective ? '' : (tenantParam || req.user?.tenant || '');
     if (!collective && !tenant) return res.status(400).json({ error: 'A tenant is required.' });
+    // Platform session: the fleet-wide (collective) roll-up is aggregate statistics; one
+    // tenant's report is that tenant's data and needs its support-access grant.
+    if (!collective && superNeedsGrant(req)) return denySupportAccess(res, tenant);
 
     const report = await buildRoadmapReport(collective ? { collective: true } : { collective: false, tenant });
     report.summary = await generateNarrative(report, collective ? undefined : tenant);
@@ -408,6 +411,7 @@ export const getReportStakeholders = async (req: Request, res: Response) => {
     const { collective, tenant } = resolveScope(req, req.query.tenant as string, req.query.scope as string);
     if (collective && !isSuperRole(req.user?.role)) return res.status(403).json({ error: 'Super-admin required for fleet stakeholders.' });
     if (!collective && !tenant) return res.status(400).json({ error: 'A tenant is required.' });
+    if (!collective && superNeedsGrant(req)) return denySupportAccess(res, tenant);
     const r = await pool.query('SELECT value FROM tenant_settings WHERE tenant_name = $1 AND key = $2', [scopeKey(collective, tenant), STAKEHOLDER_KEY]);
     let list: any[] = [];
     if (r.rows[0]?.value) { try { list = JSON.parse(r.rows[0].value); } catch { /* ignore */ } }
@@ -424,6 +428,7 @@ export const saveReportStakeholders = async (req: Request, res: Response) => {
     const { collective, tenant } = resolveScope(req, tBody, scope);
     if (collective && !isSuperRole(req.user?.role)) return res.status(403).json({ error: 'Super-admin required for fleet stakeholders.' });
     if (!collective && !tenant) return res.status(400).json({ error: 'A tenant is required.' });
+    if (!collective && superNeedsGrant(req)) return denySupportAccess(res, tenant);
     const clean = (Array.isArray(stakeholders) ? stakeholders : [])
       .filter((s: any) => s && typeof s.email === 'string' && EMAIL_RE.test(s.email.trim()))
       .slice(0, 50)
@@ -446,6 +451,7 @@ export const sendRoadmapReport = async (req: Request, res: Response) => {
     const { collective, tenant } = resolveScope(req, tBody, scope);
     if (collective && !isSuperRole(req.user?.role)) return res.status(403).json({ error: 'Super-admin required for fleet reports.' });
     if (!collective && !tenant) return res.status(400).json({ error: 'A tenant is required.' });
+    if (!collective && superNeedsGrant(req)) return denySupportAccess(res, tenant);
 
     let toList: { name?: string; email: string }[] = [];
     if (Array.isArray(recipients) && recipients.length) {
