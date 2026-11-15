@@ -1,6 +1,6 @@
 # 🔏 QuarkShield — CMVP & FIPS Compliance Mapping
 **Feature Design & Scoping Specification**
-**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) built on branch, not deployed; Stages 2–6 not built. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a).**
+**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) is live in production (2026-11-14); Stage 2 (CBOM honesty fix) is built, not deployed; Stages 3–6 not built. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a, §9.1b).**
 **Owner: Platform / Scanner Engineering · Drafted: 2026-11-13 · NIST refs: FIPS 140-2 / 140-3 (CMVP), SP 800-131A Rev. 2, FIPS 203 (ML-KEM) / 204 (ML-DSA) / 205 (SLH-DSA), SP 800-140-series, NSA CNSA 2.0**
 
 ---
@@ -283,7 +283,7 @@ Ordered so that **RFP-citable value ships before the hardest collection work**, 
 | Stage | Goal (buyer-facing exit criterion) | Builds | Prereq | Effort | Agent rebuild? |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1 — Algorithm axis (A1)** ✅ | *"N algorithms are disallowed under SP 800-131A today; M are approved but sunset by \<date\>."* Visible to every tenant. | Versioned table `lib/fipsAlgorithmStatus.ts` (§5.1); pure `fipsAlgorithmStatus()` + DB-free tests; status computed on read (not persisted, §7.1); per-asset chip + core counts tile (ungated); deadline-aware roadmap ordering (§6.1). | §5.1, §7.1 | **M** | No |
-| **2 — CBOM honesty fix** | CBOM `nistQuantumSecurityLevel` reflects the real FIPS parameter set (or is omitted), plus `quarkshield:fipsStatus`/`fipsStandard`/`transitionDate` properties. | Replace `cyclonedx.ts:61` binary `nqsl`; add crypto properties (§6.3). | Stage 1 | **S** | No |
+| **2 — CBOM honesty fix** ✅ | CBOM `nistQuantumSecurityLevel` reflects the real FIPS parameter set (or is omitted), plus `quarkshield:fipsStatus`/`fipsStandard`/`transitionDate` properties. | Replace `cyclonedx.ts:61` binary `nqsl`; add crypto properties (§6.3). | Stage 1 | **S** | No |
 | **3 — CMVP via connectors (A2, cheapest/highest-confidence)** | *"This KMS/HSM-backed key is performed by CMVP cert #\<n\> (Active, FIPS 140-3)."* | Vendor `cmvp_modules.json` (§5.2) + offline refresh job; teach KMS/HSM connectors (`pkiConnectorController.ts`) to report module name/vendor/cert for AWS KMS FIPS, CloudHSM, Luna, nShield; populate `cmvp_*` fields on those assets. Prereqs **P-c, P-d, P-e**. | Stages 1, §3.1 | **M** (data curation) | No (connector-side) |
 | **4 — CMVP module identity on hosts (A2, P-a)** | *"OpenSSL FIPS Provider 3.0.0 on this host → cert #4282 (environment: RHEL 8 / x86-64)."* | Agent resolves providing module + version + operating environment per finding (extend `sbom_scanner.go` fingerprinting and tie it to the asset); new `AuditResult` module fields; `agent/cmvp.go` resolver with match-precedence gate. | Stage 3 | **M–L** | **Yes** |
 | **5 — Verdict + posture view + FIPS-mode gate (A2, P-b)** | *"Approved algorithm **and** validated module in confirmed FIPS mode → compliant"* vs `approved_unvalidated`. Full posture view + filters (gated); FIPS attestation export (§6.4). | Agent FIPS-mode probes per platform (OpenSSL provider state, CNG policy, BC-FIPS) → confidence `measured` vs `unverified`; cross-product `compliance_verdict` (§4.2); gated posture view + attestation PDF/CSV; provenance stamping. | Stage 4 | **M** | **Yes** |
@@ -309,6 +309,26 @@ Axis A1 is built end to end, server-side, with **no agent rebuild**.
   - the deck counts Shor-breakable public-key assets with `isClassicalAsymmetric()` rather than the scanner's broader `is_vulnerable` flag.
 - **Verified:** DB-free tests in `server/test/fipsAlgorithmStatus.test.ts` (resolver, rollup and deck facts); the full server suite passes; server and UI `tsc --noEmit` are clean; `vite build` succeeds. An end-to-end run against a scratch Postgres checked that legacy NULL-purpose rows are assessed correctly in `buildRoadmapReport`.
 - **Not verified:** the console chip and tile were not viewed in a running browser, because the portal needs a signed-in tenant session.
+
+### 9.1b Stage 2 — implemented 2026-11-15 (not deployed)
+
+The server CBOM no longer asserts a NIST level it cannot support. Server-side only, **no agent rebuild**.
+
+- **Level:** `nistQuantumSecurityLevel` was `0` or `3` from the scanner's vulnerable flag, so AES-128 and ML-KEM-1024 both exported as "category 3". It is now:
+  - `0` for an asset the scanner flags as vulnerable. The scanner's verdict is not overridden: an unflagged row that names a classical public-key algorithm (a trust anchor, a list of supported algorithms) gets no level rather than `0`, so the export matches the console's counts;
+  - the real NIST category when the name states one — `nistSecurityCategory()` in `lib/fipsAlgorithmStatus.ts` covers the FIPS 203/204/205 parameter sets and the reference primitives the categories are defined by (AES-128/192/256 → 1/3/5, SHA-256/384 → 2/4);
+  - **omitted** otherwise (a PQ family with no parameter set, pre-standard Kyber/Dilithium, LMS/XMSS, SHA-512, cipher suites).
+- **Effect on production data (read-only check, 2026-11-15, 893 assets):** 570 flagged assets stay at `0`; of 323 unflagged assets that all exported as `3`, 13 now carry a real category (10 at 3, 3 at 5) and 310 carry none. Most of those are descriptive labels with no parameter set (`ML-KEM (Kyber)` ×179, `SLH-DSA (SPHINCS+)` ×23, `ML-DSA (Dilithium)` ×11) and OS-package rows (×59). Capturing the parameter set at scan time is what would turn them into real categories.
+- **Properties** on every component: `quarkshield:fipsStatus`, `quarkshield:fipsStandard`, `quarkshield:fipsDeprecatedAfter`, `quarkshield:transitionDate` (the hard sunset), `quarkshield:fipsDraftGuidance` (when a date relies on draft IR 8547), `quarkshield:fipsTableVersion`, and `quarkshield:cmvpStatus = not-assessed`. The `cmvpCertId` and `complianceVerdict` properties from §6.3 wait for Stages 3–5.
+- **Explicit vulnerability flag:** `quarkshield:quantumVulnerable` (`true`/`false`). Because the level can now be absent, consumers must not infer "safe" from it. The central console reads the flag first and shows "NIST level not stated" instead of a guessed level.
+- **Inputs:** the fleet CBOM query now selects `assets.purpose`, so the resolver judges signature use correctly (a SHA-1-signed certificate is disallowed).
+- **Consumer compatibility:** QSG (`qsg-control/src/cyclonedx.rs`) treats level `0` as not ready, level ≥ 1 as ready, and otherwise falls back to `quarkshield:quantumStatus`. Vulnerable assets are unchanged. A non-vulnerable asset with no stated category now depends on that status text and may read as "unknown" rather than "ready".
+- **Tenant-portal export:** the client-side CBOM builder in `TenantPortal.tsx` no longer writes level 3 for every non-vulnerable asset (it writes 0 or omits the field) and carries the FIPS status properties.
+- **Verified:** `server/test/cyclonedx.test.ts` (12 DB-free tests); full server suite and security-regression suite pass; server and UI `tsc --noEmit` clean.
+- **Not done:**
+  - the agent's own local CBOM export (`agent/auditor.go`) still writes a binary level and needs an agent rebuild;
+  - the tenant-portal builder still emits a non-schema `assetType: "key"` and a placeholder attestation hash, which are outside this stage;
+  - not exercised against a live database or viewed in a browser.
 
 ### 9.2 Sequencing rationale
 

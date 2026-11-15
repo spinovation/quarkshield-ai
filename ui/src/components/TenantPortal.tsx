@@ -1653,8 +1653,9 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           algorithmProperties: {
             name: a.algorithm,
             parameterSetIdentifier: String(a.keySize || ""),
-            classicalSecurityLevel: a.isVulnerable ? 0 : 256,
-            nistQuantumSecurityLevel: a.isVulnerable ? 0 : 3
+            // 0 = not quantum-safe. For anything else the real NIST category is only known
+            // server-side, so it is left out here rather than asserting "3" for every asset.
+            ...(a.isVulnerable ? { nistQuantumSecurityLevel: 0 } : {})
           },
           oid: a.path || "",
           certificate: {
@@ -1664,6 +1665,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         properties: [
           { name: "quantumVulnerability", value: a.isVulnerable ? "Vulnerable (Shor's Algorithm)" : "Post-Quantum Ready" },
           { name: "riskLevel", value: a.riskLevel },
+          // FIPS status of the ALGORITHM only; module (CMVP) validation is not assessed.
+          ...(a.fipsStatus ? [{ name: "quarkshield:fipsStatus", value: a.fipsStatus }] : []),
+          ...(a.fipsStandard ? [{ name: "quarkshield:fipsStandard", value: a.fipsStandard }] : []),
+          ...(a.fipsTransitionDate ? [{ name: "quarkshield:transitionDate", value: a.fipsTransitionDate }] : []),
+          { name: "quarkshield:cmvpStatus", value: "not-assessed" },
           // Never default to a standard name: an absent value would read as a compliance claim in the exported CBOM.
           { name: "complianceStandards", value: (Array.isArray(a.complianceViolations) ? a.complianceViolations.join(', ') : a.complianceViolations) || 'None recorded' },
           { name: "hostMachine", value: a.hostname || "Workstation" },

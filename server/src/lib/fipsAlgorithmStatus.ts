@@ -244,6 +244,41 @@ export const fipsAlgorithmStatus = (f: FipsInput): FipsResult => {
   return results[0];
 };
 
+/**
+ * NIST post-quantum SECURITY CATEGORY (1-5) for an algorithm, or undefined when it cannot
+ * be stated from the name alone. Used for CycloneDX `nistQuantumSecurityLevel`.
+ *
+ * Only what the standards themselves define is returned:
+ *   - FIPS 203 / 204 / 205 parameter sets (ML-KEM-512/768/1024, ML-DSA-44/65/87,
+ *     SLH-DSA-*-128/192/256). A hybrid such as X25519MLKEM768 takes the category of its
+ *     ML-KEM component.
+ *   - The reference primitives the categories are DEFINED by: AES-128/192/256 key search
+ *     (1 / 3 / 5) and SHA-256 / SHA-384 collision search (2 / 4), SHA-3 likewise.
+ * Everything else — a PQ family with no parameter set, pre-standard Kyber/Dilithium, LMS/XMSS,
+ * SHA-512, cipher suites, classical public-key — returns undefined. Callers must OMIT the
+ * level rather than invent one; quantum-vulnerable algorithms are level 0, decided elsewhere.
+ */
+export const nistSecurityCategory = (algorithm: string, keySize?: number | null): number | undefined => {
+  const a = String(algorithm || '').toUpperCase().trim();
+  if (!a) return undefined;
+  let m: RegExpMatchArray | null;
+  if ((m = a.match(/ML-?KEM-?(512|768|1024)(?!\d)/))) return ({ '512': 1, '768': 3, '1024': 5 } as Record<string, number>)[m[1]];
+  if ((m = a.match(/ML-?DSA-?(44|65|87)(?!\d)/))) return ({ '44': 2, '65': 3, '87': 5 } as Record<string, number>)[m[1]];
+  if ((m = a.match(/SLH-?DSA-(?:SHA2|SHAKE)-(128|192|256)[SF](?![A-Z0-9])/))) return ({ '128': 1, '192': 3, '256': 5 } as Record<string, number>)[m[1]];
+  // Any other post-quantum name (no parameter set, pre-standard, stateful HBS): not stated.
+  if (/ML-?KEM|MLKEM|ML-?DSA|MLDSA|SLH-?DSA|KYBER|DILITHIUM|SPHINCS|FALCON|FN-?DSA|\bLMS\b|HSS|XMSS/.test(a)) return undefined;
+  // A lone AES primitive (optionally with its mode). Never a cipher suite: a suite also
+  // carries a key exchange, which is what decides its quantum security.
+  const MODES = '(?:GCM|CBC|CTR|CCM|XTS|ECB|KW|KWP|CFB|OFB|GMAC|SIV)';
+  if ((m = a.match(new RegExp(`^AES[-_ ]?(128|192|256)(?:[-_ ]${MODES})*$`)))) return ({ '128': 1, '192': 3, '256': 5 } as Record<string, number>)[m[1]];
+  if (new RegExp(`^AES(?:[-_ ]${MODES})*$`).test(a) && (keySize === 128 || keySize === 192 || keySize === 256)) {
+    return keySize === 128 ? 1 : keySize === 192 ? 3 : 5;
+  }
+  if (/^(?:SHA-?256|SHA-?2-256|SHA-?3-256)$/.test(a)) return 2;
+  if (/^(?:SHA-?384|SHA-?2-384|SHA-?3-384)$/.test(a)) return 4;
+  return undefined;
+};
+
 /** Short console/report label for a status. */
 export const FIPS_STATUS_LABEL: Record<FipsStatus, string> = {
   pq_approved: 'PQC approved',

@@ -189,6 +189,11 @@ const cbomKeyLen = (comp: any): number | undefined => {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 const cbomVulnerable = (comp: any): boolean => {
+  // The server states vulnerability explicitly; the NIST level is omitted when no
+  // category can honestly be stated, so it can no longer be the only signal.
+  const flag = cbomProp(comp, 'quarkshield:quantumVulnerable');
+  if (flag === 'true') return true;
+  if (flag === 'false') return false;
   const nq = comp?.cryptoProperties?.algorithmProperties?.nistQuantumSecurityLevel;
   if (nq === 0) return true;
   if (typeof nq === 'number') return false; // explicit secure level (e.g. 3)
@@ -199,6 +204,13 @@ const cbomVulnerable = (comp: any): boolean => {
   const a = cbomAlgo(comp).toLowerCase();
   if (/ml-?kem|ml-?dsa|slh-?dsa|kyber|dilithium|sphincs|falcon|sntrup|aes-?256|chacha20/.test(a)) return false;
   return true;
+};
+// NIST quantum security level as exported: 0 = not quantum-safe, 1-5 = NIST category,
+// undefined = not stated (never guessed).
+const cbomNistLevel = (comp: any): number | undefined => {
+  const nq = comp?.cryptoProperties?.algorithmProperties?.nistQuantumSecurityLevel;
+  if (typeof nq === 'number') return nq;
+  return cbomVulnerable(comp) ? 0 : undefined;
 };
 
 export default function App() {
@@ -2850,7 +2862,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                               </td>
                               <td>
                                 <span className={`badge ${riskProp === 'critical' || riskProp === 'high' ? 'danger' : (riskProp === 'secure' ? 'success' : 'warning')}`}>
-                                  NIST Level {cbomVulnerable(c) ? 0 : 3}
+                                  {cbomNistLevel(c) === undefined ? 'NIST level not stated' : `NIST Level ${cbomNistLevel(c)}`}
                                 </span>
                               </td>
                               <td>
