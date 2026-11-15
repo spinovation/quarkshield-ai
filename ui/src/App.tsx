@@ -391,6 +391,10 @@ export default function App() {
           sessionStorage.setItem('quarkshield_account_type', 'superadmin');
           localStorage.setItem('quarkshield_role', 'Super Admin');
           sessionStorage.setItem('quarkshield_role', 'Super Admin');
+          // A super admin belongs to no tenant: forget any workspace an earlier
+          // tenant sign-in left in this browser.
+          ['quarkshield_workspace', 'quarkshield_tenant_slug']
+            .forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
         } else {
           if (currentAccountType === 'superadmin') {
             // Stored state claims superadmin but the server disagrees: demote, and
@@ -460,6 +464,10 @@ export default function App() {
     sessionStorage.removeItem('quarkshield_customer_id');
     localStorage.removeItem('quarkshield_license_tier');
     sessionStorage.removeItem('quarkshield_license_tier');
+    localStorage.removeItem('quarkshield_workspace');
+    sessionStorage.removeItem('quarkshield_workspace');
+    localStorage.removeItem('quarkshield_tenant_slug');
+    sessionStorage.removeItem('quarkshield_tenant_slug');
     localStorage.removeItem('quarkshield_view_mode');
     sessionStorage.removeItem('quarkshield_view_mode');
     localStorage.removeItem('quarkshield_active_tab');
@@ -1312,7 +1320,9 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           if (actype) setCurrentAccountType(actype);
 
           const workspace = localStorage.getItem('quarkshield_workspace') || sessionStorage.getItem('quarkshield_workspace');
-          const isTenantUser = actype === 'corporate' || actype === 'partner' || actype === 'tenant' || !!workspace;
+          // A leftover workspace from an earlier tenant sign-in must never pull a
+          // super admin into that tenant's portal.
+          const isTenantUser = actype !== 'superadmin' && (actype === 'corporate' || actype === 'partner' || actype === 'tenant' || !!workspace);
           
           if (isTenantUser) {
             const targetSlug = workspace || (userEmail && userEmail.includes('spinovation') ? 'spinovationcorp' : (userEmail && userEmail.includes('algomeld') ? 'algomeld' : ''));
