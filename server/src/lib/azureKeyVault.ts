@@ -1,6 +1,7 @@
 import { KeyClient } from '@azure/keyvault-keys';
 import { ClientSecretCredential, DefaultAzureCredential, TokenCredential } from '@azure/identity';
 import { DiscoveredAsset } from './awsKms';
+import { azureKeyVaultModule } from './cmvpModules';
 
 /**
  * Real Azure Key Vault key discovery (DEF-51, Phase 2).
@@ -75,11 +76,12 @@ export const discoverAzureKeys = async (cfg: AzureConfig): Promise<DiscoveredAss
   const assets: DiscoveredAsset[] = [];
   for await (const prop of client.listPropertiesOfKeys()) {
     if (!prop.name) continue;
-    let keyType = ''; let sizeBits = 0; let curve: string | undefined;
+    let keyType = ''; let sizeBits = 0; let curve: string | undefined; let hsmPlatform: string | undefined;
     try {
       const k = await client.getKey(prop.name);
       keyType = (k.keyType as string) || '';
       curve = k.key?.crv as string | undefined;
+      hsmPlatform = (k.properties as any)?.hsmPlatform;
       if (keyType.toUpperCase().startsWith('RSA')) sizeBits = bitsFromModulus(k.key?.n as Uint8Array | undefined);
       if (keyType.toUpperCase().startsWith('OCT')) sizeBits = 256;
     } catch { /* fall back to properties only */ }
@@ -90,6 +92,8 @@ export const discoverAzureKeys = async (cfg: AzureConfig): Promise<DiscoveredAss
       risk: prop.enabled === false ? 'low' : m.risk,
       threat: m.threat, rot: false,
       expiresAt: prop.expiresOn ? new Date(prop.expiresOn) : null,
+      // No key type means getKey failed: the protection is then unknown, not "software".
+      module: keyType ? azureKeyVaultModule({ vaultUrl: cfg.vaultUrl, keyType, hsmPlatform }) : undefined,
     });
   }
   return assets;

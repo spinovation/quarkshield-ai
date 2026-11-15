@@ -517,8 +517,8 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
     await pool.query(`
       INSERT INTO pki_synced_assets (
         id, connector_id, tenant_name, asset_name, asset_type, algorithm,
-        key_size, is_vulnerable, risk_level, quantum_threat, status, rotation_enabled, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Active', $11, COALESCE($12, NOW() + INTERVAL '365 days'))
+        key_size, is_vulnerable, risk_level, quantum_threat, status, rotation_enabled, expires_at, raw_metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Active', $11, COALESCE($12, NOW() + INTERVAL '365 days'), $13::jsonb)
     `, [
       pkiAssetId,
       connectorId,
@@ -531,20 +531,24 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
       a.risk,
       a.threat,
       a.rot,
-      a.expiresAt || null
+      a.expiresAt || null,
+      JSON.stringify(a.module ? { cryptoModule: a.module.key, cryptoModuleEvidence: a.module.evidence } : {})
     ]);
 
     // Syndicate into central assets inventory for unified CBOM & source filtering
     await pool.query(`
       INSERT INTO assets (
-        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14)
+        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose,
+        crypto_module, crypto_module_evidence
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14, $15, $16)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         path = EXCLUDED.path,
         algorithm = EXCLUDED.algorithm,
         tenant_name = EXCLUDED.tenant_name,
-        purpose = EXCLUDED.purpose
+        purpose = EXCLUDED.purpose,
+        crypto_module = EXCLUDED.crypto_module,
+        crypto_module_evidence = EXCLUDED.crypto_module_evidence
     `, [
       cbomAssetId,
       a.type,
@@ -560,6 +564,9 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
       connectorName,
       tenantName,
       classifyPurpose({ type: a.type, name: a.name, algorithm: a.algo, key_size: a.size, description: a.threat }),
+      // The module the provider's API reported for this key (CMVP Stage 3); null when not observed.
+      a.module?.key || null,
+      a.module?.evidence || null,
     ]).catch(err => {
       console.warn('Failed to syndicate PKI asset to CBOM:', err);
     });

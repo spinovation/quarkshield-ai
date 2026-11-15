@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { fipsAlgorithmStatus, nistSecurityCategory, FIPS_TABLE_VERSION } from './fipsAlgorithmStatus';
 import { isClassicalAsymmetric } from './threatGraph/cryptoPurpose';
+import { resolveCmvpModule, nistCertificateUrl } from './cmvpModules';
 
 /**
  * CycloneDX 1.6 cryptographic-asset helpers (DEF-44 / DEF-45).
@@ -20,7 +21,8 @@ import { isClassicalAsymmetric } from './threatGraph/cryptoPurpose';
  * quantum-vulnerable assets, the real NIST category when the parameter set states one,
  * and OMITTED otherwise. Each component also carries its FIPS algorithm status as
  * `quarkshield:fips*` properties. Those describe the ALGORITHM only: CMVP module
- * validation is not assessed here, and `quarkshield:cmvpStatus` says so explicitly.
+ * validation is a separate axis, reported as `quarkshield:cmvp*` (Stage 3): `not-assessed`
+ * unless a KMS / vault connector's API reported the module that holds the key.
  */
 
 export interface CbomAssetInput {
@@ -30,6 +32,8 @@ export interface CbomAssetInput {
   keySize?: number;
   hashAlgorithm?: string;
   purpose?: string | null;  // assets.purpose, when recorded — sharpens the FIPS verdict
+  cryptoModule?: string | null;          // assets.crypto_module — module a connector's API reported (Stage 3)
+  cryptoModuleEvidence?: string | null;  // the API fact it was derived from
   isVulnerable?: boolean;
   assetKind?: string;      // certificate | ssh_key | private_key | key | algorithm | ...
   status?: string;
@@ -96,6 +100,7 @@ export const cbomComponent = (i: CbomAssetInput): any => {
   const cryptoProperties: any = { assetType };
   // undefined is dropped by JSON.stringify, so an unknown level is absent from the export.
   const level = quantumSecurityLevel(i);
+  const cmvp = resolveCmvpModule(i.cryptoModule);
   const fips = fipsAlgorithmStatus({
     algorithm: i.algorithm || '', key_size: i.keySize, hash_algorithm: i.hashAlgorithm,
     purpose: i.purpose, type: i.assetKind,
@@ -144,8 +149,18 @@ export const cbomComponent = (i: CbomAssetInput): any => {
     fips.disallowedAfter ? { name: 'quarkshield:transitionDate', value: fips.disallowedAfter } : null,
     fips.draft ? { name: 'quarkshield:fipsDraftGuidance', value: 'true' } : null,
     { name: 'quarkshield:fipsTableVersion', value: FIPS_TABLE_VERSION },
-    // Algorithm approval is not module validation. Until CMVP correlation exists this is constant.
-    { name: 'quarkshield:cmvpStatus', value: 'not-assessed' },
+    // Algorithm approval is not module validation. The module axis is filled only where a KMS /
+    // vault connector's API reported the module holding the key (Stage 3); every other asset
+    // stays `not-assessed`. A certificate is the provider's published one, never inferred.
+    { name: 'quarkshield:cmvpStatus', value: cmvp.status },
+    cmvp.moduleName ? { name: 'quarkshield:cmvpModule', value: cmvp.moduleName } : null,
+    cmvp.certIds.length ? { name: 'quarkshield:cmvpCertId', value: cmvp.certIds.join(',') } : null,
+    cmvp.certIds.length ? { name: 'quarkshield:cmvpCertUrl', value: cmvp.certIds.map(nistCertificateUrl).join(' ') } : null,
+    cmvp.certIds.length && cmvp.standard ? { name: 'quarkshield:cmvpFipsLevel', value: `${cmvp.standard}${cmvp.level ? ` Level ${cmvp.level}` : ''}` } : null,
+    cmvp.certIds.length && cmvp.sunsetDate ? { name: 'quarkshield:cmvpSunsetDate', value: cmvp.sunsetDate } : null,
+    cmvp.moduleKey ? { name: 'quarkshield:cmvpBasis', value: 'provider-reported' } : null,
+    cmvp.moduleKey && i.cryptoModuleEvidence ? { name: 'quarkshield:cmvpEvidence', value: String(i.cryptoModuleEvidence) } : null,
+    cmvp.moduleKey ? { name: 'quarkshield:cmvpMapVersion', value: cmvp.mapVersion } : null,
     i.riskLevel ? { name: 'quarkshield:riskLevel', value: String(i.riskLevel) } : null,
     i.recommendation ? { name: 'quarkshield:recommendation', value: String(i.recommendation) } : null,
     i.explainer ? { name: 'quarkshield:explainer', value: String(i.explainer) } : null,

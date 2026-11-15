@@ -1,6 +1,6 @@
 # 🔏 QuarkShield — CMVP & FIPS Compliance Mapping
 **Feature Design & Scoping Specification**
-**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) is live in production (2026-11-14); Stage 2 (CBOM honesty fix) is built, not deployed; Stages 3–6 not built. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a, §9.1b).**
+**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) is live in production (2026-11-14); Stage 2 (CBOM honesty fix) is live (2026-11-15); Stage 3 (CMVP module axis for KMS / vault connector keys) is built, not deployed; Stages 4–6 not built. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a, §9.1b, §9.1c).**
 **Owner: Platform / Scanner Engineering · Drafted: 2026-11-13 · NIST refs: FIPS 140-2 / 140-3 (CMVP), SP 800-131A Rev. 2, FIPS 203 (ML-KEM) / 204 (ML-DSA) / 205 (SLH-DSA), SP 800-140-series, NSA CNSA 2.0**
 
 ---
@@ -284,7 +284,7 @@ Ordered so that **RFP-citable value ships before the hardest collection work**, 
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **1 — Algorithm axis (A1)** ✅ | *"N algorithms are disallowed under SP 800-131A today; M are approved but sunset by \<date\>."* Visible to every tenant. | Versioned table `lib/fipsAlgorithmStatus.ts` (§5.1); pure `fipsAlgorithmStatus()` + DB-free tests; status computed on read (not persisted, §7.1); per-asset chip + core counts tile (ungated); deadline-aware roadmap ordering (§6.1). | §5.1, §7.1 | **M** | No |
 | **2 — CBOM honesty fix** ✅ | CBOM `nistQuantumSecurityLevel` reflects the real FIPS parameter set (or is omitted), plus `quarkshield:fipsStatus`/`fipsStandard`/`transitionDate` properties. | Replace `cyclonedx.ts:61` binary `nqsl`; add crypto properties (§6.3). | Stage 1 | **S** | No |
-| **3 — CMVP via connectors (A2, cheapest/highest-confidence)** | *"This KMS/HSM-backed key is performed by CMVP cert #\<n\> (Active, FIPS 140-3)."* | Vendor `cmvp_modules.json` (§5.2) + offline refresh job; teach KMS/HSM connectors (`pkiConnectorController.ts`) to report module name/vendor/cert for AWS KMS FIPS, CloudHSM, Luna, nShield; populate `cmvp_*` fields on those assets. Prereqs **P-c, P-d, P-e**. | Stages 1, §3.1 | **M** (data curation) | No (connector-side) |
+| **3 — CMVP via connectors (A2, cheapest/highest-confidence)** ✅ | *"This KMS/HSM-backed key is performed by CMVP cert #\<n\> (Active, FIPS 140-3)."* | Vendor `cmvp_modules.json` (§5.2) + offline refresh job; teach KMS/HSM connectors (`pkiConnectorController.ts`) to report module name/vendor/cert for AWS KMS FIPS, CloudHSM, Luna, nShield; populate `cmvp_*` fields on those assets. Prereqs **P-c, P-d, P-e**. | Stages 1, §3.1 | **M** (data curation) | No (connector-side) |
 | **4 — CMVP module identity on hosts (A2, P-a)** | *"OpenSSL FIPS Provider 3.0.0 on this host → cert #4282 (environment: RHEL 8 / x86-64)."* | Agent resolves providing module + version + operating environment per finding (extend `sbom_scanner.go` fingerprinting and tie it to the asset); new `AuditResult` module fields; `agent/cmvp.go` resolver with match-precedence gate. | Stage 3 | **M–L** | **Yes** |
 | **5 — Verdict + posture view + FIPS-mode gate (A2, P-b)** | *"Approved algorithm **and** validated module in confirmed FIPS mode → compliant"* vs `approved_unvalidated`. Full posture view + filters (gated); FIPS attestation export (§6.4). | Agent FIPS-mode probes per platform (OpenSSL provider state, CNG policy, BC-FIPS) → confidence `measured` vs `unverified`; cross-product `compliance_verdict` (§4.2); gated posture view + attestation PDF/CSV; provenance stamping. | Stage 4 | **M** | **Yes** |
 | **6 — CAVP extension (A2′)** | *"The exact algorithm + mode this asset uses is on the module's CAVP list"* → `compliant` vs `compliant_module_algo_unverified`. | Vendor CAVP lists; add `cavpAlgorithms[]` to `cmvp_modules.json`; compute `cavp_covered`; surface as verdict refinement (§3.2). | Stage 5 | **M** (data curation) | No (data + server) |
@@ -310,7 +310,7 @@ Axis A1 is built end to end, server-side, with **no agent rebuild**.
 - **Verified:** DB-free tests in `server/test/fipsAlgorithmStatus.test.ts` (resolver, rollup and deck facts); the full server suite passes; server and UI `tsc --noEmit` are clean; `vite build` succeeds. An end-to-end run against a scratch Postgres checked that legacy NULL-purpose rows are assessed correctly in `buildRoadmapReport`.
 - **Not verified:** the console chip and tile were not viewed in a running browser, because the portal needs a signed-in tenant session.
 
-### 9.1b Stage 2 — implemented 2026-11-15 (not deployed)
+### 9.1b Stage 2 — implemented and deployed 2026-11-15
 
 The server CBOM no longer asserts a NIST level it cannot support. Server-side only, **no agent rebuild**.
 
@@ -329,6 +329,49 @@ The server CBOM no longer asserts a NIST level it cannot support. Server-side on
   - the agent's own local CBOM export (`agent/auditor.go`) still writes a binary level and needs an agent rebuild;
   - the tenant-portal builder still emits a non-schema `assetType: "key"` and a placeholder attestation hash, which are outside this stage;
   - not exercised against a live database or viewed in a browser.
+
+### 9.1c Stage 3 — implemented 2026-11-15 (not deployed)
+
+The module axis (A2) now exists for keys discovered by the KMS / vault connectors. Server-side only, **no agent rebuild**. A connector must be re-synced once before its keys carry a module.
+
+- **Two layers, kept apart** (`server/src/lib/cmvpModules.ts`):
+  - *Observation.* Each connector records which module holds a key, from a fact its API returned for that key, as a stable module key plus the fact itself (`assets.crypto_module`, `assets.crypto_module_evidence`; also in `pki_synced_assets.raw_metadata`).
+  - *Reference data.* `CMVP_MODULES` maps a module key to the certificate(s) the provider publishes for it, with status, level and sunset as read from the NIST certificate page. Versioned by `CMVP_MAP_VERSION`.
+- **Resolved on read, not stored.** The certificate, status and sunset are looked up when the console or CBOM is built. NIST moves certificates to Historical; a stored copy would go stale. This departs from the capture note's `cmvp_cert_id` / `cmvp_status` columns for the same reason A1 is not persisted (§7.1).
+- **What each connector reads:**
+
+  | Connector | API fact | Module keys |
+  | :--- | :--- | :--- |
+  | AWS KMS | `Origin` + region | `aws-kms-hsm`, `aws-kms-china`, `aws-cloudhsm-key-store`, `aws-external-key-store` |
+  | Azure Key Vault | vault host, key type (`RSA` vs `RSA-HSM`), `hsmPlatform` | `azure-managed-hsm`, `azure-kv-hsm-platform2`, `azure-kv-hsm-platform1`, `azure-kv-hsm`, `azure-kv-software` |
+  | Google Cloud KMS | `protectionLevel` | `gcp-kms-software`, `gcp-kms-hsm`, `gcp-kms-hsm-single-tenant`, `gcp-kms-external` |
+  | HashiCorp Vault | version string from `sys/seal-status` | `vault-enterprise-fips1403`, `vault-enterprise-fips1402`, `vault-enterprise-non-fips`, `vault-community` |
+
+- **Certificates in map version 2026-11-15** (each read from its NIST page that day):
+
+  | Module key | Cert | NIST module name | Standard / level | Status | Sunset |
+  | :--- | :--- | :--- | :--- | :--- | :--- |
+  | `aws-kms-hsm` | #4884 | AWS Key Management Service HSM | FIPS 140-3 / 3 | Active | 2029-11-17 |
+  | `azure-managed-hsm` | #4700 | NITROXIII CNN35XX-NFBE HSM Family (Marvell) | FIPS 140-3 / 3 | Active | 2029-05-29 |
+  | `vault-enterprise-fips1403` | #4735 | BoringCrypto (Google, LLC) | FIPS 140-3 / 1 | Active | 2029-07-22 |
+  | `vault-enterprise-fips1402` | #3678 | BoringCrypto (Google, LLC) | FIPS 140-2 / 1 | Historical | — |
+
+- **Where no certificate is reported, and why:**
+  - *Google Cloud KMS (software and HSM).* Google states FIPS 140-3 Level 1 (BoringCrypto) and Level 3 HSMs, but ties Cloud KMS to no certificate number and names no HSM vendor. Status `unverified`.
+  - *Azure Key Vault vault keys (platforms 1, 2, software).* Microsoft states the level per platform but its Key Vault documentation gives no certificate number for vault keys; #4700 is linked from the Managed HSM pages only. Status `unverified`. Certificates #3718 and #2643 appear only in a Microsoft Q&A answer and are not used.
+  - *AWS CloudHSM key stores.* The certificate depends on the cluster's HSM type (#4703 for hsm2m.medium, #4218 Historical for hsm1.medium) and on its FIPS mode, which the KMS connector does not read. Status `unverified`.
+  - *External key stores (AWS XKS, Google EKM).* The module is outside the provider. Status `unverified`.
+  - *AWS China Regions and Vault Community.* The provider states there is no FIPS validation. Status `none`.
+- **Wording discipline.** A certificate is what the *provider* publishes for the service, labelled `provider-reported`. A customer cannot see the HSM firmware behind one key (AWS itself says its fleet is "validated or in the process of validation"), so this is a service-level statement and the console tooltip says QuarkShield did not test the module. No compliance verdict is produced; that is Stage 5.
+- **CBOM:** `quarkshield:cmvpStatus` is `active | historical | revoked | none | unverified` for these assets and stays `not-assessed` for all others. Added when known: `cmvpModule`, `cmvpCertId`, `cmvpCertUrl`, `cmvpFipsLevel`, `cmvpSunsetDate`, `cmvpBasis`, `cmvpEvidence`, `cmvpMapVersion`.
+- **Console:** a module chip under the FIPS chip on the asset row (`CMVP #4884 · FIPS 140-3 L3`, `Module not verified`, `No validated module`), with the basis and caveats in the tooltip.
+- **Verified:** `server/test/cmvpModules.test.ts` (DB-free); full server suite and security-regression suite pass; server and UI `tsc --noEmit` clean.
+- **Not verified:** no connector was synced against a live AWS, Azure, Google Cloud or Vault account, and the chip was not viewed in a browser. That a Vault FIPS build reports its suffix in the `sys/seal-status` version string is inferred from HashiCorp's documented build names.
+- **Not done:**
+  - no offline refresh job for the map (§5.2); refresh is manual: re-read the NIST pages, edit `CMVP_MODULES`, bump `CMVP_MAP_VERSION`;
+  - CloudHSM, Luna and nShield are not separate connectors, so nothing reports them;
+  - the roadmap rollup and exec report still count approved algorithms as "module validation not yet determined" and do not use the module axis;
+  - the connector's own asset list (`EnterprisePkiVaults.tsx`) does not show the module.
 
 ### 9.2 Sequencing rationale
 
