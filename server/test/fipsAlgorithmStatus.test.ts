@@ -191,9 +191,14 @@ test('tenant scope: tenant sessions are pinned to their own tenant; no fleet fal
   assert.equal((noTenant as any).status, 403);
 });
 
-test('tenant scope: super sessions may target a tenant, else fleet', () => {
-  assert.deepEqual(resolveAssetScope(req({ role: 'superadmin' }, { tenant: 'acme' })), { ok: true, tenant: 'acme' });
-  assert.deepEqual(resolveAssetScope(req({ role: 'superadmin' }, { tenant: 'all' })), { ok: true, tenant: null });
+test('tenant scope: a super session gets assets only under an active support grant (never the fleet)', () => {
+  // Was: any tenant via ?tenant, or the WHOLE fleet with tenant=all. Now it needs the
+  // support scope that requireTenantAccess sets for a tenant with an active grant.
+  assert.equal(resolveAssetScope(req({ role: 'superadmin' }, { tenant: 'acme' })).ok, false);
+  assert.equal(resolveAssetScope(req({ role: 'superadmin' }, { tenant: 'all' })).ok, false);
+  const granted: any = req({ role: 'superadmin' }, { tenant: 'acme' });
+  granted.supportScope = { mode: 'granted', tenant: 'acme' };
+  assert.deepEqual(resolveAssetScope(granted), { ok: true, tenant: 'acme' });
 });
 
 test('deck facts: HNDL only for key establishment; no invented Mosca numbers; 0 assets = 0%', () => {

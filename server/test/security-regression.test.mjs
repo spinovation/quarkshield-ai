@@ -389,3 +389,75 @@ test('FP4: agent re-validates targets, honors local opt-out, and UPLOADS probe f
   const body = main.slice(start, start + 1200);
   assert.ok(/SendFleetTelemetry/.test(body), 'daemon probe no longer uploads findings (regressed to print-only)');
 });
+
+// ---- Support-access gate: super admin sees aggregates only without a tenant grant ----
+// Owner rule 2026-11-15. Behaviour is proven in test/supportAccessGate.test.ts; these
+// canaries stop the gate from being bypassed or removed by a later edit.
+test('SA1: requireTenantAccess no longer waves super sessions through', () => {
+  const auth = read('server/src/middleware/auth.ts');
+  const start = auth.indexOf('export const requireTenantAccess');
+  const body = auth.slice(start, auth.indexOf('\n};', start));
+  assert.ok(has(body, 'superAdminSupportGate(req, res, next)'), 'super sessions no longer go through the support-access gate');
+  assert.ok(!/if \(isSuperRole\(req\.user\.role\)\) \{\s*next\(\);/.test(body), 'super sessions are passed straight to next() again');
+  assert.ok(has(auth, 'await hasActiveSupportGrant(target)'), 'gate no longer checks the tenant grant');
+  assert.ok(has(auth, "'support_access_read'"), 'granted reads are no longer audit-logged');
+  assert.ok(has(auth, 'denySupportAccess(res, target)'), 'gate no longer refuses detail without a grant');
+  assert.ok(has(auth, "return 'detail';"), 'unlisted routes no longer default to detail (fail closed)');
+});
+
+test('SA2: only management routes are exempt; host/asset routes are never "manage"', () => {
+  const auth = read('server/src/middleware/auth.ts');
+  const start = auth.indexOf('const SUPER_MANAGE_ROUTES');
+  const manage = auth.slice(start, auth.indexOf(']);', start));
+  for (const bad of ['/fleet/machines', '/fleet/cbom', '/fleet/drift', 'portal-data', '/threat-graph', '/pki', '/proxy', '/projects', '/scan', '/sbom', '/ai/chat', '/reports', '/git/']) {
+    assert.ok(!has(manage, bad), `${bad} must not be a grant-exempt management route`);
+  }
+  const aStart = auth.indexOf('const SUPER_AGGREGATE_ROUTES');
+  const aggregate = auth.slice(aStart, auth.indexOf(']);', aStart));
+  for (const bad of ['/fleet/cbom', '/fleet/drift', '/threat-graph', '/pki', '/proxy', '/projects', '/scan', '/git/', '/fleet/groups', '/fleet/machines/']) {
+    assert.ok(!has(aggregate, bad), `${bad} has no aggregate answer and must stay grant-only`);
+  }
+});
+
+test('SA3: row-level guard and aggregate controllers honour the support scope', () => {
+  const auth = read('server/src/middleware/auth.ts');
+  const start = auth.indexOf('export const canAccessTenant');
+  const body = auth.slice(start, auth.indexOf('\n};', start));
+  assert.ok(!has(body, 'if (isSuperRole(req.user.role)) return true;'), 'canAccessTenant lets super sessions touch any tenant row again');
+  assert.ok(has(body, "scope.mode === 'granted'"), 'canAccessTenant no longer requires the granted tenant');
+
+  const fleet = read('server/src/controllers/fleetController.ts');
+  const fm = fleet.slice(fleet.indexOf('export const getFleetMachines'), fleet.indexOf('export const deleteFleetMachine'));
+  assert.ok(fm.indexOf('superNeedsGrant(req)') > -1 && fm.indexOf('superNeedsGrant(req)') < fm.indexOf('m.hostname'), 'getFleetMachines selects host rows before the support-access check');
+
+  const admin = read('server/src/controllers/adminController.ts');
+  const pd = admin.slice(admin.indexOf('export const getTenantPortalData'));
+  assert.ok(pd.indexOf('superNeedsGrant(req)') > -1 && pd.indexOf('superNeedsGrant(req)') < pd.indexOf('m.hardware_uuid'), 'portal-data selects machines before the support-access check');
+  const agg = admin.slice(admin.indexOf('const aggregatePortalData'), admin.indexOf('GET /api/admin/fleet/summary'));
+  for (const bad of ['hostname', 'hardware_uuid', 'public_ip', 'FROM assets', 'FROM fleet_tokens']) {
+    assert.ok(!has(agg, bad), `aggregate portal payload must not read ${bad}`);
+  }
+  const lib = read('server/src/lib/tenantAggregates.ts');
+  const sql = lib.slice(lib.indexOf('pool.query(`'), lib.indexOf('GROUP BY'));
+  for (const bad of ['hostname', 'm.ip', 'public_ip', 'hardware_uuid', 'computer_name', 'geo_']) {
+    assert.ok(!has(sql, bad), `tenant aggregates must not select ${bad}`);
+  }
+
+  const ai = read('server/src/controllers/aiController.ts');
+  const cs = ai.slice(ai.indexOf('export const chatInventoryScope'), ai.indexOf('const NO_TENANT_INVENTORY_NOTE'));
+  assert.ok(has(cs, "scope?.mode === 'granted'"), 'Copilot gives a super session tenant inventory without a grant');
+});
+
+test('SA4: a support grant is always time-boxed and cannot be self-granted', () => {
+  const lib = read('server/src/lib/supportAccess.ts');
+  assert.ok(has(lib, 'export const MAX_GRANT_HOURS = 72;'), 'max grant window changed — review before raising it');
+  assert.ok(has(lib, "expires_at <= created_at + interval '${MAX_GRANT_HOURS} hours'"), 'active-grant predicate no longer bounds the window');
+  assert.ok(has(lib, 'revoked_at IS NULL AND expires_at > now()'), 'active-grant predicate no longer checks revoked/expired');
+  assert.ok(!/revoked_at IS NULL\s+AND expires_at > now\(\)\s+LIMIT/.test(lib), 'a grant lookup bypasses ACTIVE_GRANT_SQL');
+  const schema = read('server/src/models/schema.sql');
+  assert.ok(has(schema, 'expires_at TIMESTAMP WITH TIME ZONE NOT NULL,\n  revoked_at'), 'support_access_grants.expires_at is no longer NOT NULL');
+  const ctl = read('server/src/controllers/supportAccessController.ts');
+  const g = ctl.slice(ctl.indexOf('export async function grantSupportAccess'), ctl.indexOf('export async function revokeSupportAccess'));
+  assert.ok(g.indexOf('isSuperRole(req.user?.role)') > -1 && g.indexOf('isSuperRole(req.user?.role)') < g.indexOf('createGrant('), 'a platform session can grant itself support access');
+  assert.ok(!has(ctl, 'active: grants'), 'status endpoint returns a list as `active` again (card showed ACTIVE with no expiry)');
+});

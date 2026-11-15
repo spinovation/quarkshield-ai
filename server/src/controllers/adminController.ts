@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { verifyPassword, hashPassword } from '../utils/password';
-import { signSession, setSessionCookie, clearSessionCookie, setConsoleSessionCookie, clearConsoleSessionCookie, isSuperRole, isPlatformAdmin, sanitizeTenantRole, revokeUserSessions, forgetUserState, localTenantEntitlement, RISK_ASSURANCE_ADDON } from '../middleware/auth';
+import { signSession, setSessionCookie, clearSessionCookie, setConsoleSessionCookie, clearConsoleSessionCookie, isSuperRole, isPlatformAdmin, superNeedsGrant, sanitizeTenantRole, revokeUserSessions, forgetUserState, localTenantEntitlement, RISK_ASSURANCE_ADDON } from '../middleware/auth';
+import { getTenantAggregates, totalsOf } from '../lib/tenantAggregates';
 
 /** Escape untrusted text for inclusion in HTML email bodies. */
 const escapeHtml = (v: unknown): string => String(v ?? '')
@@ -3355,6 +3356,79 @@ export const changePassword = async (req: Request, res: Response) => {
 // ==============================================================================
 // 10. STRICTLY ISOLATED TENANT PORTAL DATA
 // ==============================================================================
+/**
+ * Aggregate-only portal payload for a platform session that holds no support-access
+ * grant for the tenant. Same envelope as the full payload so the console can render the
+ * header, licence/seat usage and trend — with `machines`, `assets` and `tokens` empty.
+ */
+const aggregatePortalData = async (cleanTenant: string, tenantNameSearch: string, client: any) => {
+  const [licensesQ, snapshotsQ, aggs] = await Promise.all([
+    pool.query(`
+      SELECT id, license_key as "licenseKey", tenant_name as "tenantName",
+             tier, duration_days as "durationDays", seats, expires_at as "expiresAt",
+             customer_id as "customerId", status, created_at as "createdAt"
+        FROM admin_licenses
+       WHERE LOWER(tenant_name) = LOWER($1)
+          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+          OR (customer_id IS NOT NULL AND ($2::text != '') AND customer_id = $2::text)
+       ORDER BY CASE WHEN status = 'active' THEN 0 ELSE 1 END, created_at DESC`,
+      [tenantNameSearch, client?.customerId || '']),
+    pool.query(`
+      SELECT id, TO_CHAR(snapshot_date, 'YYYY-MM-DD') as "date",
+             active_workstations as "activeWorkstations", total_assets as "totalAssets",
+             vulnerable_assets as "vulnerableAssets", average_risk_score as "averageRiskScore"
+        FROM fleet_daily_snapshots
+       WHERE LOWER(tenant_name) = LOWER($1)
+          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
+       ORDER BY snapshot_date ASC LIMIT 30`,
+      [tenantNameSearch]),
+    getTenantAggregates(tenantNameSearch),
+  ]);
+  const agg = aggs[0];
+  const licenses = licensesQ.rows;
+  const activeLicenses = licenses.filter((l: any) => l.status === 'active' || !l.status);
+  const totalSeats = activeLicenses.length > 0
+    ? activeLicenses.reduce((sum: number, l: any) => sum + (l.seats || 100), 0)
+    : (client?.mcaLimit || 100);
+  return {
+    success: true,
+    aggregateOnly: true,
+    supportAccessRequired: true,
+    client: client || { name: cleanTenant, displayName: cleanTenant.toUpperCase(), status: 'unknown' },
+    licenses,
+    machines: [],
+    assets: [],
+    tokens: [],
+    dailySnapshots: snapshotsQ.rows,
+    aggregate: agg || null,
+    stats: {
+      totalMachines: agg?.machineCount || 0,
+      onlineMachines: agg?.onlineCount || 0,
+      totalSeats,
+      usedSeats: agg?.machineCount || 0,
+      totalAssets: agg?.assetCount || 0,
+      vulnerableAssets: agg?.vulnerableCount || 0,
+      avgRiskScore: agg?.avgRiskScore || 0,
+    },
+  };
+};
+
+/**
+ * GET /api/admin/fleet/summary   (platform roles)
+ * Per-tenant aggregate metadata for the central console's fleet view: counts, risk,
+ * seat usage, last-seen, agent versions and whether a support-access window is open.
+ * Never returns a hostname, IP or asset row.
+ */
+export const getFleetSummary = async (_req: Request, res: Response) => {
+  try {
+    const tenants = await getTenantAggregates();
+    res.json({ success: true, tenants, totals: totalsOf(tenants) });
+  } catch (err: any) {
+    console.error('Error building fleet summary:', err);
+    res.status(500).json({ error: 'Failed to build fleet summary.' });
+  }
+};
+
 export const getTenantPortalData = async (req: Request, res: Response) => {
   try {
     const { tenant } = req.params;
@@ -3391,6 +3465,12 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
     // No synthetic client rows: an unknown tenant is reported as such.
 
     const tenantNameSearch = client ? client.name : cleanTenant;
+
+    // Platform session without this tenant's support-access grant: client record,
+    // licences and numeric aggregates only. No machines, assets or enrollment tokens.
+    if (superNeedsGrant(req)) {
+      return res.json(await aggregatePortalData(cleanTenant, tenantNameSearch, client));
+    }
 
     // 2. Fetch Machines strictly for this tenant
     const machinesQuery = await pool.query(`

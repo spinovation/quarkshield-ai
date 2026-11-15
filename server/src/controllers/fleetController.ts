@@ -3,7 +3,8 @@ import pool from '../config/db';
 import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
 import { maybeSendAlert } from '../lib/alerts';
-import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
+import { canAccessTenant, resolveWriteTenant, superNeedsGrant } from '../middleware/auth';
+import { getTenantAggregates, totalsOf } from '../lib/tenantAggregates';
 import { geoLocateMachine } from '../lib/downloadTracker';
 import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTargets';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
@@ -157,6 +158,19 @@ export const revokeFleetToken = async (req: Request, res: Response) => {
 
 export const getFleetMachines = async (req: Request, res: Response) => {
   try {
+    // Platform session without the tenant's support-access grant: per-tenant aggregates
+    // only — never host rows (hostname / IP / geo / licence-per-host).
+    if (superNeedsGrant(req)) {
+      const tenants = await getTenantAggregates(req.supportScope?.tenant);
+      return res.json({
+        aggregateOnly: true,
+        supportAccessRequired: true,
+        tenant: req.supportScope?.tenant || null,
+        tenants,
+        totals: totalsOf(tenants),
+        machines: [],
+      });
+    }
     const tenant = getEffectiveTenant(req);
     let query = `
       SELECT 
