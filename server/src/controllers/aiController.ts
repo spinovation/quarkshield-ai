@@ -212,7 +212,7 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
       "5. Mosca's Theorem: X + Y > Z (Shelf-life X + Migration time Y > Threat timeline Z). " +
       "6. Complete QuarkShield.ai Platform Processes, Workflows, and Next Steps: " +
       "   • TENANT ONBOARDING & 'NEXT STEPS' WORKFLOW: " +
-      "     - Step 1 (Admin Login & Initial Credentials): After onboarding and license assignment, the Corporate Admin / Partner Admin receives their Welcome & 'Next Steps' email from support@quarkshield.ai. They log in at https://quarkshield.ai/?view=console or their dedicated tenant workspace (e.g., https://quarkshield.ai/?tenant=YOURTENANT or /tenant/spinovation). Initial credentials include their corporate admin email and initial password (e.g. QS-Amberoon7033! or customer-assigned secure password). Admins establish 2FA/MFA and verify allocated seats. " +
+      "     - Step 1 (Admin Login & Initial Credentials): After onboarding and license assignment, the Corporate Admin / Partner Admin receives their Welcome & 'Next Steps' email from support@quarkshield.ai. They log in at https://quarkshield.ai/?view=console or their dedicated tenant workspace (e.g., https://quarkshield.ai/?tenant=YOURTENANT or /tenant/YOURTENANT). Initial credentials include their corporate admin email and initial password (a customer-assigned secure password). Admins establish 2FA/MFA and verify allocated seats. " +
       "     - Step 2 (First Host / Endpoint PQC Scan): Go to Fleet Overview or Settings > Deployment. Download macOS DMG or run 1-click curl command (curl -sSL https://quarkshield.ai/api/scan/agent/install.sh | bash -s -- --token YOUR_TOKEN); on Windows run PowerShell installer with FedMitigate code-signing certs; on Linux run linux-amd64 binary. The scanner audits local certificate stores, private keys (PEM/DER/PKCS#12), SSH host/user keys, browser keychains, and OpenSSL configs, publishing a CycloneDX 1.6+ CBOM inventory back to the dashboard with zero host reboots. " +
       "     - Step 3 (Staff Onboarding & Seat Allocation): Go to Settings > Users & Access (or Tenant Portal > Users & Access), click '+ Invite User', enter corporate email, assign RBAC role (Corporate Admin, Cryptographer, Auditor, Viewer), track license seat count, and set tenant 2FA enforcement policies. " +
       "     - Step 4 (Documentation & Online Help): Access downloadable guides under Downloads & Resources (Enterprise PQC Deployment Guide, Customer PQC Readiness Guide DOCX, OS User Guides, root CAs) or contact support@quarkshield.ai. " +
@@ -535,10 +535,10 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
              "| **4** | **Documentation & Help** | Review deployment guides or contact 24/7 support | **Downloads & Resources** / PQC Copilot |\n\n" +
              "#### Step 1: Admin First Login & Credential Verification\n" +
              "1. **Welcome Email**: The Corporate Admin / Partner Admin receives an official onboarding email dispatched from `support@quarkshield.ai`.\n" +
-             "2. **Access Portal**: Open **https://quarkshield.ai/?view=console** or your dedicated tenant workspace (e.g., `https://quarkshield.ai/?tenant=YOUR_TENANT` or `/tenant/spinovation`).\n" +
+             "2. **Access Portal**: Open **https://quarkshield.ai/?view=console** or your dedicated tenant workspace (e.g., `https://quarkshield.ai/?tenant=YOUR_TENANT` or `/tenant/YOUR_TENANT`).\n" +
              "3. **Initial Credentials**:\n" +
              "   - **Username / Email**: Your corporate administrator email address.\n" +
-             "   - **Initial Password**: Supplied securely in your Welcome Email (e.g. `QS-Amberoon7033!` or your customer-assigned secure password).\n" +
+             "   - **Initial Password**: Supplied securely in your Welcome Email (or your customer-assigned secure password).\n" +
              "4. **Security Hardening**: Log in, establish **Phishing-Resistant MFA (TOTP / FIDO2 WebAuthn)**, and verify your allocated seat count under *License & Seats*.\n\n" +
              "#### Step 2: Run Your First Host / Workstation PQC Scan\n" +
              "Deploy the QuarkShield lightweight scanner to establish your baseline Cryptographic Bill of Materials (CBOM):\n" +

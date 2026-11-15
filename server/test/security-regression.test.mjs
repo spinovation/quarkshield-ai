@@ -461,3 +461,53 @@ test('SA4: a support grant is always time-boxed and cannot be self-granted', () 
   assert.ok(g.indexOf('isSuperRole(req.user?.role)') > -1 && g.indexOf('isSuperRole(req.user?.role)') < g.indexOf('createGrant('), 'a platform session can grant itself support access');
   assert.ok(!has(ctl, 'active: grants'), 'status endpoint returns a list as `active` again (card showed ACTIVE with no expiry)');
 });
+
+// ---- No per-tenant special treatment ------------------------------------------
+// Every tenant is matched by its own name and nothing else. Queries used to widen one
+// tenant's reach with a hand-written alias (a literal name list, a LIKE on its name, a
+// literal enrollment-token name): any tenant whose token or name happened to collide
+// was pulled into that tenant's data. Old rows are fixed by the generic backfill in
+// schema.sql, never by naming a tenant in code.
+test('TN1: no query or resolver hard-codes a tenant, token name or email domain', () => {
+  const files = [
+    'server/src/controllers/fleetController.ts', 'server/src/controllers/adminController.ts',
+    'server/src/controllers/reportController.ts', 'server/src/controllers/sbomController.ts',
+    'server/src/controllers/aiController.ts', 'server/src/controllers/gitScanController.ts',
+    'server/src/controllers/pkiConnectorController.ts', 'server/src/controllers/pqcProxyController.ts',
+    'server/src/controllers/ciGateController.ts', 'server/src/controllers/threatGraphController.ts',
+    'server/src/lib/roadmapReport.ts', 'server/src/lib/tenantAggregates.ts', 'server/src/middleware/auth.ts',
+  ];
+  const banned = [
+    [/LOWER\(\$\{?\$?[\w.]*\}?\d*\)\s+IN\s*\(\s*'/i, 'compares the requested tenant to a literal name list'],
+    [/tenant_name[^\n]{0,40}\bI?LIKE\s+'%[a-z]/i, 'matches tenant_name with a literal LIKE'],
+    [/LOWER\((t\.)?name\)\s*=\s*'[a-z]/i, 'matches an enrollment token by a literal name'],
+    [/REPLACE\(LOWER\(\$\d\),\s*'@/i, 'rewrites one email domain to another'],
+    [/tenantName\s*=\s*'[A-Za-z]/, 'defaults a write to a literal tenant'],
+    [/toLowerCase\(\)\s*===\s*'engg'/, 'infers a tenant from a token named engg'],
+  ];
+  for (const f of files) {
+    const src = read(f);
+    for (const [re, why] of banned) assert.ok(!re.test(src), `${f} ${why}`);
+  }
+});
+
+test('TN2: the schema seeds no tenant and backfills tenant_name generically', () => {
+  const schema = read('server/src/models/schema.sql');
+  assert.ok(!/INSERT INTO admin_clients/i.test(schema), 'schema seeds a client organization again');
+  assert.ok(!/INSERT INTO tenant_users/i.test(schema), 'schema seeds a tenant admin again');
+  const bf = schema.slice(schema.indexOf('TENANT ATTRIBUTION BACKFILL'));
+  assert.ok(bf.length > 200, 'tenant attribution backfill removed');
+  assert.ok(!/'[A-Za-z][A-Za-z0-9 _-]{2,}'/.test(bf.replace(/'\[\^a-zA-Z0-9\]'|'g'/g, '')), 'backfill names a specific tenant or token');
+});
+
+test('TN3: the console resolves a workspace from the session, not from a per-tenant table', () => {
+  const app = read('ui/src/App.tsx');
+  assert.ok(!/sub\s*===\s*'/.test(app), 'App.tsx aliases a specific subdomain again');
+  assert.ok(!/port\s*===\s*'50/.test(app), 'App.tsx maps a port to a specific tenant again');
+  assert.ok(!/includes\('[a-z]+'\)\s*\?\s*'[a-z]+'/.test(app), 'App.tsx guesses a workspace from an email again');
+  assert.ok(!/QS-(CORP|PARTNER)-[A-Z]+-[0-9A-F]{8}/.test(app), 'App.tsx ships a literal licence key');
+  const portal = read('ui/src/components/TenantPortal.tsx');
+  assert.ok(!/cleanSlug\.includes\('(?!partner)[a-z]+'\)/.test(portal), 'TenantPortal special-cases a tenant slug again');
+  const landing = read('ui/src/components/LandingPage.tsx');
+  assert.ok(!/cleanEmail\.includes\('/.test(landing), 'LandingPage guesses a workspace from an email again');
+});

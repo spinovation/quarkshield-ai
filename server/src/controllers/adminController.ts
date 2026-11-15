@@ -3180,16 +3180,12 @@ export const forgotPassword = async (req: Request, res: Response) => {
     // Does an account exist? (Do NOT create one as a side effect.)
     const adminRes = await pool.query(
       `SELECT id FROM admin_users 
-       WHERE LOWER(email) = LOWER($1) 
-          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.com', '@algomeld.ai')) 
-          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.ai', '@algomeld.com'))`,
+       WHERE LOWER(email) = LOWER($1)`,
       [cleanEmail]
     );
     const tenantRes = await pool.query(
       `SELECT id FROM tenant_users 
-       WHERE LOWER(email) = LOWER($1) 
-          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.com', '@algomeld.ai')) 
-          OR (LOWER(email) = REPLACE(LOWER($1), '@algomeld.ai', '@algomeld.com'))`,
+       WHERE LOWER(email) = LOWER($1)`,
       [cleanEmail]
     );
     if (adminRes.rowCount === 0 && tenantRes.rowCount === 0) {
@@ -3287,9 +3283,7 @@ export const resetPassword = async (req: Request, res: Response) => {
     for (const r of affectedAdmins.rows) forgetUserState('admin', r.id);
     const affectedTenantUsers = await pool.query(
       `UPDATE tenant_users SET password_hash = $1, salt = NULL, must_change_password = false, sessions_revoked_at = CURRENT_TIMESTAMP
-       WHERE LOWER(email) = LOWER($2) 
-          OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.com', '@algomeld.ai')) 
-          OR (LOWER(email) = REPLACE(LOWER($2), '@algomeld.ai', '@algomeld.com')) RETURNING id`,
+       WHERE LOWER(email) = LOWER($2) RETURNING id`,
       [newHash, row.email]
     );
     for (const r of affectedTenantUsers.rows) forgetUserState('tenant', r.id);
@@ -3455,7 +3449,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
          OR LOWER(REPLACE(display_name, ' ', '')) = $1
          OR LOWER(customer_id) = $1
          OR LOWER(admin_email) = $1
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(name) IN ('spinovation', 'spinovationcorp'))
       ORDER BY CASE WHEN LOWER(name) = $1 THEN 0 ELSE 1 END, created_at ASC
       LIMIT 1;
     `, [cleanTenant]);
@@ -3508,7 +3501,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE LOWER(m.tenant_name) = LOWER($1)
          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg'))
       ORDER BY m.last_seen DESC;
     `, [tenantNameSearch, client?.displayName || tenantNameSearch]);
 
@@ -3530,11 +3522,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($1)
          OR LOWER(REPLACE(COALESCE(a.tenant_name, m.tenant_name, ''), ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (
-               LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) LIKE '%spinovation%'
-               OR LOWER(t.name) = 'engg'
-               OR (a.tenant_name IS NULL AND m.id IS NOT NULL)
-            ))
       ORDER BY a.is_vulnerable DESC, a.created_at DESC;
     `, [tenantNameSearch]);
 
@@ -3555,7 +3542,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       FROM admin_licenses
       WHERE LOWER(tenant_name) = LOWER($1)
          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(tenant_name) LIKE '%spinovation%')
          OR (customer_id IS NOT NULL AND ($2::text != '') AND customer_id = $2::text)
       ORDER BY 
         CASE WHEN status = 'active' THEN 0 ELSE 1 END,
@@ -3572,7 +3558,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       FROM fleet_tokens
       WHERE LOWER(tenant_name) = LOWER($1)
          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(tenant_name) LIKE '%spinovation%' OR LOWER(name) = 'engg'))
       ORDER BY created_at DESC;
     `, [tenantNameSearch]);
     // Enrollment tokens are bearer credentials: only tenant admins / platform roles
@@ -3591,7 +3576,6 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       FROM fleet_daily_snapshots
       WHERE LOWER(tenant_name) = LOWER($1)
          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(tenant_name) LIKE '%spinovation%')
       ORDER BY snapshot_date ASC
       LIMIT 30;
     `, [tenantNameSearch]);
@@ -3618,8 +3602,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
     try {
       const gitScansRes = await pool.query(`
         SELECT quantum_risk_score FROM git_scans 
-        WHERE LOWER(COALESCE(tenant_name, '')) = LOWER($1) 
-           OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(COALESCE(tenant_name, '')) LIKE '%spinovation%')
+        WHERE LOWER(COALESCE(tenant_name, '')) = LOWER($1)
         ORDER BY created_at DESC LIMIT 5
       `, [tenantNameSearch]);
       for (const row of gitScansRes.rows) {

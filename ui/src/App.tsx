@@ -212,28 +212,23 @@ export default function App() {
     const path = window.location.pathname.toLowerCase();
     if (path.startsWith('/tenant/')) {
       return path.split('/')[2].trim();
-    } else if (path === '/spinovation' || path === '/spinovationcorp') {
-      return 'spinovationcorp';
     }
-
-    const port = window.location.port;
-    if (port === '5001') return 'democlient';
-    if (port === '5002') return 'spinovationcorp';
-    if (port === '5003') return 'vanguard-logistics';
-    if (port === '5052') return 'apex-cyber';
-    if (port === '5053') return 'cybershield-partners';
 
     const host = window.location.hostname.toLowerCase();
     if (host.startsWith('scanner.')) {
       return '';
     }
     if (host.includes('.quarkshield.ai') && !host.startsWith('www.') && !host.startsWith('quarkshield.ai') && !host.startsWith('scanner.')) {
-      const sub = host.split('.')[0];
-      return (sub === 'spinovation' || sub === 'spinovationcorp') ? 'spinovationcorp' : sub;
+      // The subdomain is only a hint for the sign-in page. Once a session exists the
+      // workspace is the session's own tenant (see the /api/auth/me effect below), so
+      // no tenant needs a hand-written subdomain alias here.
+      return host.split('.')[0];
     }
     if (host.includes('.fedmitigate.com') && !host.startsWith('www.') && !host.startsWith('fedmitigate.com')) {
-      const sub = host.split('.')[0];
-      return (sub === 'spinovation' || sub === 'spinovationcorp') ? 'spinovationcorp' : sub;
+      // The subdomain is only a hint for the sign-in page. Once a session exists the
+      // workspace is the session's own tenant (see the /api/auth/me effect below), so
+      // no tenant needs a hand-written subdomain alias here.
+      return host.split('.')[0];
     }
 
     return localStorage.getItem('quarkshield_tenant_slug') || sessionStorage.getItem('quarkshield_tenant_slug') || '';
@@ -250,14 +245,13 @@ export default function App() {
   const [showRoadmapModal, setShowRoadmapModal] = useState<boolean>(false);
 
   const [viewMode, setViewMode] = useState<'landing' | 'console' | 'tenant'>(() => {
-    // HARD SECURITY BARRIER: On dedicated tenant subdomains (e.g. algomeld.quarkshield.ai, spinovationcorp.quarkshield.ai),
+    // HARD SECURITY BARRIER: On dedicated tenant subdomains (<tenant>.quarkshield.ai),
     // viewMode is permanently locked to 'tenant'. Global console view is strictly forbidden.
     if (isTenantHost) {
       return 'tenant';
     }
 
     const urlParams = new URLSearchParams(window.location.search);
-    const port = window.location.port;
     const path = window.location.pathname.toLowerCase();
 
     // Check if scanner console subdomain
@@ -266,12 +260,7 @@ export default function App() {
     }
 
     // Check if tenant query param or path
-    if (urlParams.get('tenant') || urlParams.get('workspace') || path.startsWith('/tenant/') || path === '/spinovation' || path === '/spinovationcorp') {
-      return 'tenant';
-    }
-
-    // Check if dedicated tenant port
-    if (['5001', '5002', '5003', '5052', '5053'].includes(port)) {
+    if (urlParams.get('tenant') || urlParams.get('workspace') || path.startsWith('/tenant/')) {
       return 'tenant';
     }
 
@@ -415,6 +404,14 @@ export default function App() {
           // where its licence, users, groups and Copilot live.
           // (Platform operators have no tenant and stay where they are.)
           const slug = String(u.tenant || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+          // A tenant session's workspace is its own tenant, whatever name the URL used
+          // to reach the portal (a short subdomain, an old bookmark). Same rule for
+          // every tenant; nothing here knows any tenant's name.
+          if (viewMode === 'tenant' && slug && slug !== tenantSlug) {
+            setTenantSlug(slug);
+            localStorage.setItem('quarkshield_tenant_slug', slug);
+            sessionStorage.setItem('quarkshield_tenant_slug', slug);
+          }
           if (viewMode === 'console' && slug) {
             try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
             setTenantSlug(slug);
@@ -518,7 +515,7 @@ export default function App() {
   // Token creation & deployment states
   const [showCreateTokenModal, setShowCreateTokenModal] = useState(false);
   const [newTokenName, setNewTokenName] = useState('');
-  const [newTokenTenant, setNewTokenTenant] = useState('SPINOVATIONCORP');
+  const [newTokenTenant, setNewTokenTenant] = useState('');
   const [selectedDeploymentToken, setSelectedDeploymentToken] = useState<string>('');
   const [deploymentMethod, setDeploymentMethod] = useState<'desktop' | 'curl' | 'jamf' | 'intune' | 'ansible' | 'docker'>('desktop');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -631,15 +628,14 @@ export default function App() {
   }, [isTenantDropdownOpen]);
 
   const handleCreateToken = async () => {
-    if (!newTokenName.trim()) return;
+    if (!newTokenName.trim() || !newTokenTenant) return;
     try {
       const res = await fetch('/api/fleet/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           name: newTokenName.trim(),
-          tenantName: newTokenTenant || 'SPINOVATIONCORP',
-          licenseKey: newTokenTenant === 'SPINOVATIONCORP' ? 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8' : undefined
+          tenantName: newTokenTenant
         })
       });
       if (res.ok) {
@@ -885,14 +881,11 @@ export default function App() {
   const tenantGroups: TenantGroup[] = React.useMemo(() => {
     const map = new Map<string, TenantGroup>();
     filteredMachines.forEach(m => {
-      let tenant = m.tenantName || 'Default Enterprise Fleet';
-      if (tenant.toUpperCase().includes('SPINOVATION') || (m.groupName && m.groupName.toLowerCase() === 'engg')) {
-        tenant = 'SPINOVATIONCORP';
-      }
+      const tenant = m.tenantName || 'Default Enterprise Fleet';
       if (!map.has(tenant)) {
         map.set(tenant, {
           tenantName: tenant,
-          licenseKey: tenant === 'SPINOVATIONCORP' ? 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8' : (m.licenseKey || 'QS-CORP-DEMOCLIENT-6AF00609-C7486296'),
+          licenseKey: m.licenseKey || '',
           tier: m.licenseTier || (tenant.toLowerCase().includes('partner') || tenant.toLowerCase().includes('msp') ? 'MSP Partner' : 'Enterprise Pro'),
           machines: [],
           totalVulnerable: 0,
@@ -960,11 +953,7 @@ export default function App() {
       const key = rawName.toLowerCase().trim();
       if (!key) return;
 
-      let displayName = (c.displayName || c.name || '').trim();
-      if (displayName.toLowerCase() === 'spinovationcorp') displayName = 'Spinovation Corp';
-      else if (displayName.toLowerCase() === 'amberoon') displayName = 'Amberoon';
-      else if (displayName.toLowerCase() === 'algomeld') displayName = 'Algomeld';
-      else if (displayName.toLowerCase() === 'democlient') displayName = 'Demo Client Workspace';
+      const displayName = (c.displayName || c.name || '').trim();
 
       const customerId = c.customerId || (c.id?.startsWith('PART-') || c.id?.startsWith('CORP-') ? c.id : undefined);
       const isMSP = c.accountType === 'partner' 
@@ -980,10 +969,6 @@ export default function App() {
       if (customerId) {
         aliases.add(customerId.toLowerCase());
         aliases.add(customerId.toLowerCase().replace(/[^a-z0-9]/g, ''));
-      }
-      if (key === 'spinovationcorp') {
-        aliases.add('spinovation');
-        aliases.add('spinovation corp');
       }
 
       tenantMap.set(key, {
@@ -1020,10 +1005,7 @@ export default function App() {
         if (!opt.aliases.includes(norm)) opt.aliases.push(norm);
       } else {
         const isMSP = norm.includes('msp') || norm.includes('partner');
-        let displayName = machineTenant;
-        if (norm === 'spinovationcorp') displayName = 'Spinovation Corp';
-        else if (norm === 'algomeld') displayName = 'Algomeld';
-        else if (norm === 'amberoon') displayName = 'Amberoon';
+        const displayName = machineTenant;
 
         tenantMap.set(clean || norm, {
           key: clean || norm,
@@ -1325,7 +1307,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           const isTenantUser = actype !== 'superadmin' && (actype === 'corporate' || actype === 'partner' || actype === 'tenant' || !!workspace);
           
           if (isTenantUser) {
-            const targetSlug = workspace || (userEmail && userEmail.includes('spinovation') ? 'spinovationcorp' : (userEmail && userEmail.includes('algomeld') ? 'algomeld' : ''));
+            const targetSlug = workspace || '';
             if (targetSlug) {
               setTenantSlug(targetSlug);
               localStorage.setItem('quarkshield_view_mode', 'tenant');
@@ -1360,7 +1342,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
     return (
       <PortalErrorBoundary>
         <TenantPortal
-          tenantSlug={tenantSlug || 'spinovationcorp'}
+          tenantSlug={tenantSlug}
+          onWorkspaceResolved={(ws) => {
+            setTenantSlug(ws);
+            localStorage.setItem('quarkshield_tenant_slug', ws);
+            sessionStorage.setItem('quarkshield_tenant_slug', ws);
+          }}
           isSupportMirror={isSupportMirror}
           onExitMirror={() => {
             setIsSupportMirror(false);
@@ -1384,8 +1371,8 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           }}
           onLogout={() => {
             setIsSupportMirror(false);
-            sessionStorage.removeItem(`tenant_auth_${tenantSlug || 'spinovationcorp'}`);
-            localStorage.removeItem(`tenant_auth_${tenantSlug || 'spinovationcorp'}`);
+            sessionStorage.removeItem(`tenant_auth_${tenantSlug}`);
+            localStorage.removeItem(`tenant_auth_${tenantSlug}`);
             localStorage.removeItem('quarkshield_user');
             sessionStorage.removeItem('quarkshield_user');
             localStorage.removeItem('quarkshield_role');
@@ -2394,7 +2381,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                         <input
                           ref={tenantSearchInputRef}
                           type="text"
-                          placeholder="Search partner or tenant name, ID (e.g. Algomeld)..."
+                          placeholder="Search partner or tenant name, ID ..."
                           value={tenantSearchQuery}
                           onChange={e => setTenantSearchQuery(e.target.value)}
                           style={{
@@ -3187,11 +3174,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                     fontSize: '0.85rem'
                   }}
                 >
-                  <option value="SPINOVATIONCORP">Spinovation Corp [CORP-9812]</option>
-                  <option value="APEXCYBERDEFENSEMSP">Apex Cyber Defense MSP [PART-9148]</option>
-                  <option value="APEXDEFENSELABS">Apex Defense Labs [CORP-4821]</option>
-                  <option value="DEMOCLIENT">Demo Client Enterprise [CORP-5120]</option>
-                  <option value="PARTNERTEST">CyberShield Sec MSP [PART-8830]</option>
+                  <option value="">Select a tenant…</option>
+                  {(registeredClients || []).filter((c: any) => c?.name).map((c: any) => (
+                    <option key={c.id || c.name} value={String(c.name).toUpperCase()}>
+                      {c.displayName || c.name}{c.customerId ? ` [${c.customerId}]` : ''}
+                    </option>
+                  ))}
                 </select>
               </div>
 

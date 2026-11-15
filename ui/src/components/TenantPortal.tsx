@@ -152,6 +152,8 @@ interface TenantPortalProps {
   onLogout?: () => void;
   isSupportMirror?: boolean;
   onExitMirror?: () => void;
+  /** Sign-in resolved the session's own workspace and it differs from the URL's slug. */
+  onWorkspaceResolved?: (workspace: string) => void;
 }
 
 interface FleetMachine {
@@ -453,9 +455,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   onNavigateHome,
   onLogout,
   isSupportMirror,
-  onExitMirror
+  onExitMirror,
+  onWorkspaceResolved
 }) => {
-  const cleanSlug = (tenantSlug || 'spinovationcorp').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const cleanSlug = (tenantSlug || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
 
   // Auth State - always show tenant login screen first until explicit sign-in, or if support mirror session is active
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -513,35 +516,21 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   // Dashboard Data State
   const [loading, setLoading] = useState<boolean>(true);
   const [client, setClient] = useState<TenantClient>(() => {
-    if (cleanSlug.includes('algomeld')) {
-      return {
-        id: 'client-algomeld',
-        name: 'algomeld',
-        displayName: 'Algo Meld MSP',
-        customerId: 'PART-4421',
-        appPort: 5003,
-        dbPort: 5435,
-        status: 'active',
-        subscriptionTier: 'partner',
-        mcaLimit: 50,
-        contactName: 'Tenant Administrator',
-        adminEmail: 'admin@algomeld.com',
-        accountType: 'partner'
-      };
-    }
+    // Placeholder shown until /portal-data answers. Built from the slug alone — the
+    // same for every tenant; the real record replaces it as soon as it loads.
     return {
       id: `client-${cleanSlug}`,
       name: cleanSlug,
-      displayName: cleanSlug.includes('spinovation') ? 'Spinovation Corp' : cleanSlug.includes('amberoon') ? 'Amberoon' : cleanSlug.toUpperCase(),
-      customerId: cleanSlug.includes('spinovation') ? 'CORP-9812' : cleanSlug.includes('amberoon') ? 'PART-7033' : `CORP-${cleanSlug.slice(0, 4).toUpperCase()}`,
+      displayName: cleanSlug.toUpperCase(),
+      customerId: '',
       appPort: 5050,
       dbPort: 5432,
       status: 'active',
-      subscriptionTier: (cleanSlug.includes('partner') || cleanSlug.includes('amberoon')) ? 'partner' : 'growth',
+      subscriptionTier: 'growth',
       mcaLimit: 100,
       contactName: 'Tenant Administrator',
       adminEmail: `admin@${cleanSlug}.com`,
-      accountType: (cleanSlug.includes('partner') || cleanSlug.includes('amberoon')) ? 'partner' : 'corporate'
+      accountType: 'corporate'
     };
   });
 
@@ -636,12 +625,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   });
 
   const isPartner = client.accountType === 'partner' ||
-    (client.customerId && client.customerId.startsWith('PART-')) ||
-    cleanSlug.includes('algomeld') ||
-    cleanSlug.includes('partner');
+    (!!client.customerId && client.customerId.startsWith('PART-'));
 
-  const displayCustomerId = client.customerId || (cleanSlug.includes('algomeld') ? 'PART-4421' : (cleanSlug.includes('partner') || isPartner ? 'PART-7000' : `CORP-${cleanSlug.slice(0, 4).toUpperCase()}`));
-  const displayCustomerName = client.displayName || (cleanSlug.includes('algomeld') ? 'Algomeld' : (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)));
+  const displayCustomerId = client.customerId || '—';
+  const displayCustomerName = client.displayName || (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1));
   const displayRole = currentUserRole || (isPartner ? 'Partner Admin' : 'Corporate Admin');
   const activeLicKey = (licenses && licenses.length > 0 && licenses[0].licenseKey)
     ? licenses[0].licenseKey
@@ -890,7 +877,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       {
         id: 'msg-welcome',
         sender: 'ai',
-        text: `Hello! I am QuarkShield AI, your dedicated Post-Quantum Cryptographic Remediation Copilot for ${client.displayName || (cleanSlug.includes('spinovation') ? 'Spinovation Corp' : cleanSlug.toUpperCase())}.\n\nI have active context of your enterprise cryptographic inventory.\n\nAsk me anything about:\n• **Onboarding & Next Steps**: Admin initial credentials, running your first desktop scan, staff onboarding & seat allocation.\n• **Roadmap & Platform Features**: CI/CD CBOM security gate, Enterprise PKI & Vault connectors, Transparent Hybrid Quantum TLS proxy, and 3-tier deployment.\n• **PQC & Cryptanalysis**: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), Shor's/Grover's threats, NGINX hybrid TLS, OpenSSH 9.8+, or CNSA 2.0 roadmaps!`,
+        text: `Hello! I am QuarkShield AI, your dedicated Post-Quantum Cryptographic Remediation Copilot for ${client.displayName || cleanSlug.toUpperCase()}.\n\nI have active context of your enterprise cryptographic inventory.\n\nAsk me anything about:\n• **Onboarding & Next Steps**: Admin initial credentials, running your first desktop scan, staff onboarding & seat allocation.\n• **Roadmap & Platform Features**: CI/CD CBOM security gate, Enterprise PKI & Vault connectors, Transparent Hybrid Quantum TLS proxy, and 3-tier deployment.\n• **PQC & Cryptanalysis**: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), Shor's/Grover's threats, NGINX hybrid TLS, OpenSSH 9.8+, or CNSA 2.0 roadmaps!`,
         timestamp: new Date().toISOString()
       }
     ]
@@ -1108,6 +1095,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
   // Fetch Tenant Data from Backend
   const fetchTenantData = async () => {
+    if (!cleanSlug) { setLoading(false); return; }
     setLoading(true);
     try {
       const res = await fetch(`/api/tenant/${cleanSlug}/portal-data`);
@@ -1493,6 +1481,14 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       // The pre-login portal-data fetch 401s and latches "session expired"; clear
       // that now and load the real data for this session.
       setSessionExpired(false);
+      // The session's own workspace is authoritative. If the URL reached this portal
+      // under another name, switch to the real one; the data loads when the slug changes.
+      const ws = String(data.workspace || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+      if (ws && ws !== cleanSlug && onWorkspaceResolved) {
+        try { sessionStorage.setItem(`tenant_auth_${ws}`, 'true'); } catch { /* ignore */ }
+        onWorkspaceResolved(ws);
+        return;
+      }
       fetchTenantData();
       fetchPullSchedules();
       fetchFleetGroups();

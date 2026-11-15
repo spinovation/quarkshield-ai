@@ -597,7 +597,7 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
 
   // Pin the scan (and its persisted assets) to the session's tenant; a body/header
   // tenant cannot inject findings into another tenant's inventory (super roles may
-  // target the requested tenant). M4: reject an empty tenant rather than defaulting to SPINOVATIONCORP.
+  // target the requested tenant). M4: reject an empty tenant rather than defaulting to any tenant.
   const cleanTenant = (resolveWriteTenant(req, tenantName || tenant) || '').trim().toUpperCase();
   if (!cleanTenant) return res.status(400).json({ error: 'Unable to resolve a tenant for this request.' });
 

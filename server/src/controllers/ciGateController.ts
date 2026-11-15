@@ -60,7 +60,7 @@ const CI_CRYPTO_RULES = [
 export const evaluateCIGate = async (req: Request, res: Response) => {
   try {
     const {
-      tenantName = 'SPINOVATIONCORP',
+      tenantName = '',
       provider = 'github',
       repoName = 'unknown-repo',
       repoUrl = '',

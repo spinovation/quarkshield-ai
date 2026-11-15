@@ -166,11 +166,11 @@ export const GitRepoAuditor: React.FC<{ onAssetsChanged?: () => void }> = ({ onA
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: selectedCiProvider === 'runner' ? 'github' : selectedCiProvider,
-          repoName: 'spinovation/payments-v2',
+          repoName: 'example-org/payments-v2',
           branch: shouldFail ? 'feature/legacy-auth' : 'fix/pqc-kem',
           prNumber: `PR #${Math.floor(110 + Math.random() * 80)}`,
           commitHash: Math.random().toString(16).substring(2, 9),
-          commitAuthor: 'devops@spinovation.com',
+          commitAuthor: 'devops@example.com',
           commitMessage: shouldFail ? 'feat: implement payment signing with RSA' : 'fix: migrate tokens to NIST FIPS 203 ML-KEM',
           filesChanged: shouldFail ? [
             {
@@ -242,7 +242,7 @@ export const GitRepoAuditor: React.FC<{ onAssetsChanged?: () => void }> = ({ onA
           token: authType === 'public' ? undefined : token.trim(),
           username: provider === 'bitbucket' ? username.trim() : undefined,
           branch: branch.trim() || 'main',
-          tenant: localStorage.getItem('pqc_active_tenant') || 'SPINOVATIONCORP'
+          tenant: localStorage.getItem('pqc_active_tenant') || undefined
         })
       });
 

@@ -103,7 +103,7 @@ export const getPkiConnectors = async (req: Request, res: Response) => {
 export const createPkiConnector = async (req: Request, res: Response) => {
   try {
     const {
-      tenantName = 'SPINOVATIONCORP',
+      tenantName = '',
       name,
       provider, // 'aws_kms', 'azure_keyvault', 'hashicorp_vault', 'gcp_kms', 'ad_cs'
       endpointUrl,
@@ -134,7 +134,7 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     const id = 'conn-' + crypto.randomUUID().substring(0, 10);
     // Pin the connector to the session's tenant (super roles may target the
     // requested tenant); a body-supplied tenantName cannot write into another.
-    // M4: reject empty-tenant writes rather than silently defaulting to SPINOVATIONCORP.
+    // M4: reject empty-tenant writes rather than silently defaulting to any tenant.
     const cleanTenant = (resolveWriteTenant(req, tenantName) || '').toUpperCase().trim();
     if (!cleanTenant) return res.status(400).json({ error: 'Unable to resolve a tenant for this request.' });
 

@@ -89,8 +89,6 @@ export const createFleetToken = async (req: Request, res: Response) => {
       const effective = getEffectiveTenant(req);
       if (effective) {
         assignedTenant = effective;
-      } else if (name.toLowerCase().includes('spinovation') || name.toLowerCase() === 'engg') {
-        assignedTenant = 'SPINOVATIONCORP';
       } else {
         assignedTenant = name.trim();
       }
@@ -204,9 +202,9 @@ export const getFleetMachines = async (req: Request, res: Response) => {
     const params: any[] = [];
     if (tenant) {
       // SECURITY: EXACT tenant match (was `%tenant%` substring → cross-tenant machine leak).
-      // The spinovation/engg branch is the operator's own org alias, gated to that session only.
+      // No per-tenant aliases: every tenant is matched by its own name, nothing else.
       params.push(tenant);
-      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) = LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) = LOWER($1) OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))`;
+      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) = LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) = LOWER($1))`;
     }
     query += ` ORDER BY m.last_seen DESC;`;
     const result = await pool.query(query, params);
@@ -274,9 +272,9 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
 
     if (effectiveTenant) {
       // SECURITY: EXACT tenant match (was `%tenant%` ILIKE → cross-tenant CBOM/asset leak);
-      // dropped the `t.name ILIKE` arm. spinovation/engg alias stays gated to that session.
+      // dropped the `t.name ILIKE` arm. No per-tenant aliases.
       values.push(effectiveTenant);
-      conditions.push(`(LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($${values.length}) OR (LOWER($${values.length}) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) LIKE '%spinovation%'))`);
+      conditions.push(`(LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($${values.length}))`);
     }
 
     if (source && source !== 'all') {
@@ -720,9 +718,7 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     // seat. Fall back to the token's own name only when the token carries no tenant_name.
     const tokenTenant = (tokenRow.tenant_name || '').trim();
     const assignedTenant = tokenTenant
-      || (tokenRow.name?.toLowerCase().includes('spinovation') || tokenRow.name?.toLowerCase() === 'engg'
-            ? 'SPINOVATIONCORP'
-            : ((tokenRow.name || '').trim() || 'DEFAULT_FLEET'));
+      || (tokenRow.name || '').trim() || 'DEFAULT_FLEET';
     const assignedLicense = tokenRow.license_key || req.body.license_key || 'QS-STANDARD-ACTIVE';
 
     const cleanHwUUID = (hardware_uuid || '').trim();
@@ -1354,7 +1350,7 @@ export const getFleetDrift = async (req: Request, res: Response) => {
     const params: any[] = [];
     let where = '';
     // SECURITY: EXACT tenant match (was `%tenant%` → cross-tenant drift-history leak).
-    if (tenant) { params.push(tenant); where += `${params.length === 1 ? ' WHERE' : ' AND'} (LOWER(COALESCE(tenant_name,'')) = LOWER($${params.length}) OR (LOWER($${params.length}) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(tenant_name,'')) LIKE '%spinovation%'))`; }
+    if (tenant) { params.push(tenant); where += `${params.length === 1 ? ' WHERE' : ' AND'} (LOWER(COALESCE(tenant_name,'')) = LOWER($${params.length}))`; }
     if (machineId) { params.push(machineId); where += `${params.length === 1 ? ' WHERE' : ' AND'} machine_id = $${params.length}`; }
     params.push(limit);
     const result = await pool.query(
@@ -1393,8 +1389,7 @@ export const enqueuePullsForScope = async (
        FROM fleet_machines m
        LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE (LOWER(m.tenant_name) = LOWER($1)
-          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-          OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', '')))
         ${groupClause}`,
     params
   );
@@ -1588,8 +1583,7 @@ export const enqueueProbesForScope = async (
        FROM fleet_machines m
        LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE (LOWER(m.tenant_name) = LOWER($1)
-          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-          OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', '')))
         ${groupClause}`,
     params
   );
@@ -1803,8 +1797,7 @@ export const listFleetGroups = async (req: Request, res: Response) => {
            FROM fleet_machines m
            LEFT JOIN fleet_tokens t ON m.token_id = t.id
           WHERE (LOWER(m.tenant_name) = LOWER($1)
-              OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($1,' ',''))
-              OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+              OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($1,' ','')))
           GROUP BY 1
        ),
        defined AS (
@@ -1866,8 +1859,7 @@ export const deleteFleetGroup = async (req: Request, res: Response) => {
          WHERE id IN (
            SELECT m.id FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
             WHERE (LOWER(m.tenant_name) = LOWER($2)
-                OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($2,' ',''))
-                OR (LOWER($2) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+                OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($2,' ','')))
               AND LOWER(${EFFECTIVE_GROUP}) = LOWER($1)
          )`,
       [name, tenant]
@@ -1982,7 +1974,6 @@ export const getTenantDailySnapshots = async (req: Request, res: Response) => {
       FROM fleet_daily_snapshots
       WHERE LOWER(tenant_name) = LOWER($1) 
          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(tenant_name) LIKE '%spinovation%')
       ORDER BY snapshot_date ASC
       LIMIT 30;
     `, [cleanTenant]);
