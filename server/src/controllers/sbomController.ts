@@ -3,8 +3,7 @@ import pool from '../config/db';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { isSuperRole } from '../middleware/auth';
-import { hasActiveSupportGrant, auditSupportEvent } from '../lib/supportAccess';
+import { isSuperRole, normTenant } from '../middleware/auth';
 
 interface VulnerabilityDetail {
   cveId: string;
@@ -842,13 +841,10 @@ async function allowComponentAccess(req: Request, tenant: string): Promise<boole
   const isSuper = !!(req.user?.role && isSuperRole(req.user.role));
   if (!isSuper) return true;                                   // tenant user → own data
   if (tenant.toLowerCase() === 'quarkshield.ai') return true;  // platform's own stack
-  const granted = await hasActiveSupportGrant(tenant);
-  if (granted) {
-    await auditSupportEvent('support_access_sbom_read', req.user?.email || req.user?.sub || 'superadmin',
-      `tenant=${tenant} route=${req.path}`, req.ip);
-    return true;
-  }
-  return false;
+  // The grant check + audit row now live in the shared gate (requireTenantAccess →
+  // superAdminSupportGate); it sets req.supportScope when this tenant's grant is active.
+  const scope = req.supportScope;
+  return scope?.mode === 'granted' && !!scope.tenant && normTenant(scope.tenant) === normTenant(tenant);
 }
 
 function resolveTenant(req: Request): string {

@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import pool from '../config/db';
+import { hasActiveSupportGrant, auditSupportEvent } from '../lib/supportAccess';
 
 /** Constant-time string compare for shared secrets / service tokens. */
 export const safeEqual = (a: string, b: string): boolean => {
@@ -76,6 +77,8 @@ declare global {
   namespace Express {
     interface Request {
       user?: SessionUser;
+      /** Set by requireTenantAccess for platform (super) sessions — see SUPPORT ACCESS GATE. */
+      supportScope?: SupportScope;
     }
   }
 }
@@ -312,7 +315,15 @@ export const normTenant = (s: string): string => (s || '').toLowerCase().replace
  */
 export const canAccessTenant = (req: Request, rowTenant?: string | null): boolean => {
   if (!req.user) return false;
-  if (isSuperRole(req.user.role)) return true;
+  if (isSuperRole(req.user.role)) {
+    // A platform session may touch a tenant-owned row only on a management route, or
+    // while the row's tenant is the one it holds an active support grant for. With no
+    // scope at all (a route that never went through requireTenantAccess) fail closed.
+    const scope = req.supportScope;
+    if (!scope) return false;
+    if (scope.mode === 'manage') return true;
+    return scope.mode === 'granted' && !!scope.tenant && normTenant(rowTenant || '') === normTenant(scope.tenant);
+  }
   return !!req.user.tenant && normTenant(rowTenant || '') === normTenant(req.user.tenant);
 };
 
@@ -327,13 +338,157 @@ export const resolveWriteTenant = (req: Request, requested?: string | null): str
   if (req.user && !isSuperRole(req.user.role)) {
     return (req.user.tenant || '').toString();
   }
+  // Under a support grant the write is pinned to the granted tenant, whatever the body says.
+  if (req.supportScope?.mode === 'granted' && req.supportScope.tenant) return req.supportScope.tenant;
   return (requested || req.user?.tenant || '').toString();
+};
+
+// ---------------------------------------------------------------------------
+// SUPPORT ACCESS GATE (platform / super-admin sessions)
+//
+// Owner rule (2026-11-15): every tenant owns its data. A platform admin manages
+// tenants, licensing and onboarding and may see AGGREGATE metadata per tenant.
+// Tenant DETAIL (hostnames, IPs, hardware UUIDs, CBOM assets, portal data, git/PKI
+// findings, threat graph, projects…) is reachable only while that tenant has an
+// active, time-boxed support-access grant, and every such request is audit-logged.
+//
+// This is the single enforcement point: requireTenantAccess sends every super
+// session through here, and canAccessTenant / resolveWriteTenant read the resulting
+// req.supportScope. Routes are classified below by Express route path; anything NOT
+// listed is `detail` (fail closed), so a new tenant route is gated by default.
+//
+//   manage    — tenant administration the platform operator does by design
+//               (enrollment tokens, tenant users, 2FA policy, billing portal).
+//   aggregate — the controller has a safe aggregate answer; without a grant it must
+//               return that (check superNeedsGrant(req)) and never host/asset rows.
+//   detail    — 403 `supportAccessRequired` without a grant.
+// ---------------------------------------------------------------------------
+export interface SupportScope {
+  /** manage: admin route, no data gate · granted: active grant for `tenant` · aggregate: no grant, aggregates only */
+  mode: 'manage' | 'granted' | 'aggregate';
+  tenant: string | null;
+}
+export type SuperRouteMode = 'manage' | 'aggregate' | 'detail';
+
+const SUPER_MANAGE_ROUTES = new Set<string>([
+  '/fleet/tokens', '/fleet/tokens/:id',
+  '/service-tokens', '/service-tokens/:id',
+  '/tenants/:tenant/users', '/tenants/:tenant/users/:id',
+  '/tenants/:tenant/users/:id/reset-2fa', '/tenants/:tenant/users/:id/reset-password',
+  '/tenants/:tenant/2fa-policy',
+  '/billing/portal-session',
+]);
+const SUPER_AGGREGATE_ROUTES = new Set<string>([
+  '/fleet/machines',                       // per-tenant counts instead of host rows
+  '/tenant/:tenant/portal-data',           // client + licence + stats, no machines/assets/tokens
+  '/tenant/:tenant/daily-snapshots',       // numeric daily roll-ups only
+  '/reports/executive', '/reports/stakeholders', '/reports/executive/send', // fleet-wide (collective) only
+  '/ai/chat',                              // answers without any tenant inventory
+  '/sbom/components', '/sbom/stats', '/sbom/export', '/sbom/fix-script',
+]);
+
+/** How a platform session is treated on a route (by Express route path). Unlisted → detail. */
+export const superRouteMode = (routePath?: string): SuperRouteMode => {
+  const p = String(routePath || '');
+  if (SUPER_MANAGE_ROUTES.has(p)) return 'manage';
+  if (SUPER_AGGREGATE_ROUTES.has(p)) return 'aggregate';
+  return 'detail';
+};
+
+// The platform's own software stack is not customer data (see sbomController).
+const PLATFORM_TENANT_KEY = normTenant('quarkshield.ai');
+
+/** Every place a request can name a tenant. `all` / empty mean "no tenant named". */
+const namedTenants = (req: Request): { names: string[]; malformed: boolean } => {
+  const body = (req.body && typeof req.body === 'object') ? req.body as Record<string, unknown> : {};
+  const raw: unknown[] = [
+    req.params?.tenant, req.query?.tenant,
+    req.headers?.['x-tenant-id'], req.headers?.['x-tenant-slug'],
+    body.tenantName, body.tenant,
+  ];
+  const names: string[] = [];
+  let malformed = false;
+  for (const v of raw) {
+    if (v === undefined || v === null || v === '') continue;
+    if (typeof v !== 'string') { malformed = true; continue; }
+    const t = v.trim();
+    if (!t || t.toLowerCase() === 'all') continue;
+    names.push(t);
+  }
+  return { names, malformed };
+};
+
+/** True when a platform session must be answered with aggregates only (no active grant). */
+export const superNeedsGrant = (req: Request): boolean =>
+  isSuperRole(req.user?.role) && (!req.supportScope || req.supportScope.mode === 'aggregate');
+
+/** The standard "no grant" refusal. The UI keys off `supportAccessRequired`. */
+export const denySupportAccess = (res: Response, tenant?: string | null): void => {
+  res.status(403).json({
+    error: tenant
+      ? `Support access required: ${tenant} has not granted QuarkShield support an active access window.`
+      : 'Support access required: name one tenant that has granted an active support-access window.',
+    supportAccessRequired: true,
+    tenant: tenant || null,
+  });
+};
+
+export const superAdminSupportGate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const mode = superRouteMode((req as any).route?.path);
+    if (mode === 'manage') {
+      req.supportScope = { mode: 'manage', tenant: null };
+      next();
+      return;
+    }
+    const { names, malformed } = namedTenants(req);
+    const distinct = new Set(names.map(normTenant));
+    if (malformed || distinct.size > 1) {
+      // Two different tenants in one request (e.g. ?tenant=A with body.tenantName=B)
+      // would let a grant for A be spent on B. Refuse rather than guess.
+      res.status(400).json({ error: 'Name exactly one tenant for this request.' });
+      return;
+    }
+    const target = names[0] || null;
+    const key = target ? normTenant(target) : '';
+    let granted = false;
+    if (key && key === PLATFORM_TENANT_KEY) {
+      granted = true;
+    } else if (key && await hasActiveSupportGrant(target)) {
+      granted = true;
+      await auditSupportEvent(
+        req.method === 'GET' ? 'support_access_read' : 'support_access_action',
+        req.user?.email || req.user?.sub || 'superadmin',
+        `tenant=${target} route=${req.method} ${req.path}`, req.ip,
+      );
+    }
+    if (granted && target) {
+      // Pin every downstream tenant lookup to the granted tenant.
+      req.query.tenant = target;
+      delete req.headers['x-tenant-id'];
+      delete req.headers['x-tenant-slug'];
+      req.supportScope = { mode: 'granted', tenant: target };
+      next();
+      return;
+    }
+    if (mode === 'aggregate') {
+      req.supportScope = { mode: 'aggregate', tenant: target };
+      next();
+      return;
+    }
+    denySupportAccess(res, target);
+  } catch (err) {
+    // A failed grant lookup must never open the data.
+    console.error('support-access gate failed (denying):', err);
+    res.status(503).json({ error: 'Support-access check failed. Try again.' });
+  }
 };
 
 /**
  * Require that the session may act on the tenant named in the request
- * (route param :tenant, or ?tenant / X-Tenant-Id). Super admins may act on any
- * tenant. A tenant session may act only on its own tenant.
+ * (route param :tenant, or ?tenant / X-Tenant-Id). A tenant session may act only on
+ * its own tenant. A platform (super) session is handed to superAdminSupportGate:
+ * management routes pass, everything else needs the tenant's active support grant.
  */
 export const requireTenantAccess = (req: Request, res: Response, next: NextFunction): void => {
   if (!req.user) {
@@ -341,7 +496,8 @@ export const requireTenantAccess = (req: Request, res: Response, next: NextFunct
     return;
   }
   if (isSuperRole(req.user.role)) {
-    next();
+    // Platform sessions never get tenant detail by default — see SUPPORT ACCESS GATE.
+    void superAdminSupportGate(req, res, next);
     return;
   }
   const requested =

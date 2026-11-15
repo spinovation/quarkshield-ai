@@ -12,6 +12,11 @@ import {
  */
 export async function grantSupportAccess(req: Request, res: Response) {
   try {
+    // Only the tenant itself can open the window. A platform session passes
+    // requireTenantAdmin, so refuse it explicitly — support can never self-grant.
+    if (isSuperRole(req.user?.role)) {
+      return res.status(403).json({ success: false, error: 'Support access can only be granted by the tenant\'s own administrator.' });
+    }
     const tenant = req.user?.tenant;
     if (!tenant) return res.status(400).json({ success: false, error: 'No tenant in session.' });
     const { durationHours, reason } = req.body || {};
@@ -44,7 +49,8 @@ export async function revokeSupportAccess(req: Request, res: Response) {
 /**
  * GET /api/support-access/status
  * Tenant admin → their own tenant's active grant.
- * Super-admin  → ?tenant= to check one tenant, or the full active list.
+ * Super-admin  → ?tenant= to check one tenant, or `grants`: every active window.
+ * `active` is a boolean and `grant.expires_at` is always set when it is true.
  */
 export async function getSupportAccessStatus(req: Request, res: Response) {
   try {
@@ -55,8 +61,11 @@ export async function getSupportAccessStatus(req: Request, res: Response) {
         const grant = await getActiveGrant(q);
         return res.json({ success: true, tenant: q, active: !!grant, grant: grant || null });
       }
+      // `active` is ALWAYS a boolean. It used to be the grants array here, which the
+      // tenant portal's Support Access card read as truthy → "ACTIVE · Expires —" for a
+      // platform session even when no grant existed.
       const grants = await listActiveGrants();
-      return res.json({ success: true, active: grants });
+      return res.json({ success: true, tenant: null, active: false, grant: null, grants });
     }
     const tenant = req.user?.tenant;
     if (!tenant) return res.status(400).json({ success: false, error: 'No tenant in session.' });

@@ -71,6 +71,7 @@ import { PqcProxyGateway } from './PqcProxyGateway';
 import { GitRepoAuditor } from './GitRepoAuditor';
 import SbomInventory from './SbomInventory';
 import SupportAccessCard from './SupportAccessCard';
+import { SupportAccessRequired } from './SupportAccessGate';
 import ComplianceProjects from './ComplianceProjects';
 
 // Threat & Risk Graph pulls in React Flow; load it only when the tab is opened.
@@ -565,6 +566,9 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     avgRiskScore: 87
   });
   const [sessionExpired, setSessionExpired] = useState(false);
+  // Support mirror without the tenant's support-access grant: the server returns
+  // aggregates only (no machines / assets / tokens).
+  const [supportLocked, setSupportLocked] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'compliance' | 'threat' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
     try {
       const p = new URLSearchParams(window.location.search);
@@ -1117,6 +1121,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           try { sessionStorage.setItem(`tenant_auth_${cleanSlug}`, 'true'); } catch { /* ignore */ }
         }
         setSessionExpired(false);
+        setSupportLocked(!!data.aggregateOnly);
         if (data.client) setClient(data.client);
         if (data.machines) setMachines(data.machines);
         if (data.assets) setAssets(data.assets);
@@ -2844,7 +2849,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               Diagnostic Session for Tenant: <strong style={{ color: '#ffffff', textDecoration: 'underline' }}>{client.displayName || cleanSlug}</strong> ({cleanSlug}.quarkshield.ai)
             </span>
             <span style={{ fontSize: '0.75rem', color: '#fef9c3', opacity: 0.85 }}>
-              • Live Diagnostic Telemetry • Passwordless Support Inspection
+              • {supportLocked ? 'Aggregate metrics only — tenant has not granted support access' : 'Tenant-granted support access · every request is audit-logged'}
             </span>
           </div>
 
@@ -2882,6 +2887,15 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               <LogOut size={14} /> Exit Support Mirror & Return to Super Admin
             </button>
           </div>
+        </div>
+      )}
+      {isSupportMirror && supportLocked && (
+        <div style={{ padding: '0.75rem 1.25rem', flexShrink: 0, background: 'var(--bg-dark, #07090E)' }}>
+          <SupportAccessRequired
+            compact
+            tenantLabel={client.displayName || cleanSlug}
+            what="endpoints, cryptographic assets, enrollment tokens and findings"
+          />
         </div>
       )}
 
@@ -3458,7 +3472,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             {activeTab === 'overview' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
                 {/* Tenant-controlled support access (GDPR drill-down window) */}
-                <SupportAccessCard apiUrl="" canManage={/admin|owner/i.test(currentUserRole || '')} />
+                <SupportAccessCard
+                  apiUrl=""
+                  canManage={!isSupportMirror && /admin|owner/i.test(currentUserRole || '')}
+                  viewTenant={isSupportMirror ? cleanSlug : undefined}
+                />
                 {/* 4 Metric Cards */}
                 <div style={{
                   display: 'grid',
