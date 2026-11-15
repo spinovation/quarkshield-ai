@@ -572,6 +572,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'INTERNAL USER');
       localStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
       sessionStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
+      // A super admin belongs to no tenant: drop any workspace left by an earlier
+      // tenant sign-in on this browser, or the console would open that tenant.
+      ['quarkshield_workspace', 'quarkshield_tenant_slug']
+        .forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
       // The session lives in the httpOnly cookie only; never mirror the JWT into
       // web storage where any XSS could read it.
       setSignInSuccessMsg('Verified Internal Super Admin. Launching Management Console...');
@@ -594,6 +598,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       localStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
       sessionStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
       const ws = data.workspace || (cleanEmail.includes('algomeld') ? 'algomeld' : (cleanEmail.includes('spinovation') ? 'spinovationcorp' : ''));
+      ['quarkshield_workspace', 'quarkshield_tenant_slug']
+        .forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
       if (ws) {
         localStorage.setItem('quarkshield_workspace', ws);
         sessionStorage.setItem('quarkshield_workspace', ws);
