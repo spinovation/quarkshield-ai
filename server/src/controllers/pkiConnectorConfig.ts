@@ -4,6 +4,7 @@ import { seal, open as unseal } from '../utils/secretbox';
 import type { KmsConfig } from '../lib/awsKms';
 import type { VaultConfig } from '../lib/hashiVault';
 import type { AzureConfig } from '../lib/azureKeyVault';
+import type { GcpConfig } from '../lib/gcpKms';
 
 /**
  * Pure config helpers for the Enterprise PKI/KMS connectors: sealing credentials
@@ -28,7 +29,8 @@ export const rawConfig = (row: any): any => {
  */
 export const sealConnectorSecrets = (config: Record<string, any> = {}): Record<string, any> => {
   const out = { ...config };
-  for (const k of ['token', 'secretId', 'clientSecret', 'accessKeyId', 'secretAccessKey', 'secretKey']) {
+  // serviceAccountJson = a Google service-account key file (contains a private key).
+  for (const k of ['token', 'secretId', 'clientSecret', 'accessKeyId', 'secretAccessKey', 'secretKey', 'serviceAccountJson']) {
     if (out[k]) out[k] = seal(String(out[k]));
   }
   return out;
@@ -73,9 +75,21 @@ export const parseAzureConfig = (row: any): AzureConfig => {
   };
 };
 
+export const parseGcpConfig = (row: any): GcpConfig => {
+  const cfg = rawConfig(row);
+  const locations = Array.isArray(cfg.locations)
+    ? cfg.locations
+    : typeof cfg.locations === 'string' ? cfg.locations.split(',') : undefined;
+  return {
+    projectId: cfg.projectId,
+    locations: locations?.map((l: any) => String(l).trim()).filter(Boolean),
+    serviceAccountJson: unseal(cfg.serviceAccountJson) || undefined,
+  };
+};
+
 // Config keys safe to return to the client. Everything else (tokens, client/
 // AWS secrets, access keys) is withheld from API responses.
-export const PUBLIC_CONFIG_KEYS = ['region', 'regions', 'roleArn', 'externalId', 'namespace', 'transitMount', 'pkiMount', 'roleId', 'clientId', 'tenantId', 'vaultUrl', 'authorityHost', 'endpointUrl'];
+export const PUBLIC_CONFIG_KEYS = ['region', 'regions', 'roleArn', 'externalId', 'namespace', 'transitMount', 'pkiMount', 'roleId', 'clientId', 'tenantId', 'vaultUrl', 'authorityHost', 'endpointUrl', 'projectId', 'locations'];
 
 /** Strip config_summary (which holds secrets) and expose only non-secret hints. */
 export const publicConnector = (row: any): any => {
