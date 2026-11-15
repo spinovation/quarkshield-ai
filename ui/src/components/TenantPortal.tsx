@@ -866,7 +866,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
 
   // 4. PQC Copilot Multi-Session State
-  const copilotStorageKey = `quarkshield_copilot_sessions_${cleanSlug}`;
+  // Chat history is kept in this browser, so it is keyed by the SIGNED-IN identity the
+  // server reports (tenant + user), never by the workspace in the address bar: a browser
+  // shared by two tenants, or by two users, must not show one's transcript to the other.
+  // Empty until the session is confirmed; nothing is read or written without an owner.
+  const [copilotOwner, setCopilotOwner] = useState<string>('');
+  const [copilotLoadedFor, setCopilotLoadedFor] = useState<string>('');
+  const copilotStorageKey = copilotOwner ? `quarkshield_copilot_sessions_${copilotOwner}` : '';
 
   const createDefaultSession = (): CopilotSession => ({
     id: 'session-' + Date.now(),
@@ -883,18 +889,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     ]
   });
 
-  const [copilotSessions, setCopilotSessions] = useState<CopilotSession[]>(() => {
-    try {
-      const saved = localStorage.getItem(copilotStorageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.warn('Failed to load saved copilot sessions:', e);
-    }
-    return [createDefaultSession()];
-  });
+  const [copilotSessions, setCopilotSessions] = useState<CopilotSession[]>(() => [createDefaultSession()]);
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     return copilotSessions[0]?.id || 'session-default';
@@ -910,14 +905,54 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Sync sessions to localStorage
+  // Who owns the chat history: the tenant + user of the server session.
   useEffect(() => {
+    // The old key held one history per workspace, shared by every user of the browser.
+    try { if (cleanSlug) localStorage.removeItem(`quarkshield_copilot_sessions_${cleanSlug}`); } catch { /* ignore */ }
+    if (!isAuthenticated && !isSupportMirror) { setCopilotOwner(''); return; }
+    let cancelled = false;
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled) return;
+        const u = d?.user;
+        const who = String(u?.email || u?.sub || '').toLowerCase().trim();
+        const tenantKey = String(u?.tenant || cleanSlug || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        setCopilotOwner(who && tenantKey ? `${tenantKey}:${who}` : '');
+      })
+      .catch(() => { if (!cancelled) setCopilotOwner(''); });
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isSupportMirror, cleanSlug]);
+
+  // Owner changed (sign-in, sign-out, another workspace): drop what is on screen and
+  // load that owner's own history. Never carry one owner's transcript over to the next.
+  useEffect(() => {
+    let next: CopilotSession[] | null = null;
+    if (copilotStorageKey) {
+      try {
+        const saved = localStorage.getItem(copilotStorageKey);
+        const parsed = saved ? JSON.parse(saved) : null;
+        if (Array.isArray(parsed) && parsed.length > 0) next = parsed;
+      } catch (e) {
+        console.warn('Failed to load saved copilot sessions:', e);
+      }
+    }
+    const sessions = next || [createDefaultSession()];
+    setCopilotSessions(sessions);
+    setActiveSessionId(sessions[0].id);
+    setCopilotLoadedFor(copilotStorageKey);
+  }, [copilotStorageKey]);
+
+  // Save only once this owner's history is the one loaded, so a transcript still on
+  // screen from the previous owner can never be written under the new owner's key.
+  useEffect(() => {
+    if (!copilotStorageKey || copilotLoadedFor !== copilotStorageKey) return;
     try {
       localStorage.setItem(copilotStorageKey, JSON.stringify(copilotSessions));
     } catch (e) {
       console.warn('Failed to save copilot sessions:', e);
     }
-  }, [copilotSessions, copilotStorageKey]);
+  }, [copilotSessions, copilotStorageKey, copilotLoadedFor]);
 
   // Active session helper
   const currentSession = copilotSessions.find(s => s.id === activeSessionId) || copilotSessions[0];
@@ -1593,7 +1628,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     localStorage.removeItem(`tenant_auth_${cleanSlug}`);
     // Copilot transcripts can contain hostnames and remediation details; never leave
     // them for the next user of this browser.
-    try { localStorage.removeItem(`quarkshield_copilot_sessions_${cleanSlug}`); } catch { /* ignore */ }
+    try {
+      localStorage.removeItem(`quarkshield_copilot_sessions_${cleanSlug}`);
+      if (copilotStorageKey) localStorage.removeItem(copilotStorageKey);
+    } catch { /* ignore */ }
+    setCopilotOwner('');
     if (onLogout) onLogout();
   };
 

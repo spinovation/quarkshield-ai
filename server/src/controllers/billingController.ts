@@ -54,6 +54,7 @@ export const QUARKSHIELD_PLANS: Record<string, PlanTierConfig> = {
 // secret is missing/weak). The previous local copy silently fell back to a public
 // dev secret, so Stripe-issued licenses were forgeable.
 import { computeLicenseSig } from './adminController';
+import { isReservedTenantName, newCustomerId, tenantKey, sqlTenantKey } from '../lib/tenantNames';
 
 /**
  * POST /api/billing/checkout
@@ -74,7 +75,11 @@ export const createCheckoutSession = async (req: Request, res: Response) => {
     const intervalStr = isAnnual ? 'year' : 'month';
 
     const stripe = getStripe();
-    const cleanSubdomain = companyName.toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 24) || 'tenant';
+    const cleanSubdomain = String(companyName).toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 24) || 'tenant';
+    // A platform bucket name can never become a tenant (same rule as console onboarding).
+    if (isReservedTenantName(cleanSubdomain)) {
+      return res.status(400).json({ error: 'That company name cannot be used for a workspace. Contact support@quarkshield.ai.' });
+    }
     const regId = 'reg-' + crypto.randomUUID().substring(0, 8);
 
     const session = await stripe.checkout.sessions.create({
@@ -613,8 +618,17 @@ async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
   const seats = parseInt(meta.seats || '50', 10);
   const billingInterval = meta.billingInterval || 'monthly';
 
-  const cleanSlug = (meta.subdomain || companyName.toLowerCase().replace(/[^a-z0-9]/g, '')).substring(0, 24) || 'tenant';
-  const customerId = (tier === 'partner' ? 'PART-' : 'CORP-') + Math.floor(1000 + Math.random() * 9000);
+  // Always alphanumeric: the stored slug and the access-check key are then the same string.
+  let cleanSlug = String(meta.subdomain || companyName || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 24) || 'tenant';
+  if (isReservedTenantName(cleanSlug)) {
+    console.error(`SECURITY: blocked checkout for reserved tenant name '${cleanSlug}'. No provisioning performed.`);
+    await pool.query(
+      `UPDATE pending_registrations SET status = 'conflict', updated_at = CURRENT_TIMESTAMP WHERE stripe_session_id = $1 OR id = $2`,
+      [session.id, meta.registrationId || '']
+    ).catch(() => {});
+    return;
+  }
+  const customerId = await newCustomerId(tier === 'partner' ? 'PART-' : 'CORP-');
   const clientId = 'cli-' + crypto.randomUUID().substring(0, 8);
   const stripeCustId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
   const stripeSubId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id;
@@ -623,9 +637,11 @@ async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
   // companyName. Refuse to fulfill a checkout that targets an EXISTING tenant owned by a
   // different customer/email — otherwise a public checkout could overwrite that tenant's
   // tier/seats, repoint its Stripe customer, and mint victim-scoped license/fleet tokens.
+  // Matched on the normalised key, so a client stored as "acme-corp" is recognised as the
+  // owner of "acmecorp" (the two are one tenant to the access check).
   const existingClient = await pool.query(
-    'SELECT stripe_customer_id, admin_email FROM admin_clients WHERE name = $1',
-    [cleanSlug]
+    `SELECT name, stripe_customer_id, admin_email FROM admin_clients WHERE ${sqlTenantKey('name')} = $1 ORDER BY (name = $2) DESC LIMIT 1`,
+    [tenantKey(cleanSlug), cleanSlug]
   );
   if (existingClient.rowCount && existingClient.rows[0]) {
     const row = existingClient.rows[0];
@@ -639,6 +655,9 @@ async function fulfillPaidRegistration(session: Stripe.Checkout.Session) {
       ).catch(() => {});
       return;
     }
+    // Same owner: keep provisioning under the client's existing name, never a second
+    // client whose name collapses to the same tenant.
+    cleanSlug = row.name;
   }
 
   // 1. Provision or update admin_clients

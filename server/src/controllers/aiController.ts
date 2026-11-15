@@ -106,10 +106,13 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
       return res.json({ text: SCOPE_REFUSAL, code: undefined, language: 'text' });
     }
 
-    // SECURITY: scope all context to the caller's tenant. A non-super session is pinned
-    // to its own tenant; a super (fleet) session may target ?tenant, else sees all.
+    // SECURITY: the Copilot sees ONE tenant's data or none. A tenant session is pinned to
+    // its own tenant; a platform session gets a tenant only under that tenant's active
+    // support grant. There is no "all tenants" context: `allowed` is true only together
+    // with a concrete tenant, and every query below carries the tenant filter.
     const inventoryScope = chatInventoryScope(req);
     const scopeTenant = inventoryScope.tenant || '';
+    const hasInventoryScope = inventoryScope.allowed && !!scopeTenant;
 
     // Build a COMPACT inventory context. Dumping every asset as pretty-printed JSON made
     // the prompt enormous for large fleets (e.g. 7k+ assets => hundreds of thousands of
@@ -117,12 +120,12 @@ export const getAIChatResponse = async (req: Request, res: Response) => {
     // breakdown, and a small sample of the most critical/vulnerable assets. The model can
     // ask the user to narrow down for host-level detail.
     const ASSET_SAMPLE = 40;
-    const whereTenant = scopeTenant ? 'WHERE LOWER(tenant_name) = LOWER($1)' : '';
-    const tenantParams = scopeTenant ? [scopeTenant] : [];
+    const whereTenant = 'WHERE LOWER(tenant_name) = LOWER($1)';
+    const tenantParams = [scopeTenant];
     const riskRank = "CASE LOWER(COALESCE(risk_level,'')) WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'low' THEN 1 ELSE 0 END";
     let assetsContext = '';
     // A session with no tenant gets NO inventory (never the unfiltered fleet).
-    if (!inventoryScope.allowed) assetsContext = NO_TENANT_INVENTORY_NOTE;
+    if (!hasInventoryScope) assetsContext = NO_TENANT_INVENTORY_NOTE;
     else try {
       const summary = await pool.query(
         `SELECT COUNT(*)::int AS total,
@@ -1379,14 +1382,12 @@ func main() {
       query.includes('vulnerable') || query.includes('list') || query.includes('assets') || query.includes('dashboard') || query.includes('inventory') || query.includes('cmdb')
     ) {
       try {
-        // SECURITY: tenant-scope this inventory lookup too (local-fallback reply path). The
-        // unfiltered query is reachable ONLY by a super (fleet) session that chose no tenant.
-        if (!inventoryScope.allowed) {
+        // SECURITY: tenant-scope this inventory lookup too (local-fallback reply path).
+        // There is no unfiltered variant of this query.
+        if (!hasInventoryScope) {
           return res.json({ text: "No tenant is associated with your session, so I can't show inventory data. Ask your administrator to assign your account to a tenant.", code: undefined, language: 'text' });
         }
-        const assetsRes = scopeTenant
-          ? await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets WHERE LOWER(tenant_name) = LOWER($1)', [scopeTenant])
-          : await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets');
+        const assetsRes = await pool.query('SELECT name, algorithm, key_size, is_vulnerable, risk_level, status FROM assets WHERE LOWER(tenant_name) = LOWER($1)', [scopeTenant]);
         const total = assetsRes.rows.length;
         const vulnerable = assetsRes.rows.filter(r => r.is_vulnerable);
         
@@ -1521,10 +1522,10 @@ export const resolveAssetScope = (req: Request): AssetScope => {
   return { ok: false, status: 403, error: 'Support access required: the tenant has not granted an active support-access window.' };
 };
 
-/** Assets for the scope (fleet-wide only for a super session that asked for no tenant). */
-const scopedAssetsQuery = (tenant: string | null) => tenant
+/** Assets of ONE tenant. No tenant → no rows; there is no fleet-wide variant. */
+const scopedAssetsQuery = async (tenant: string | null): Promise<{ rows: any[] }> => tenant
   ? pool.query('SELECT * FROM assets WHERE LOWER(tenant_name) = LOWER($1) ORDER BY created_at DESC', [tenant])
-  : pool.query('SELECT * FROM assets ORDER BY created_at DESC');
+  : { rows: [] };
 
 /**
  * One tenant_settings value for the scope's OWN tenant. The previous queries had no tenant

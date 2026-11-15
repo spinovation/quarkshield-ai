@@ -7,7 +7,7 @@ import os from 'os';
 import { execFile } from 'child_process';
 import { assertPublicHost } from '../utils/ssrf';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
-import { resolveWriteTenant } from '../middleware/auth';
+import { resolveWriteTenant, scopedTenant, denyUnscoped } from '../middleware/auth';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
 
 export interface GitFinding {
@@ -890,8 +890,10 @@ export const scanRemoteGitRepo = async (req: Request, res: Response) => {
 // ==============================================================================
 
 export const getGitScanHistory = async (req: Request, res: Response) => {
+  // No tenant scope → no rows. This used to run the query with no tenant filter.
+  const tenant = scopedTenant(req);
+  if (!tenant) return denyUnscoped(res);
   try {
-    const { tenant } = req.query;
     let query = `
       SELECT 
         id, provider, repo_url as "repoUrl", repo_name as "repoName", branch,
@@ -902,11 +904,8 @@ export const getGitScanHistory = async (req: Request, res: Response) => {
         summary_text as "summaryText", tenant_name as "tenantName", created_at as "scannedAt"
       FROM git_scans
     `;
-    const params: any[] = [];
-    if (tenant && tenant !== 'all') {
-      params.push(tenant);
-      query += ` WHERE LOWER(COALESCE(tenant_name, '')) = LOWER($1) `;
-    }
+    const params: any[] = [tenant];
+    query += ` WHERE LOWER(COALESCE(tenant_name, '')) = LOWER($1) `;
     query += ` ORDER BY created_at DESC LIMIT 20`;
 
     const result = await pool.query(query, params);
@@ -917,7 +916,7 @@ export const getGitScanHistory = async (req: Request, res: Response) => {
     console.warn('DB read for git_scans failed, returning cached scans:', dbErr);
   }
 
-  const cacheTenant = String(req.query.tenant || req.user?.tenant || '').toLowerCase();
+  const cacheTenant = tenant.toLowerCase();
   const list = recentScansCache.filter(s => cacheTenant && String(s.tenantName || '').toLowerCase() === cacheTenant).map(s => ({
     id: s.id,
     provider: s.provider,

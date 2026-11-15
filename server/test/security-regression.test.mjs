@@ -511,3 +511,71 @@ test('TN3: the console resolves a workspace from the session, not from a per-ten
   const landing = read('ui/src/components/LandingPage.tsx');
   assert.ok(!/cleanEmail\.includes\('/.test(landing), 'LandingPage guesses a workspace from an email again');
 });
+
+// ---------------------------------------------------------------------------
+// ISO: no data crosses from one tenant to another.
+// ---------------------------------------------------------------------------
+test('ISO1: tenant-data reads have no unfiltered ("all tenants") variant', () => {
+  const ai = read('server/src/controllers/aiController.ts');
+  assert.ok(!/FROM assets'\s*\)/.test(ai), 'Copilot has an assets query with no tenant filter again');
+  assert.ok(!/FROM assets ORDER BY/.test(ai), 'Copilot report/deck query has a fleet-wide variant again');
+  assert.ok(!/whereTenant = scopeTenant \?/.test(ai), 'Copilot inventory filter is optional again');
+  for (const [file, fn] of [
+    ['server/src/controllers/pkiConnectorController.ts', 'getPkiConnectors'],
+    ['server/src/controllers/pkiConnectorController.ts', 'getPkiSyncedAssets'],
+    ['server/src/controllers/pqcProxyController.ts', 'getProxies'],
+    ['server/src/controllers/gitScanController.ts', 'getGitScanHistory'],
+    ['server/src/controllers/ciGateController.ts', 'getCIGateHistory'],
+    ['server/src/controllers/fleetController.ts', 'getFleetMachines'],
+    ['server/src/controllers/fleetController.ts', 'getFleetCBOM'],
+    ['server/src/controllers/fleetController.ts', 'getFleetDrift'],
+  ]) {
+    const src = read(file);
+    const at = src.indexOf(`export const ${fn} = `);
+    assert.ok(at >= 0, `${fn} not found`);
+    const next = src.indexOf('\nexport const ', at + 10);
+    const body = src.slice(at, next > 0 ? next : undefined);
+    assert.ok(/denyUnscoped\(res\)/.test(body), `${fn} no longer refuses a request with no tenant scope`);
+  }
+});
+
+test('ISO2: connector assets are removed by connector AND tenant, never by name alone', () => {
+  const pki = read('server/src/controllers/pkiConnectorController.ts');
+  assert.ok(!/FROM assets WHERE source (IN \([^)]*\)|= '[a-z_]+') AND \(source_ref = \$1 OR source_ref = \$2\)"/.test(pki),
+    'a connector asset query is scoped by name only again');
+  assert.ok(/CONNECTOR_ASSETS =[\s\S]{0,200}tenant_name[\s\S]{0,40}\$3/.test(pki), 'CONNECTOR_ASSETS lost its tenant filter');
+});
+
+test('ISO3: an enrollment token never takes its tenant from its own name', () => {
+  const fleet = read('server/src/controllers/fleetController.ts');
+  assert.ok(!/assignedTenant = name\.trim\(\)/.test(fleet), 'token creation falls back to the token name again');
+  assert.ok(!/tokenRow\.name \|\| ''\)\.trim\(\) \|\| 'DEFAULT_FLEET'/.test(fleet), 'ingest files a tenant-less token under its name again');
+  assert.ok(!/tenant_name \|\| owner\.rows\[0\]\.name/.test(fleet), 'token ownership falls back to the token name again');
+});
+
+test('ISO4: a tenant portal finds its client by name only, and licences by tenant only', () => {
+  const admin = read('server/src/controllers/adminController.ts');
+  const at = admin.indexOf('export const getTenantPortalData');
+  const body = admin.slice(admin.lastIndexOf('const aggregatePortalData', at));
+  assert.ok(!/display_name[^\n]*= \$1/.test(body), 'portal-data matches a client by display name again');
+  assert.ok(!/LOWER\(customer_id\) = \$1|LOWER\(admin_email\) = \$1/.test(body), 'portal-data matches a client by customer id / email again');
+  assert.ok(!/customer_id = \$2::text/.test(body), 'portal-data returns licences by customer id again');
+});
+
+test('ISO5: every tenant-creation path applies the tenant-name rules', () => {
+  const admin = read('server/src/controllers/adminController.ts');
+  for (const fn of ['deployInlineClient', 'createClient', 'onboardPartnerTenant', 'onboardUser']) {
+    const at = admin.indexOf(`export const ${fn} = `);
+    const body = admin.slice(at, admin.indexOf('\nexport const ', at + 10));
+    assert.ok(/tenantNameProblem\(/.test(body), `${fn} creates a tenant without the name rules`);
+  }
+  const billing = read('server/src/controllers/billingController.ts');
+  assert.ok((billing.match(/isReservedTenantName\(/g) || []).length >= 2, 'checkout no longer refuses reserved tenant names');
+  assert.ok(!/Math\.random\(\) \* 9000/.test(admin + billing), 'customer ids are drawn without a uniqueness check again');
+});
+
+test('ISO6: Copilot chat history in the browser belongs to the signed-in tenant + user', () => {
+  const portal = read('ui/src/components/TenantPortal.tsx');
+  assert.ok(!/copilotStorageKey = `quarkshield_copilot_sessions_\$\{cleanSlug\}`/.test(portal), 'Copilot history is keyed by workspace only again');
+  assert.ok(/copilotLoadedFor !== copilotStorageKey\) return;/.test(portal), 'Copilot history can be saved under another owner again');
+});
