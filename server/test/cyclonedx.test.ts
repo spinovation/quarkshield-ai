@@ -122,8 +122,10 @@ test('algorithm approval is never presented as module validation', () => {
   for (const algorithm of ['ML-KEM-768', 'AES-256-GCM', 'RSA']) {
     const c = cbomComponent({ id: 'a', name: 'a', algorithm, keySize: 2048, assetKind: 'algorithm' });
     assert.equal(prop(c, 'quarkshield:cmvpStatus'), 'not-assessed');
-    assert.equal(c.properties.some((p: any) => /cmvpCert|complianceVerdict/i.test(p.name)), false);
+    assert.equal(c.properties.some((p: any) => /cmvpCert/i.test(p.name)), false);
     assert.equal(c.properties.some((p: any) => /validated|compliant/i.test(String(p.value)) && /fips|cmvp/i.test(p.name)), false);
+    // The verdict exists (Stage 5) but with no module observed it can never read compliant.
+    assert.ok(['approved_unvalidated', 'noncompliant', 'not_determined'].includes(String(prop(c, 'quarkshield:complianceVerdict'))));
   }
 });
 

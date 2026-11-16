@@ -51,6 +51,16 @@ type FipsProviderIdentity struct {
 	Path    string `json:"path,omitempty"`
 }
 
+// ModeFact is one host fact that bears on whether a module is running in its FIPS-approved
+// mode (CMVP/FIPS Stage 5, prerequisite P-b): a name, the value read, and where it was read.
+// The agent reports facts only. What they add up to is decided on the server, against the
+// rule each module's Security Policy sets, so a rule can be corrected without an agent rebuild.
+type ModeFact struct {
+	Name   string `json:"name"`
+	Value  string `json:"value"`
+	Source string `json:"source"`
+}
+
 // CryptoModule is one observed module. Ref is unique within a host report and is what a
 // finding points at (AuditResult.CryptoModule).
 type CryptoModule struct {
@@ -60,13 +70,18 @@ type CryptoModule struct {
 	Version      string                `json:"version,omitempty"`
 	FipsProvider *FipsProviderIdentity `json:"fipsProvider,omitempty"`
 	Evidence     string                `json:"evidence"`
-	binPath      string
+	// Facts about this module's own configuration (for OpenSSL: which providers the default
+	// library context has active).
+	ModeFacts []ModeFact `json:"modeFacts,omitempty"`
+	binPath   string
 }
 
 // HostModuleReport is what travels in fleet telemetry.
 type HostModuleReport struct {
 	Environment OperatingEnvironment `json:"environment"`
 	Modules     []CryptoModule       `json:"modules"`
+	// Host-wide FIPS-mode facts (kernel flag, system crypto policy, Windows FIPS policy).
+	ModeFacts []ModeFact `json:"modeFacts,omitempty"`
 }
 
 const moduleProbeTimeout = 8 * time.Second
@@ -146,6 +161,29 @@ func parseProviderIdentity(out, provider string) (name, version string, ok bool)
 	return name, version, ok
 }
 
+// parseActiveProviders returns the ids of the providers `openssl list -providers` shows
+// with "status: active", in the order listed.
+func parseActiveProviders(out string) []string {
+	active := []string{}
+	current := ""
+	for _, line := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || trimmed == "Providers:" {
+			continue
+		}
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		if indent <= 2 && !strings.Contains(trimmed, ":") {
+			current = trimmed
+			continue
+		}
+		if current != "" && trimmed == "status: active" {
+			active = append(active, current)
+			current = ""
+		}
+	}
+	return active
+}
+
 var reSSHVersion = regexp.MustCompile(`(OpenSSH[_A-Za-z]*_[0-9][0-9A-Za-z.]*)[^,]*,\s*(OpenSSL|LibreSSL)\s+([0-9][0-9A-Za-z.\-+~]*)`)
 
 // parseSSHVersion reads `ssh -V`, which prints the crypto library OpenSSH is running on:
@@ -162,11 +200,13 @@ func parseSSHVersion(out string) (product, key, version string) {
 }
 
 // parseWindowsProbe splits the single line the Windows identity probe prints:
-// ProductName|DisplayVersion|major.minor.build.ubr|file version of bcryptprimitives.dll.
+// ProductName|DisplayVersion|major.minor.build.ubr|file version of bcryptprimitives.dll|
+// FipsAlgorithmPolicy Enabled|FipsAlgorithmPolicy MDMEnabled.
 // A version with an empty component (a registry value that was not there) is dropped.
+// The two policy values are "0", "1" or "" (value absent); see parseWindowsFipsPolicy.
 func parseWindowsProbe(out string) (name, display, version, fileVersion string) {
 	parts := strings.Split(firstLine(out), "|")
-	if len(parts) != 4 {
+	if len(parts) != 6 {
 		return "", "", "", ""
 	}
 	for i := range parts {
@@ -176,6 +216,23 @@ func parseWindowsProbe(out string) (name, display, version, fileVersion string) 
 		version = parts[2]
 	}
 	return parts[0], parts[1], version, parts[3]
+}
+
+// parseWindowsFipsPolicy reads the two FIPS policy registry values from the probe line.
+// Anything that is not a plain number is reported as absent, never as on or off.
+func parseWindowsFipsPolicy(out string) (enabled, mdmEnabled string) {
+	parts := strings.Split(firstLine(out), "|")
+	if len(parts) != 6 {
+		return "", ""
+	}
+	num := func(s string) string {
+		s = strings.TrimSpace(s)
+		if regexp.MustCompile(`^\d+$`).MatchString(s) {
+			return s
+		}
+		return ""
+	}
+	return num(parts[4]), num(parts[5])
 }
 
 // parseOSRelease reads /etc/os-release.
@@ -218,6 +275,16 @@ func detectOpenSSLAt(binPath string) (CryptoModule, bool) {
 	}
 	if key == ModuleOpenSSL && strings.HasPrefix(version, "3.") {
 		m.FipsProvider = detectFipsProvider(binPath)
+		// With no -provider flag this lists what the DEFAULT library context loads from the
+		// system configuration: the providers an ordinary application gets.
+		if out, err := runProbe(binPath, "list", "-providers"); err == nil {
+			if active := parseActiveProviders(out); len(active) > 0 {
+				m.ModeFacts = append(m.ModeFacts, ModeFact{
+					Name: "openssl.default_providers", Value: strings.Join(active, ","),
+					Source: binPath + " list -providers",
+				})
+			}
+		}
 	}
 	return m, true
 }
@@ -287,6 +354,7 @@ func HostCryptoModules() HostModuleReport {
 	hostModulesOnce.Do(func() {
 		hostModules = HostModuleReport{Environment: detectOperatingEnvironment()}
 		hostModules.Modules = dedupeModules(detectPlatformModules(hostModules.Environment))
+		hostModules.ModeFacts = detectPlatformModeFacts()
 	})
 	return hostModules
 }
@@ -406,7 +474,7 @@ func linkFindingsToModules(findings []AuditResult, report HostModuleReport, ssh 
 			}
 		}
 	}
-	return out, HostModuleReport{Environment: report.Environment, Modules: mods}
+	return out, HostModuleReport{Environment: report.Environment, Modules: mods, ModeFacts: report.ModeFacts}
 }
 
 // withModuleLinks is the production wiring of linkFindingsToModules.

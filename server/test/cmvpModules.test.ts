@@ -163,11 +163,13 @@ test('CBOM: an asset with no recorded module is unchanged from Stage 2', () => {
   assert.equal(c.properties.some((p: any) => /^quarkshield:cmvp(?!Status)/.test(p.name)), false);
 });
 
-test('the module axis never states a compliance verdict, and never the word validated/compliant as a status', () => {
+test('the module status is never the word validated/compliant, and the verdict (Stage 5) follows the module status', () => {
   for (const key of Object.keys(CMVP_MODULES)) {
     const c = cbomComponent({ id: 'v', name: 'v', algorithm: 'AES-256', assetKind: 'symmetric_key', cryptoModule: key });
-    assert.equal(c.properties.some((p: any) => /complianceVerdict/i.test(p.name)), false);
-    assert.equal(/^(validated|compliant)$/i.test(String(prop(c, 'quarkshield:cmvpStatus'))), false);
+    const status = String(prop(c, 'quarkshield:cmvpStatus'));
+    assert.equal(/^(validated|compliant)$/i.test(status), false);
+    // Compliant only where the provider publishes a current certificate for the module.
+    assert.equal(prop(c, 'quarkshield:complianceVerdict') === 'compliant', status === 'active', key);
   }
 });
 

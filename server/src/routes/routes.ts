@@ -7,6 +7,7 @@ import {
   listRiskAssets, getAssetRiskDetail, updateRemediation, overrideAssetContext, rebuildThreatGraph,
   listRebuildRuns, getThreatGraphCatalog, scheduleRebuild, getThreatIntelStatus, syncThreatIntelNow,
 } from '../controllers/threatGraphController';
+import { downloadFipsAttestation } from '../controllers/fipsAttestationController';
 import { exportExecutiveReport, getReportStakeholders, saveReportStakeholders, sendRoadmapReport } from '../controllers/reportController';
 import { twoFactorStatusSafe as twoFactorStatus, twoFactorSetupSafe as twoFactorSetup, twoFactorVerifySafe as twoFactorVerify, twoFactorDisableSafe as twoFactorDisable } from '../controllers/twoFactorController';
 import {
@@ -392,6 +393,8 @@ router.put('/threat-graph/assets/:id/context', ...tg, overrideAssetContext);
 router.patch('/threat-graph/remediations/:id', ...tg, updateRemediation);
 router.post('/threat-graph/rebuild', ...tg, rebuildThreatGraph);
 router.get('/threat-graph/runs', ...tg, listRebuildRuns);
+// FIPS / CMVP compliance evidence export (CMVP/FIPS Stage 5) — same gate as the Risk Graph.
+router.get('/compliance/fips-attestation.csv', ...tg, downloadFipsAttestation);
 router.get('/threat-intel/status', requireAuth, getThreatIntelStatus);
 router.post('/threat-intel/sync', requirePlatformAdmin, syncThreatIntelNow);
 

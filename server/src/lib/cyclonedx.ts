@@ -3,6 +3,7 @@ import { fipsAlgorithmStatus, nistSecurityCategory, FIPS_TABLE_VERSION } from '.
 import { isClassicalAsymmetric } from './threatGraph/cryptoPurpose';
 import { nistCertificateUrl } from './cmvpModules';
 import { resolveAssetModule, isHostResolution } from './hostCryptoModules';
+import { complianceVerdict } from './complianceVerdict';
 
 /**
  * CycloneDX 1.6 cryptographic-asset helpers (DEF-44 / DEF-45).
@@ -170,10 +171,14 @@ export const cbomComponent = (i: CbomAssetInput): any => {
     host?.candidate ? { name: 'quarkshield:cmvpCandidateUrl', value: nistCertificateUrl(host.candidate.certId) } : null,
     host?.candidate ? { name: 'quarkshield:cmvpCandidateMatch', value: host.candidate.match } : null,
     host?.candidate ? { name: 'quarkshield:cmvpCandidateCertificateStatus', value: host.candidate.certStatus } : null,
-    host ? { name: 'quarkshield:cmvpFipsMode', value: 'not-checked' } : null,
+    host ? { name: 'quarkshield:cmvpFipsMode', value: host.fipsMode.state } : null,
+    host ? { name: 'quarkshield:cmvpFipsModeEvidence', value: host.fipsMode.evidence } : null,
     host?.note ? { name: 'quarkshield:cmvpNote', value: host.note } : null,
     cmvp.moduleKey && i.cryptoModuleEvidence ? { name: 'quarkshield:cmvpEvidence', value: String(i.cryptoModuleEvidence) } : null,
     cmvp.moduleKey ? { name: 'quarkshield:cmvpMapVersion', value: cmvp.mapVersion } : null,
+    // Algorithm axis x module axis (Stage 5, one fixed table). `compliant` is reachable only
+    // through a module whose current certificate was matched; see complianceVerdict.ts.
+    { name: 'quarkshield:complianceVerdict', value: complianceVerdict(fips.status, cmvp.status) },
     i.riskLevel ? { name: 'quarkshield:riskLevel', value: String(i.riskLevel) } : null,
     i.recommendation ? { name: 'quarkshield:recommendation', value: String(i.recommendation) } : null,
     i.explainer ? { name: 'quarkshield:explainer', value: String(i.explainer) } : null,

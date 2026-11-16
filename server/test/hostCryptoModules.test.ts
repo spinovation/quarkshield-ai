@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {
   HOST_VALIDATIONS, sanitizeHostModuleReport, moduleDetailFor, resolveHostModule, resolveAssetModule,
   isHostResolution, moduleForConsole, hostModulesForConsole, HostModuleDetail,
+  MODE_RULES,
 } from '../src/lib/hostCryptoModules';
+import { complianceVerdict, VERDICT_ORDER } from '../src/lib/complianceVerdict';
+import { assessAsset, buildAttestationCsv } from '../src/lib/fipsAttestation';
 import { CMVP_MAP_VERSION } from '../src/lib/cmvpModules';
 import { cbomComponent } from '../src/lib/cyclonedx';
 
@@ -15,10 +18,10 @@ const RHEL9 = 'Red Hat Enterprise Linux 9 - OpenSSL FIPS Provider';
 
 // ---- The rule that matters most ---------------------------------------------
 
-test('a host module is never active, historical or revoked, and never carries certIds', () => {
+test('from identity alone a host module is never active, historical or revoked, and carries no certIds', () => {
   const details: HostModuleDetail[] = [
     openssl('3.5.9', { present: 'yes', name: RHEL9, version: '3.0.7-cda111b5812c30d4' }, env('rhel', '9.9')),
-    { key: 'windows-cng', name: 'CNG', version: '10.0.22621.30001', environment: env('windows', '10.0.22621.30001') },
+    { key: 'windows-cng', name: 'CNG', version: '10.0.22621.4317', environment: env('windows', '10.0.22621.4317') },
     { key: 'apple-corecrypto', name: 'Apple corecrypto', version: '15.5', environment: env('macos', '15.5', 'arm64') },
     { key: 'libressl', name: 'LibreSSL', version: '3.3.6', environment: env('macos', '15.5', 'arm64') },
     { key: 'something-new', name: 'X', environment: env('linux', '1') },
@@ -29,7 +32,8 @@ test('a host module is never active, historical or revoked, and never carries ce
     assert.deepEqual(r.certIds, [], `${d.key} must not carry certIds`);
     assert.equal(r.basis, 'host-observed');
     assert.equal(r.mapVersion, CMVP_MAP_VERSION);
-    if (r.candidate) assert.match(String(r.note), /FIPS-approved mode was not checked/);
+    assert.notEqual(r.fipsMode.state, 'confirmed', `${d.key}: no host fact was reported`);
+    if (r.candidate) assert.match(String(r.note), /^Candidate only\./);
   }
 });
 
@@ -244,10 +248,10 @@ test('CBOM: a host module exports identity and a candidate, not a certificate or
   assert.equal(prop(c, 'quarkshield:cmvpModuleVersion'), '3.0.7-cda111b5812c30d4');
   assert.equal(prop(c, 'quarkshield:cmvpCandidateId'), '5573');
   assert.equal(prop(c, 'quarkshield:cmvpCandidateMatch'), 'exact');
-  assert.equal(prop(c, 'quarkshield:cmvpFipsMode'), 'not-checked');
+  assert.equal(prop(c, 'quarkshield:cmvpFipsMode'), 'not-determined');
+  assert.equal(prop(c, 'quarkshield:complianceVerdict'), 'not_determined', 'an unclassifiable algorithm label is not determined');
   assert.equal(prop(c, 'quarkshield:cmvpCertId'), undefined, 'cmvpCertId is reserved for provider-reported certificates');
   assert.equal(prop(c, 'quarkshield:cmvpFipsLevel'), undefined);
-  assert.equal(c.properties.some((p: any) => /complianceVerdict/i.test(p.name)), false);
   assert.equal(c.properties.some((p: any) => /^quarkshield:cmvp(Status|Basis)$/.test(p.name) && /validated|compliant/i.test(p.value)), false);
 });
 
@@ -261,4 +265,173 @@ test('CBOM: connector and plain assets are unchanged by Stage 4', () => {
   const plain = cbomComponent({ id: 'p', name: 'CN=web', algorithm: 'RSA', keySize: 2048, assetKind: 'certificate' });
   assert.equal(prop(plain, 'quarkshield:cmvpStatus'), 'not-assessed');
   assert.equal(plain.properties.some((p: any) => /cmvp(Module|Candidate|Basis)/.test(p.name)), false);
+});
+
+// ---- Stage 5: the FIPS-mode gate --------------------------------------------
+
+const FIPS_ON = [
+  { name: 'linux.kernel.fips_enabled', value: '1', source: '/proc/sys/crypto/fips_enabled' },
+  { name: 'linux.crypto_policy.current', value: 'FIPS', source: '/etc/crypto-policies/state/current' },
+];
+const providers = (v: string) => [{ name: 'openssl.default_providers', value: v, source: '/usr/bin/openssl list -providers' }];
+const rhel = (over: Partial<HostModuleDetail> = {}, e = env('rhel', '9.4')): HostModuleDetail => ({
+  ...openssl('3.0.7', { present: 'yes', name: RHEL9, version: '3.0.7-cda111b5812c30d4' }, e),
+  hostModeFacts: FIPS_ON, modeFacts: providers('base,fips'), ...over,
+});
+
+test('gate: exact identity + system FIPS mode + only the fips provider active -> the certificate is reported', () => {
+  const r = resolveHostModule(rhel());
+  assert.equal(r.status, 'active');
+  assert.deepEqual(r.certIds, ['5573']);
+  assert.equal(r.standard, 'FIPS 140-3');
+  assert.equal(r.sunsetDate, '2029-10-28');
+  assert.equal(r.fipsMode.state, 'confirmed');
+  assert.match(r.fipsMode.evidence, /fips_enabled = 1/);
+  assert.match(String(r.note), /did not test the module/);
+  // A superseded build in the same state reports its certificate as NIST lists it: historical.
+  const old = resolveHostModule(rhel({ fipsProvider: { present: 'yes', name: RHEL9, version: '3.0.7-395c1a240fbfffd8' } }));
+  assert.equal(old.status, 'historical');
+  assert.deepEqual(old.certIds, ['4857']);
+});
+
+test('gate: any missing or failing fact keeps the module unverified', () => {
+  const cases: [string, Partial<HostModuleDetail>, 'off' | 'not-determined'][] = [
+    ['kernel flag off', { hostModeFacts: [{ name: 'linux.kernel.fips_enabled', value: '0' }, FIPS_ON[1]] }, 'off'],
+    ['kernel flag not reported', { hostModeFacts: [FIPS_ON[1]] }, 'not-determined'],
+    ['no host facts at all', { hostModeFacts: undefined }, 'not-determined'],
+    ['crypto policy DEFAULT', { hostModeFacts: [FIPS_ON[0], { name: 'linux.crypto_policy.current', value: 'DEFAULT' }] }, 'off'],
+    ['crypto policy not reported', { hostModeFacts: [FIPS_ON[0]] }, 'not-determined'],
+    ['fips provider not active', { modeFacts: providers('default') }, 'off'],
+    ['default provider active beside fips', { modeFacts: providers('default,fips') }, 'not-determined'],
+    ['providers not reported', { modeFacts: undefined }, 'not-determined'],
+    ['odd flag value', { hostModeFacts: [{ name: 'linux.kernel.fips_enabled', value: '1 ' + 'x' }, FIPS_ON[1]] }, 'off'],
+  ];
+  for (const [label, over, state] of cases) {
+    const r = resolveHostModule(rhel(over));
+    assert.equal(r.status, 'unverified', label);
+    assert.deepEqual(r.certIds, [], label);
+    assert.equal(r.fipsMode.state, state, label);
+    assert.equal(r.candidate?.certId, '5573', `${label}: the candidate is still shown`);
+  }
+});
+
+test('gate: FIPS mode on does not promote a match that is not exact', () => {
+  // Same provider build on Rocky, or on an architecture the certificate was not tested on.
+  for (const e of [env('rocky', '9.4'), env('rhel', '9.4', 'arm64')]) {
+    const r = resolveHostModule(rhel({}, e));
+    assert.equal(r.fipsMode.state, 'confirmed');
+    assert.equal(r.status, 'unverified');
+    assert.deepEqual(r.certIds, []);
+    assert.match(String(r.note), /not exact/);
+  }
+});
+
+test('gate: Ubuntu needs the kernel flag and the provider, not the RHEL crypto policy', () => {
+  const ub = (hostModeFacts: any, modeFacts: any) => resolveHostModule({
+    ...openssl('3.0.2', { present: 'yes', name: 'Ubuntu 22.04 OpenSSL Cryptographic Module', version: '3.0.5-0ubuntu0.1+Fips2.1' }, env('ubuntu', '22.04')),
+    hostModeFacts, modeFacts,
+  });
+  assert.equal(ub([FIPS_ON[0]], providers('fips,base')).status, 'active');
+  assert.equal(ub([{ name: 'linux.kernel.fips_enabled', value: '0' }], providers('fips')).status, 'unverified');
+});
+
+test('gate: upstream OpenSSL and Apple have no rule and are never confirmed', () => {
+  const up = resolveHostModule({ ...openssl('3.1.2', { present: 'yes', name: 'OpenSSL FIPS Provider', version: '3.1.2' }, env('debian', '11')), hostModeFacts: FIPS_ON, modeFacts: providers('fips') });
+  assert.equal(up.candidate?.match, 'exact');
+  assert.equal(up.status, 'unverified');
+  assert.equal(up.fipsMode.state, 'not-determined');
+  const mac = resolveHostModule({ key: 'apple-corecrypto', name: 'Apple corecrypto', version: '15.5', environment: env('macos', '15.5', 'arm64') });
+  assert.equal(mac.status, 'unverified');
+});
+
+test('gate: Windows is confirmed only on the tested build; the legacy policy matters only for #4825', () => {
+  assert.equal(resolveHostModule(cng('10.0.22621.30001')).status, 'active');
+  assert.deepEqual(resolveHostModule(cng('10.0.22621.30001')).certIds, ['5410']);
+  // A patched build of the same release is not the validated binary.
+  const patched = resolveHostModule({ ...cng('10.0.22621.4317'), hostModeFacts: [{ name: 'windows.fips_policy.enabled', value: '1' }] });
+  assert.equal(patched.status, 'unverified');
+  // #4825 (Windows 11 21H2) needs the FIPS policy; its listed version has no update revision,
+  // so a real host is a "release" match and is not promoted even with the policy on.
+  const w21 = resolveHostModule({ ...cng('10.0.22000.3260'), hostModeFacts: [{ name: 'windows.fips_policy.enabled', value: '1' }] });
+  assert.equal(w21.fipsMode.state, 'confirmed');
+  assert.equal(w21.status, 'unverified');
+  assert.equal(resolveHostModule(cng('10.0.22000.3260')).fipsMode.state, 'not-determined');
+});
+
+test('every mode rule named by a row exists, and rules never throw on empty input', () => {
+  for (const v of HOST_VALIDATIONS) if (v.modeRule) assert.equal(typeof MODE_RULES[v.modeRule], 'function', v.certId);
+  for (const rule of Object.values(MODE_RULES)) assert.ok(rule({ key: 'x', name: 'x', environment: { id: 'x' } }).evidence);
+});
+
+test('mode facts are sanitised and travel with the per-asset record', () => {
+  const report = sanitizeHostModuleReport({
+    environment: env('rhel', '9.4'),
+    modeFacts: [...FIPS_ON, { name: 'Bad Name', value: '1' }, { name: 'ok.name', value: 7 }, { name: 'long', value: 'v'.repeat(500) }, null],
+    modules: [{ ref: 'openssl:3.0.7', key: 'openssl', name: 'OpenSSL', version: '3.0.7', modeFacts: providers('base,fips') }],
+  })!;
+  assert.deepEqual(report.modeFacts!.map(f => f.name), ['linux.kernel.fips_enabled', 'linux.crypto_policy.current', 'long']);
+  assert.equal(report.modeFacts![2].value.length, 120);
+  const d = moduleDetailFor(report, 'openssl:3.0.7')!;
+  assert.equal(d.hostModeFacts!.length, 3);
+  assert.equal(d.modeFacts![0].value, 'base,fips');
+});
+
+// ---- Stage 5: verdict -------------------------------------------------------
+
+test('verdict table (spec 4.2)', () => {
+  const rows: [string, string, string][] = [
+    ['approved', 'active', 'compliant'], ['pq_approved', 'active', 'compliant'], ['acceptable', 'active', 'compliant_until'],
+    ['approved', 'historical', 'validated_sunsetting'], ['acceptable', 'historical', 'validated_sunsetting'],
+    ['approved', 'revoked', 'validated_revoked'],
+    ['approved', 'none', 'approved_unvalidated'], ['approved', 'unverified', 'approved_unvalidated'], ['pq_approved', 'not-assessed', 'approved_unvalidated'],
+    ['restricted', 'active', 'restricted_use'], ['disallowed', 'active', 'noncompliant'], ['non_fips', 'unverified', 'noncompliant'],
+    ['unknown', 'active', 'not_determined'], ['not_applicable', 'active', 'not_applicable'],
+  ];
+  for (const [f, c, want] of rows) assert.equal(complianceVerdict(f, c), want, `${f} x ${c}`);
+});
+
+test('"compliant" is unreachable without an active module status', () => {
+  const fips = ['pq_approved', 'approved', 'acceptable', 'restricted', 'disallowed', 'non_fips', 'not_applicable', 'unknown', undefined, 'garbage'];
+  const cmvp = ['historical', 'revoked', 'none', 'unverified', 'not-assessed', undefined, '', 'ACTIVE', 'garbage'];
+  for (const f of fips) for (const c of cmvp) {
+    const v = complianceVerdict(f as any, c as any);
+    assert.ok(VERDICT_ORDER.includes(v));
+    assert.ok(v !== 'compliant' && v !== 'compliant_until', `${f} x ${c} -> ${v}`);
+  }
+});
+
+test('assessAsset: host asset through the gate is compliant; the same asset without it is not', () => {
+  const base = { id: 'a', name: 'key exchange', type: 'algorithm', algorithm: 'ML-KEM-768', purpose: 'key_establishment', crypto_module: 'openssl' };
+  const on = assessAsset({ ...base, crypto_module_detail: rhel() });
+  assert.equal(on.verdict, 'compliant');
+  assert.deepEqual(on.certIds, ['5573']);
+  assert.equal(on.fipsMode, 'confirmed');
+  const off = assessAsset({ ...base, crypto_module_detail: rhel({ hostModeFacts: undefined }) });
+  assert.equal(off.verdict, 'approved_unvalidated');
+  assert.equal(off.candidateCertId, '5573');
+  assert.equal(assessAsset({ ...base, crypto_module: null }).verdict, 'approved_unvalidated');
+  assert.equal(assessAsset({ ...base, algorithm: 'MD5', crypto_module_detail: rhel() }).verdict, 'noncompliant', 'a validated module does not rescue a disallowed algorithm');
+  assert.equal(assessAsset({ ...base, crypto_module: 'aws-kms-hsm' }).verdict, 'compliant');
+});
+
+test('evidence CSV: stamped, one row per asset, formula cells neutralised', () => {
+  const out = buildAttestationCsv('Acme, Inc.', [
+    { id: '1', name: '=HYPERLINK("http://x","y")', type: 'algorithm', algorithm: 'ML-KEM-768', purpose: 'key_establishment', crypto_module: 'openssl', crypto_module_detail: rhel(), hostname: 'web01' },
+    { id: '2', name: 'CN=web', type: 'certificate', algorithm: 'RSA', key_size: 1024, hostname: '+cmd' },
+  ], new Date('2026-11-16T00:00:00Z'));
+  const lines = out.csv.trim().split('\r\n');
+  assert.match(out.csv, /# FIPS algorithm table/);
+  assert.match(out.csv, /# CMVP module map,2026-11-15/);
+  assert.match(out.csv, /not a certification/);
+  assert.match(out.csv, /"# Tenant","Acme, Inc\."|# Tenant,"Acme, Inc\."/);
+  const header = lines.findIndex(l => l.startsWith('Asset,'));
+  assert.equal(lines.length - header - 1, 2);
+  assert.ok(lines[header + 1].startsWith(`"'=HYPERLINK(""http://x"",""y"")"`), lines[header + 1]);
+  assert.match(lines[header + 1], /#5573/);
+  assert.match(lines[header + 1], /,compliant,/);
+  assert.match(lines[header + 2], /'\+cmd/);
+  assert.match(lines[header + 2], /,noncompliant,/);
+  assert.equal(out.counts.compliant, 1);
+  assert.equal(out.counts.noncompliant, 1);
+  assert.equal(out.total, 2);
 });
