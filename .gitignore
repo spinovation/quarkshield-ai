@@ -59,3 +59,7 @@ ui/public/downloads/pqc-scanner*
 # Marketing Collateral & Strategy (Do Not Sync to GitHub)
 marketing/
 **/marketing/
+
+# Signed release manifest (generated per release by build_all_and_sign.sh)
+agent-manifest.json
+agent-manifest.json.sig

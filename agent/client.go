@@ -102,7 +102,7 @@ func SaveEnrollmentConfig(cfg EnrollmentConfig) error {
 // AgentReleaseVersion is the single source of truth for the agent/GUI version.
 // It is shown in the Post-Quantum Guard header chip (served via /api/status) and
 // reported to QuarkShield Central in fleet telemetry (FleetPayload.AgentVersion).
-const AgentReleaseVersion = "2.3.1"
+const AgentReleaseVersion = "2.3.2"
 
 // FleetPayload represents the JSON body sent to QuarkShield.AI /api/scan/agent/ingest
 type FleetPayload struct {
@@ -310,6 +310,12 @@ type AgentCommand struct {
 // fields a command type needs are populated; unknown fields are ignored.
 type AgentCommandArgs struct {
 	Targets []string `json:"targets,omitempty"` // probe: host:port list
+
+	// upgrade: the signed release manifest, exactly as published, plus its
+	// Ed25519 signature. Nothing here is trusted until verified (updater.go).
+	Manifest  string `json:"manifest,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Force     bool   `json:"force,omitempty"` // allow re-installing the same version
 }
 
 // FetchAgentCommands polls the server for pending on-demand commands for this
@@ -329,6 +335,9 @@ func FetchAgentCommands(serverURL string, token string) ([]AgentCommand, error) 
 		"token":         token,
 		"hardware_uuid": GetHardwareUUID(),
 		"hostname":      hostname,
+		// Lets the console see a completed push-upgrade at the next poll instead of
+		// waiting for the next full telemetry sync.
+		"agent_version": AgentReleaseVersion,
 	}
 	payload, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", cleanServer+"/api/scan/agent/commands", bytes.NewBuffer(payload))
@@ -352,5 +361,8 @@ func FetchAgentCommands(serverURL string, token string) ([]AgentCommand, error) 
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&parsed); err != nil {
 		return nil, err
 	}
+	// An authenticated round trip with the server succeeded: if this process is
+	// the build a pending push-upgrade was waiting for, that confirms it.
+	ConfirmUpgradeIfPending()
 	return parsed.Commands, nil
 }

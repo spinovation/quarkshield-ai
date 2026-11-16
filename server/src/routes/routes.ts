@@ -23,6 +23,8 @@ import {
   ingestTelemetry,
   enqueuePullCommand,
   enqueueBulkPullCommand,
+  enqueueUpgradeCommand,
+  enqueueBulkUpgradeCommand,
   setMachineGroup,
   listFleetGroups,
   createFleetGroup,
@@ -220,6 +222,10 @@ router.get('/fleet/machines', requireAuth, requireTenantAccess, getFleetMachines
 router.delete('/fleet/machines/:id', requireAuth, requireTenantAccess, deleteFleetMachine);
 router.post('/fleet/machines/:machineId/pull', requireAuth, requireTenantAccess, enqueuePullCommand);
 router.post('/fleet/pull-bulk', requireAuth, requireTenantAccess, enqueueBulkPullCommand);
+// Push-upgrade: queue a verified remote agent upgrade (tenant admins only). The
+// agent independently verifies the signed release manifest before applying it.
+router.post('/fleet/machines/:machineId/upgrade', requireAuth, requireTenantAccess, requireTenantAdmin, enqueueUpgradeCommand);
+router.post('/fleet/upgrade-bulk', requireAuth, requireTenantAccess, requireTenantAdmin, enqueueBulkUpgradeCommand);
 // Fleet Probe — active TLS endpoint probing. Admin-only (requireTenantAdmin) on top
 // of tenant scoping, since it drives outbound connections across the fleet (§5).
 router.post('/fleet/machines/:machineId/probe', requireAuth, requireTenantAccess, requireTenantAdmin, enqueueProbeCommand);

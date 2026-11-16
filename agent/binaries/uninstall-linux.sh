@@ -17,6 +17,7 @@ fi
 
 echo "Removing binaries..."
 $SUDO rm -f /usr/local/bin/quarkshield-scanner /usr/local/bin/pqc-scanner "$HOME/.local/bin/quarkshield-scanner" 2>/dev/null || true
+$SUDO rm -rf /opt/quarkshield 2>/dev/null || true
 
 echo "Removing desktop shortcuts..."
 rm -f "$HOME/.local/share/applications/quarkshield.desktop" "$HOME/Desktop/quarkshield.desktop" 2>/dev/null || true

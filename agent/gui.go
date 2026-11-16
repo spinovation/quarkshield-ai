@@ -981,10 +981,14 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 	fmt.Println("    Opening your default web browser now...")
 	fmt.Println("    (Press Ctrl+C in this console or click Exit to quit)")
 	// Launch default web browser
-	go func() {
-		time.Sleep(350 * time.Millisecond)
-		openBrowser(serverURL)
-	}()
+	// (Skipped when the app was restarted by a push-upgrade: the user's existing
+	// tab simply reconnects.)
+	if os.Getenv(suppressBrowserEnv) == "" {
+		go func() {
+			time.Sleep(350 * time.Millisecond)
+			openBrowser(serverURL)
+		}()
+	}
 
 	// Alias listener on port 41723 to ensure any references redirect to the active port
 	if port != 41723 {
@@ -1031,6 +1035,12 @@ func StartGUI(preferredPort int, defaultServer string, defaultToken string) erro
 						forceSync = true
 					case "probe":
 						probeTargets = append(probeTargets, c.Args.Targets...)
+					case "upgrade":
+						// Verified download → swap → restart (updater.go). On success the
+						// app restarts into the new build without opening a new browser tab.
+						if err := PerformUpgrade(cfg.ServerURL, c.Args); err != nil {
+							fmt.Printf("❌ Upgrade not applied: %v\n", err)
+						}
 					}
 				}
 			}
