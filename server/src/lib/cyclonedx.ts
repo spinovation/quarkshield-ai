@@ -1,7 +1,8 @@
 import crypto from 'crypto';
 import { fipsAlgorithmStatus, nistSecurityCategory, FIPS_TABLE_VERSION } from './fipsAlgorithmStatus';
 import { isClassicalAsymmetric } from './threatGraph/cryptoPurpose';
-import { resolveCmvpModule, nistCertificateUrl } from './cmvpModules';
+import { nistCertificateUrl } from './cmvpModules';
+import { resolveAssetModule, isHostResolution } from './hostCryptoModules';
 
 /**
  * CycloneDX 1.6 cryptographic-asset helpers (DEF-44 / DEF-45).
@@ -34,6 +35,7 @@ export interface CbomAssetInput {
   purpose?: string | null;  // assets.purpose, when recorded — sharpens the FIPS verdict
   cryptoModule?: string | null;          // assets.crypto_module — module a connector's API reported (Stage 3)
   cryptoModuleEvidence?: string | null;  // the API fact it was derived from
+  cryptoModuleDetail?: unknown;          // assets.crypto_module_detail — host module identity the agent reported (Stage 4)
   isVulnerable?: boolean;
   assetKind?: string;      // certificate | ssh_key | private_key | key | algorithm | ...
   status?: string;
@@ -100,7 +102,8 @@ export const cbomComponent = (i: CbomAssetInput): any => {
   const cryptoProperties: any = { assetType };
   // undefined is dropped by JSON.stringify, so an unknown level is absent from the export.
   const level = quantumSecurityLevel(i);
-  const cmvp = resolveCmvpModule(i.cryptoModule);
+  const cmvp = resolveAssetModule(i.cryptoModule, i.cryptoModuleDetail);
+  const host = isHostResolution(cmvp) ? cmvp : undefined;
   const fips = fipsAlgorithmStatus({
     algorithm: i.algorithm || '', key_size: i.keySize, hash_algorithm: i.hashAlgorithm,
     purpose: i.purpose, type: i.assetKind,
@@ -158,7 +161,17 @@ export const cbomComponent = (i: CbomAssetInput): any => {
     cmvp.certIds.length ? { name: 'quarkshield:cmvpCertUrl', value: cmvp.certIds.map(nistCertificateUrl).join(' ') } : null,
     cmvp.certIds.length && cmvp.standard ? { name: 'quarkshield:cmvpFipsLevel', value: `${cmvp.standard}${cmvp.level ? ` Level ${cmvp.level}` : ''}` } : null,
     cmvp.certIds.length && cmvp.sunsetDate ? { name: 'quarkshield:cmvpSunsetDate', value: cmvp.sunsetDate } : null,
-    cmvp.moduleKey ? { name: 'quarkshield:cmvpBasis', value: 'provider-reported' } : null,
+    cmvp.moduleKey ? { name: 'quarkshield:cmvpBasis', value: host ? 'host-observed' : 'provider-reported' } : null,
+    // Host modules (Stage 4): identity, and at most a CANDIDATE certificate. Deliberately not
+    // `cmvpCertId`: the module's FIPS mode is unconfirmed, so this is not a validation claim.
+    host?.moduleVersion ? { name: 'quarkshield:cmvpModuleVersion', value: host.moduleVersion } : null,
+    host?.environment ? { name: 'quarkshield:cmvpOperatingEnvironment', value: host.environment } : null,
+    host?.candidate ? { name: 'quarkshield:cmvpCandidateId', value: host.candidate.certId } : null,
+    host?.candidate ? { name: 'quarkshield:cmvpCandidateUrl', value: nistCertificateUrl(host.candidate.certId) } : null,
+    host?.candidate ? { name: 'quarkshield:cmvpCandidateMatch', value: host.candidate.match } : null,
+    host?.candidate ? { name: 'quarkshield:cmvpCandidateCertificateStatus', value: host.candidate.certStatus } : null,
+    host ? { name: 'quarkshield:cmvpFipsMode', value: 'not-checked' } : null,
+    host?.note ? { name: 'quarkshield:cmvpNote', value: host.note } : null,
     cmvp.moduleKey && i.cryptoModuleEvidence ? { name: 'quarkshield:cmvpEvidence', value: String(i.cryptoModuleEvidence) } : null,
     cmvp.moduleKey ? { name: 'quarkshield:cmvpMapVersion', value: cmvp.mapVersion } : null,
     i.riskLevel ? { name: 'quarkshield:riskLevel', value: String(i.riskLevel) } : null,

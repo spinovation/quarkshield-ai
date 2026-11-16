@@ -19,7 +19,7 @@ const isValidEmail = (v: unknown): v is string =>
 const safeHeader = (v: unknown): string => String(v ?? '').replace(/[\r\n]+/g, ' ').slice(0, 500);
 import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
 import { fipsAlgorithmStatus } from '../lib/fipsAlgorithmStatus';
-import { cmvpForConsole } from '../lib/cmvpModules';
+import { moduleForConsole, hostModulesForConsole } from '../lib/hostCryptoModules';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
 /**
@@ -3501,6 +3501,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         m.last_seen as "lastSeen",
         m.last_sync as "lastSync",
         m.created_at as "createdAt",
+        m.crypto_modules as "cryptoModulesRaw",
         t.name as "groupName",
         COALESCE(NULLIF(m.tenant_name, ''), $2::text) as "tenantName",
         COALESCE(NULLIF(m.license_key, ''), NULLIF(t.license_key, ''), 'QS-TENANT-STANDARD') as "licenseKey"
@@ -3511,7 +3512,11 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       ORDER BY m.last_seen DESC;
     `, [tenantNameSearch, client?.displayName || tenantNameSearch]);
 
-    const machines = machinesQuery.rows;
+    // CMVP/FIPS Stage 4: the modules each host's agent reported, resolved on read.
+    const machines = machinesQuery.rows.map((m: any) => {
+      const { cryptoModulesRaw, ...row } = m;
+      return cryptoModulesRaw ? { ...row, cryptoModules: hostModulesForConsole(cryptoModulesRaw) } : row;
+    });
 
     // 3. Fetch Assets strictly for this tenant's machines, deployed endpoints, and external repositories
     const assetsQuery = await pool.query(`
@@ -3520,7 +3525,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         a.is_vulnerable as "isVulnerable", a.risk_level as "riskLevel", a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations as "complianceViolations", a.created_at as "createdAt",
         a.machine_id as "machineId", a.source, a.source_ref as "sourceRef", a.purpose,
-        a.crypto_module as "cryptoModule", a.crypto_module_evidence as "cryptoModuleEvidence",
+        a.crypto_module as "cryptoModule", a.crypto_module_evidence as "cryptoModuleEvidence", a.crypto_module_detail as "cryptoModuleDetail",
         COALESCE(m.hostname, a.source_ref, 'Remote Repository') as hostname,
         COALESCE(m.computer_name, a.source_ref, 'Remote Asset') as "computerName",
         COALESCE(m.os, 'cloud') as os,
@@ -3540,8 +3545,9 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       const f = fipsAlgorithmStatus({ algorithm: a.algorithm, key_size: a.keySize, hash_algorithm: a.hashAlgorithm, purpose: a.purpose, type: a.type });
       // CMVP module axis (Stage 3): only where a connector's API reported the module that holds
       // the key. Resolved on read from the versioned map; absent for every other asset.
-      const cmvp = a.cryptoModule ? { cmvp: cmvpForConsole(a.cryptoModule, a.cryptoModuleEvidence) } : {};
-      return { ...a, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft, ...cmvp };
+      const { cryptoModuleDetail, ...row } = a;
+      const cmvp = a.cryptoModule ? { cmvp: moduleForConsole(a.cryptoModule, a.cryptoModuleEvidence, cryptoModuleDetail) } : {};
+      return { ...row, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft, ...cmvp };
     });
 
     // 4. Fetch Licenses strictly for this tenant (returning status so revoked keys are clearly identified)
