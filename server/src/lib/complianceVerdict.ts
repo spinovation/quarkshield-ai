@@ -12,13 +12,20 @@
  * `compliant` means: approved algorithm, performed by a module whose current CMVP
  * certificate was matched as above. It is a statement about that pairing as observed, not a
  * certification of the system, and exports carry the evidence and table versions beside it.
+ *
+ * Stage 6 adds one refinement: when the module's certificate has an approved-algorithm list
+ * and the asset's algorithm is NOT on it, `compliant` / `compliant_until` become
+ * `compliant_module_algo_unverified`. A coverage of `covered` or `unknown` changes nothing:
+ * missing CAVP data is never turned into a worse verdict.
  */
 import type { FipsStatus } from './fipsAlgorithmStatus';
 import type { CmvpStatus } from './cmvpModules';
+import type { CavpState } from './cavpCoverage';
 
 export type ComplianceVerdict =
   | 'compliant'              // approved algorithm + module with a current certificate
   | 'compliant_until'        // same, but the algorithm has a published sunset
+  | 'compliant_module_algo_unverified' // current module certificate, but this algorithm is not on its CAVP list
   | 'validated_sunsetting'   // module certificate is Historical
   | 'validated_revoked'      // module certificate is Revoked
   | 'approved_unvalidated'   // approved algorithm, validated module not confirmed
@@ -29,10 +36,14 @@ export type ComplianceVerdict =
 
 export const VERDICT_ORDER: ComplianceVerdict[] = [
   'noncompliant', 'validated_revoked', 'restricted_use', 'approved_unvalidated',
-  'validated_sunsetting', 'compliant_until', 'compliant', 'not_determined', 'not_applicable',
+  'compliant_module_algo_unverified', 'validated_sunsetting', 'compliant_until', 'compliant', 'not_determined', 'not_applicable',
 ];
 
-export const complianceVerdict = (fips: FipsStatus | string | undefined, cmvp: CmvpStatus | string | undefined): ComplianceVerdict => {
+export const complianceVerdict = (
+  fips: FipsStatus | string | undefined,
+  cmvp: CmvpStatus | string | undefined,
+  cavp?: CavpState | string,
+): ComplianceVerdict => {
   switch (fips) {
     case 'disallowed':
     case 'non_fips':
@@ -44,7 +55,10 @@ export const complianceVerdict = (fips: FipsStatus | string | undefined, cmvp: C
     case 'approved':
     case 'pq_approved':
     case 'acceptable':
-      if (cmvp === 'active') return fips === 'acceptable' ? 'compliant_until' : 'compliant';
+      if (cmvp === 'active') {
+        if (cavp === 'not_covered') return 'compliant_module_algo_unverified';
+        return fips === 'acceptable' ? 'compliant_until' : 'compliant';
+      }
       if (cmvp === 'historical') return 'validated_sunsetting';
       if (cmvp === 'revoked') return 'validated_revoked';
       // none / unverified / not-assessed / anything unexpected

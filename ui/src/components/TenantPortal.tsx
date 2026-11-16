@@ -184,13 +184,16 @@ interface ModuleView {
   };
   /** Host modules only (Stage 5): whether FIPS-approved mode was confirmed from host facts. */
   fipsMode?: { state: 'confirmed' | 'off' | 'not-determined'; evidence: string };
+  /** Stage 6: is this asset's algorithm on the reported certificate's approved-algorithm list?
+   *  Present only where a certificate is reported. `unknown` never changes the verdict. */
+  cavp?: { state: 'covered' | 'not_covered' | 'unknown'; note: string; validations: string[]; mapVersion: string };
   evidence?: string;     // the fact the module was derived from
   note?: string;
   mapVersion: string;
 }
 
 /** Algorithm axis x module axis (Stage 5). Computed server-side from one fixed table. */
-type ComplianceVerdict = 'compliant' | 'compliant_until' | 'validated_sunsetting' | 'validated_revoked'
+type ComplianceVerdict = 'compliant' | 'compliant_until' | 'compliant_module_algo_unverified' | 'validated_sunsetting' | 'validated_revoked'
   | 'approved_unvalidated' | 'restricted_use' | 'noncompliant' | 'not_determined' | 'not_applicable';
 
 interface FleetMachine {
@@ -395,6 +398,7 @@ const cmvpChipTitle = (c: NonNullable<Asset['cmvp']>): string => {
 const VERDICT_CHIP: Record<ComplianceVerdict, { label: string; color: string; bg: string; help: string }> = {
   compliant:            { label: 'Compliant · validated module', color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)', help: 'Approved algorithm, performed by a module whose current CMVP certificate was matched.' },
   compliant_until:      { label: 'Compliant · algorithm sunset', color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)', help: 'Approved algorithm with a published sunset date, performed by a module whose current CMVP certificate was matched.' },
+  compliant_module_algo_unverified: { label: 'Validated module · algorithm not on its list', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'Approved algorithm in a module with a current CMVP certificate, but this algorithm is not on that certificate\'s approved-algorithm (CAVP) list, so it is not shown as tested in the module.' },
   validated_sunsetting: { label: 'Module certificate historical', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'Approved algorithm, but the matched module certificate has moved to the NIST Historical list.' },
   validated_revoked:    { label: 'Module certificate revoked', color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)', help: 'Approved algorithm, but the matched module certificate is revoked.' },
   approved_unvalidated: { label: 'Approved algorithm · module not validated', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'The algorithm is approved, but it is not confirmed to run in a CMVP-validated module in FIPS-approved mode.' },
@@ -408,6 +412,7 @@ const verdictChipTitle = (a: Asset): string => {
   if (!v) return '';
   const parts = [v.help];
   if (a.cmvp?.fipsMode) parts.push(`FIPS mode: ${a.cmvp.fipsMode.state}. ${a.cmvp.fipsMode.evidence}`);
+  if (a.cmvp?.cavp) parts.push(`Algorithm list (CAVP): ${a.cmvp.cavp.state.replace('_', ' ')}. ${a.cmvp.cavp.note}${a.cmvp.cavp.validations.length ? ` Validations: ${a.cmvp.cavp.validations.join(', ')}.` : ''}`);
   parts.push('Evidence as observed by QuarkShield, not a certification; QuarkShield did not test the module.');
   return parts.join(' ');
 };
@@ -1888,12 +1893,22 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               { name: "quarkshield:cmvpCandidateId", value: a.cmvp.candidate.certId },
               { name: "quarkshield:cmvpCandidateMatch", value: a.cmvp.candidate.match },
             ] : []),
-            ...(a.cmvp.basis === 'host-observed' ? [{ name: "quarkshield:cmvpFipsMode", value: "not-checked" }] : []),
+            ...(a.cmvp.fipsMode ? [
+              { name: "quarkshield:cmvpFipsMode", value: a.cmvp.fipsMode.state },
+              { name: "quarkshield:cmvpFipsModeEvidence", value: a.cmvp.fipsMode.evidence },
+            ] : []),
+            ...(a.cmvp.cavp ? [
+              { name: "quarkshield:cavpCovered", value: a.cmvp.cavp.state },
+              ...(a.cmvp.cavp.validations.length ? [{ name: "quarkshield:cavpValidations", value: a.cmvp.cavp.validations.join(",") }] : []),
+              { name: "quarkshield:cavpNote", value: a.cmvp.cavp.note },
+              { name: "quarkshield:cavpMapVersion", value: a.cmvp.cavp.mapVersion },
+            ] : []),
             { name: "quarkshield:cmvpBasis", value: a.cmvp.basis || "provider-reported" },
             { name: "quarkshield:cmvpMapVersion", value: a.cmvp.mapVersion },
           ] : []),
           ...(a.fipsTransitionDate ? [{ name: "quarkshield:transitionDate", value: a.fipsTransitionDate }] : []),
           { name: "quarkshield:cmvpStatus", value: a.cmvp ? a.cmvp.status : "not-assessed" },
+          ...(a.complianceVerdict ? [{ name: "quarkshield:complianceVerdict", value: a.complianceVerdict }] : []),
           // Never default to a standard name: an absent value would read as a compliance claim in the exported CBOM.
           { name: "complianceStandards", value: (Array.isArray(a.complianceViolations) ? a.complianceViolations.join(', ') : a.complianceViolations) || 'None recorded' },
           { name: "hostMachine", value: a.hostname || "Workstation" },
@@ -2305,8 +2320,17 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     return c;
   }, [assets]);
 
+  // The tile's links group verdicts the way its numbers do: "compliant" includes the
+  // sunset variant, "certificate historical" includes revoked.
+  const matchesVerdictFilter = (a: Asset): boolean => {
+    if (verdictFilter === 'all') return true;
+    if (verdictFilter === 'compliant') return a.complianceVerdict === 'compliant' || a.complianceVerdict === 'compliant_until';
+    if (verdictFilter === 'validated_sunsetting') return a.complianceVerdict === 'validated_sunsetting' || a.complianceVerdict === 'validated_revoked';
+    return a.complianceVerdict === verdictFilter;
+  };
+
   const filteredAssets = assets.filter(a => {
-    if (verdictFilter !== 'all' && a.complianceVerdict !== verdictFilter) return false;
+    if (!matchesVerdictFilter(a)) return false;
     if (sourceFilter !== 'all') {
       const effectiveSource = a.source || 'endpoint';
       if (effectiveSource !== sourceFilter) return false;
@@ -5067,6 +5091,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           const n = (v: ComplianceVerdict) => verdictCounts[v] || 0;
                           const compliant = n('compliant') + n('compliant_until');
                           const stale = n('validated_sunsetting') + n('validated_revoked');
+                          const offList = n('compliant_module_algo_unverified');
                           const link = (label: string, v: ComplianceVerdict) => (
                             <span onClick={() => setVerdictFilter(verdictFilter === v ? 'all' : v)}
                               style={{ cursor: 'pointer', textDecoration: 'underline', color: verdictFilter === v ? '#38bdf8' : 'inherit' }}>{label}</span>
@@ -5085,6 +5110,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                               <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary, #94a3b8)' }}>
                                 {n('approved_unvalidated')} {link('approved, module not validated', 'approved_unvalidated')}
                                 {stale ? <> · {stale} {link('certificate historical', 'validated_sunsetting')}</> : null}
+                                {offList ? <> · {offList} {link('algorithm not on module list', 'compliant_module_algo_unverified')}</> : null}
                               </div>
                               <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.2rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
                                 {compliant ? link('show compliant', 'compliant') : null}
@@ -5168,6 +5194,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           </thead>
                           <tbody>
                             {assets.filter(a => {
+                              // The verdict tile above this table filters it.
+                              if (!matchesVerdictFilter(a)) return false;
                               if (cbomCategory !== 'all' && a.type !== cbomCategory) return false;
                               if (cbomSearch) {
                                 const q = cbomSearch.toLowerCase();
