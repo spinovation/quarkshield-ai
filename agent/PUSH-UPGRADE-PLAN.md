@@ -89,8 +89,25 @@ upgrade, a rollback, a manual re-install) restarts into it on its next tick.
 - `agent/updater_test.go`: signature, version rules, URL rules, hash, archive
   extraction, confirmation, macOS publisher check (against real signed code).
 - `server/test/agentRelease.test.ts`: manifest loading and upgrade-state logic.
-- End to end on Linux (container, real binaries, throwaway key): swapped binary
-  refused, untrusted signature refused, broken release rolled back, good release
-  upgraded and confirmed.
-- **Not yet exercised on a real host**: the Windows path (compiles only), the
-  macOS app-bundle swap, and the systemd transient-unit watchdog.
+- End to end on Linux under **systemd** (container, the real installer and unit
+  file, real binaries, throwaway key, rollback window shortened to 45 s): swapped
+  binary refused, untrusted signature refused, broken release rolled back while
+  the service was restarted mid-window, good release upgraded and confirmed with
+  the service's main pid unchanged, watchdog running as its own transient unit
+  outside the service's control group, uninstaller, desktop-host install.
+- End to end through the **real console** (local server and database, tenant
+  admin in a browser): "Update agent" and "Update agents (N)" queue the command,
+  the endpoint upgrades, and the console shows the new version at the next poll.
+- macOS **app-bundle swap** in an isolated folder (test builds with the publisher
+  check stubbed, because only a notarized build can pass it): broken release
+  rolled back and relaunched, good release upgraded and confirmed.
+- macOS **publisher check** against the published, notarized 2.3.1 app archive:
+  downloaded, hash-checked, unpacked, accepted by `codesign` and Gatekeeper, then
+  correctly refused at the self-test (2.3.1 predates `--agent-version`).
+- **Not yet exercised**: the Windows path (compiles only); one continuous macOS
+  run with a notarized 2.3.2+ build (publisher check and swap were tested
+  separately); a launchd-managed macOS agent; the manifest step of a full signed
+  release build.
+- **Known limitation**: the watchdog does not survive a reboot. A host that
+  reboots inside the 10-minute window keeps the new build; if that build cannot
+  reach the server it is not rolled back automatically.

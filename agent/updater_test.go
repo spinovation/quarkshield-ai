@@ -398,3 +398,36 @@ func TestVerifyCodeSignature_macOS(t *testing.T) {
 		t.Fatal("a modified app bundle must be rejected")
 	}
 }
+
+// A service restart (or a crash + restart) while an upgrade is unconfirmed leaves
+// the marker pointing at a dead pid; the new process must take the marker over so
+// a rollback stops the process that is really running the new build.
+func TestAdoptPendingUpgrade(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+
+	// Pending upgrade to THIS version, recorded by another process: adopt it.
+	if err := writeUpgradeMarker(upgradeMarker{ExpectedVersion: AgentReleaseVersion, PreviousVersion: "0.0.1", Pid: 1}); err != nil {
+		t.Fatal(err)
+	}
+	AdoptPendingUpgrade()
+	if m, ok := readUpgradeMarker(); !ok || m.Pid != os.Getpid() || m.PreviousVersion != "0.0.1" {
+		t.Fatalf("marker not adopted: %+v (present=%v)", m, ok)
+	}
+
+	// Pending upgrade to a DIFFERENT version (this is the old build): leave it alone.
+	if err := writeUpgradeMarker(upgradeMarker{ExpectedVersion: "999.0.0", Pid: 1}); err != nil {
+		t.Fatal(err)
+	}
+	AdoptPendingUpgrade()
+	if m, _ := readUpgradeMarker(); m.Pid != 1 {
+		t.Fatalf("marker for another version was changed: %+v", m)
+	}
+
+	// No marker: nothing is created.
+	clearUpgradeMarker()
+	AdoptPendingUpgrade()
+	if _, ok := readUpgradeMarker(); ok {
+		t.Fatal("a marker was created out of nothing")
+	}
+}

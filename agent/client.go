@@ -335,6 +335,9 @@ func FetchAgentCommands(serverURL string, token string) ([]AgentCommand, error) 
 		"token":         token,
 		"hardware_uuid": GetHardwareUUID(),
 		"hostname":      hostname,
+		// Lets the console see a completed push-upgrade at the next poll instead of
+		// waiting for the next full telemetry sync.
+		"agent_version": AgentReleaseVersion,
 	}
 	payload, _ := json.Marshal(body)
 	req, err := http.NewRequest("POST", cleanServer+"/api/scan/agent/commands", bytes.NewBuffer(payload))

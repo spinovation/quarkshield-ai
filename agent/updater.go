@@ -532,6 +532,20 @@ func ConfirmUpgradeIfPending() {
 	fmt.Printf("✅ Upgrade %s → %s confirmed.\n", m.PreviousVersion, AgentReleaseVersion)
 }
 
+// AdoptPendingUpgrade is called when a long-running agent starts. If this process
+// is the build a pending upgrade is waiting on but not the process that performed
+// the swap (the service was restarted, or the new build crashed and was started
+// again), the marker is pointed at this process, so a rollback stops the process
+// that is actually running the unconfirmed build.
+func AdoptPendingUpgrade() {
+	m, ok := readUpgradeMarker()
+	if !ok || m.ExpectedVersion != AgentReleaseVersion || m.Pid == os.Getpid() {
+		return
+	}
+	m.Pid = os.Getpid()
+	_ = writeUpgradeMarker(m)
+}
+
 // runUpgradeWatchdog runs in the PREVIOUS build (hidden --upgrade-watchdog flag),
 // started detached by the swap. It waits for the new build to confirm; if the
 // rollback window passes without confirmation it restores the previous build.

@@ -11,6 +11,7 @@ import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTar
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
 import { canonicalizeAlgorithmLabel } from '../lib/algorithmLabel';
 import { loadAgentRelease, upgradeStateFor, cmpAgentVersion, AgentRelease } from '../lib/agentRelease';
+import { withUpgradeState, UPGRADE_IN_FLIGHT_MIN } from '../lib/agentUpgradeState';
 
 // A machine's effective group: explicit override, else its enrollment token tag, else Default.
 // Requires the query to alias fleet_machines as m and LEFT JOIN fleet_tokens as t.
@@ -213,29 +214,8 @@ export const getFleetMachines = async (req: Request, res: Response) => {
     const result = await pool.query(query, params);
 
     // Push-upgrade: tell the console which endpoints are behind the published
-    // release and whether each can upgrade itself (see lib/agentRelease.ts).
-    const release = loadAgentRelease();
-    let upgrading = new Set<string>();
-    if (release && result.rows.length > 0) {
-      try {
-        const inFlight = await pool.query(
-          `SELECT DISTINCT machine_id FROM fleet_commands
-            WHERE command = 'upgrade' AND status IN ('pending', 'dispatched')
-              AND created_at > NOW() - ($2 || ' minutes')::interval
-              AND machine_id = ANY($1)`,
-          [result.rows.map(r => r.id), String(UPGRADE_IN_FLIGHT_MIN)]
-        );
-        upgrading = new Set(inFlight.rows.map(r => r.machine_id));
-      } catch (e) {
-        console.warn('Could not read in-flight upgrades:', e);
-      }
-    }
-    res.json(result.rows.map(r => ({
-      ...r,
-      latestVersion: release?.version || null,
-      upgradeState: upgradeStateFor(release, r),
-      upgradeInFlight: upgrading.has(r.id),
-    })));
+    // release and whether each can upgrade itself (see lib/agentUpgradeState.ts).
+    res.json(await withUpgradeState(result.rows));
   } catch (err: any) {
     console.error('Error fetching fleet machines:', err);
     res.status(500).json({ error: 'Failed to retrieve fleet machines.' });
@@ -1354,21 +1334,7 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
 
     // Push-upgrade: telemetry from an agent now running the version an upgrade
     // command asked for (or newer) proves that upgrade was applied — close it.
-    // `details` holds the target version (plain text) for upgrade commands.
-    try {
-      const open = await pool.query(
-        "SELECT id, details FROM fleet_commands WHERE machine_id = $1 AND command = 'upgrade' AND status = 'dispatched'",
-        [machineId]
-      );
-      const done = open.rows
-        .filter(c => cmpAgentVersion((agent_version || '').toString(), (c.details || '').toString()) >= 0)
-        .map(c => c.id);
-      if (done.length > 0) {
-        await pool.query("UPDATE fleet_commands SET status = 'completed', completed_at = NOW() WHERE id = ANY($1)", [done]);
-      }
-    } catch (cmdErr) {
-      console.warn('Could not close out upgrade commands:', cmdErr);
-    }
+    await closeAppliedUpgrades(machineId, agent_version);
 
     // Tenant resolved from the fleet token, for the Threat & Risk Graph rebuild hook.
     res.locals.tenant = assignedTenant;
@@ -1523,10 +1489,24 @@ export const enqueueBulkPullCommand = async (req: Request, res: Response) => {
 // SHA-256, the OS code signature and a self-test, before swapping. See
 // lib/agentRelease.ts and agent/updater.go.
 
-// An upgrade counts as "in flight" for this long after it is queued. Agents poll
-// every 2 minutes and roll back an unconfirmed upgrade after 10, so by then it
-// has either been applied (and closed by the next telemetry) or abandoned.
-const UPGRADE_IN_FLIGHT_MIN = 30;
+// An upgrade command is finished once its endpoint reports the version it asked
+// for (or newer). `details` holds the target version for upgrade commands.
+const closeAppliedUpgrades = async (machineId: string, agentVersion: unknown): Promise<void> => {
+  try {
+    const open = await pool.query(
+      "SELECT id, details FROM fleet_commands WHERE machine_id = $1 AND command = 'upgrade' AND status = 'dispatched'",
+      [machineId]
+    );
+    const done = open.rows
+      .filter(c => cmpAgentVersion((agentVersion || '').toString(), (c.details || '').toString()) >= 0)
+      .map(c => c.id);
+    if (done.length > 0) {
+      await pool.query("UPDATE fleet_commands SET status = 'completed', completed_at = NOW() WHERE id = ANY($1)", [done]);
+    }
+  } catch (cmdErr) {
+    console.warn('Could not close out upgrade commands:', cmdErr);
+  }
+};
 
 const recordUpgradeAudit = async (
   actor: string, scope: string, tenant: string, version: string, machineIds: string[], force: boolean, ip?: string
@@ -1553,12 +1533,14 @@ const enqueueUpgradeForMachine = async (
   machineId: string, release: AgentRelease, force: boolean, issuedBy: string, scope: 'machine' | 'group' | 'all'
 ): Promise<string | null> => {
   const commandId = 'cmd-' + crypto.randomBytes(8).toString('hex');
+  // $2 is cast explicitly: it is used both as an inserted value and in a comparison,
+  // and PostgreSQL refuses to guess one type for the two uses.
   const ins = await pool.query(
     `INSERT INTO fleet_commands (id, machine_id, command, status, details, args, issued_by, scope)
-     SELECT $1, $2, 'upgrade', 'pending', $3, $4::jsonb, $5, $6
+     SELECT $1, $2::text, 'upgrade', 'pending', $3, $4::jsonb, $5, $6
       WHERE NOT EXISTS (
         SELECT 1 FROM fleet_commands fc
-         WHERE fc.machine_id = $2 AND fc.command = 'upgrade'
+         WHERE fc.machine_id = $2::text AND fc.command = 'upgrade'
            AND fc.status IN ('pending', 'dispatched')
            AND fc.created_at > NOW() - ($7 || ' minutes')::interval
       )
@@ -1637,9 +1619,7 @@ export const enqueueBulkUpgradeCommand = async (req: Request, res: Response) => 
       `SELECT m.id, m.os, m.arch, m.agent_version AS "agentVersion"
          FROM fleet_machines m
          LEFT JOIN fleet_tokens t ON m.token_id = t.id
-        WHERE (LOWER(m.tenant_name) = LOWER($1)
-            OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-            OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+        WHERE (LOWER(COALESCE(m.tenant_name, '')) = LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) = LOWER($1))
           ${groupClause}`,
       params
     );
@@ -2181,6 +2161,22 @@ export const agentFetchCommands = async (req: Request, res: Response) => {
     );
     if (m.rowCount === 0) return res.json({ commands: [] });
     const machineId = m.rows[0].id;
+
+    // Agents report their version with every poll (2.3.2+). After a push-upgrade
+    // that is the first the server hears from the new build, so record it and
+    // close the upgrade command now rather than at the next telemetry sync.
+    const polledVersion = (req.body?.agent_version || '').toString().trim();
+    if (/^\d{1,4}\.\d{1,4}\.\d{1,4}$/.test(polledVersion)) {
+      try {
+        await pool.query(
+          'UPDATE fleet_machines SET agent_version = $1 WHERE id = $2 AND agent_version IS DISTINCT FROM $1',
+          [polledVersion, machineId]
+        );
+      } catch (verErr) {
+        console.warn('Could not record polled agent version:', verErr);
+      }
+      await closeAppliedUpgrades(machineId, polledVersion);
+    }
 
     const cmds = await pool.query(
       "SELECT id, command, details, COALESCE(args, '{}'::jsonb) AS args FROM fleet_commands WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC",

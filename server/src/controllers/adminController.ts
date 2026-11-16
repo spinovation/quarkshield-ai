@@ -21,6 +21,7 @@ import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
 import { fipsAlgorithmStatus } from '../lib/fipsAlgorithmStatus';
 import { moduleForConsole, hostModulesForConsole } from '../lib/hostCryptoModules';
 import { complianceVerdict as computeVerdict } from '../lib/complianceVerdict';
+import { withUpgradeState } from '../lib/agentUpgradeState';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
 /**
@@ -3514,7 +3515,8 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
     `, [tenantNameSearch, client?.displayName || tenantNameSearch]);
 
     // CMVP/FIPS Stage 4: the modules each host's agent reported, resolved on read.
-    const machines = machinesQuery.rows.map((m: any) => {
+    // Push-upgrade state rides along, so the portal can offer "Update agent".
+    const machines = (await withUpgradeState(machinesQuery.rows)).map((m: any) => {
       const { cryptoModulesRaw, ...row } = m;
       return cryptoModulesRaw ? { ...row, cryptoModules: hostModulesForConsole(cryptoModulesRaw) } : row;
     });

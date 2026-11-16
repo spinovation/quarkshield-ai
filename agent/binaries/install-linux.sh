@@ -69,9 +69,11 @@ fi
 
 # Install Desktop Entry if GUI environment exists
 if [ -n "$XDG_CURRENT_DESKTOP" ] || [ -d "$HOME/.local/share/applications" ]; then
-  APP_DIR="$HOME/.local/share/applications"
-  mkdir -p "$APP_DIR"
-  cat << 'EOF' > "$APP_DIR/quarkshield.desktop"
+  # Own variable: APP_DIR is the binary's install directory and is written into
+  # the systemd unit (ReadWritePaths) further down.
+  DESKTOP_DIR="$HOME/.local/share/applications"
+  mkdir -p "$DESKTOP_DIR"
+  cat << 'EOF' > "$DESKTOP_DIR/quarkshield.desktop"
 [Desktop Entry]
 Type=Application
 Name=QuarkShield Post-Quantum Guard
@@ -81,7 +83,7 @@ Icon=security-high
 Terminal=false
 Categories=Security;System;
 EOF
-  chmod +x "$APP_DIR/quarkshield.desktop" 2>/dev/null || true
+  chmod +x "$DESKTOP_DIR/quarkshield.desktop" 2>/dev/null || true
   echo "✓ Desktop application launcher registered."
 fi
 

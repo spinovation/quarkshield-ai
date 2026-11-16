@@ -539,6 +539,7 @@ func main() {
 		}
 
 		recordSelfIdentity()
+		AdoptPendingUpgrade()
 		ticker := time.NewTicker(2 * time.Minute)
 		for {
 			// 0. Another process (GUI upgrade, rollback, re-install) replaced our binary.
