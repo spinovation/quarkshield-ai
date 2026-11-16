@@ -1156,15 +1156,12 @@ export const getLicenses = async (req: Request, res: Response) => {
       LEFT JOIN LATERAL (
         SELECT admin_email, contact_name, display_name
         FROM admin_clients c
-        WHERE LOWER(c.name) = LOWER(l.tenant_name) 
-           OR LOWER(REPLACE(c.display_name, ' ', '')) = LOWER(REPLACE(l.tenant_name, ' ', ''))
-           OR (l.customer_id IS NOT NULL AND c.customer_id = l.customer_id)
+        -- Matched by tenant name (or its display-name spelling), never by customer_id:
+        -- a licence carrying another client's id would show that client's admin contact.
+        WHERE ${sqlTenantKey('c.name')} = ${sqlTenantKey('l.tenant_name')}
+           OR ${sqlTenantKey('c.display_name')} = ${sqlTenantKey('l.tenant_name')}
         ORDER BY 
-          CASE 
-            WHEN LOWER(c.name) = LOWER(l.tenant_name) THEN 1
-            WHEN LOWER(REPLACE(c.display_name, ' ', '')) = LOWER(REPLACE(l.tenant_name, ' ', '')) THEN 2
-            ELSE 3
-          END
+          CASE WHEN ${sqlTenantKey('c.name')} = ${sqlTenantKey('l.tenant_name')} THEN 1 ELSE 2 END
         LIMIT 1
       ) c ON true
       ORDER BY l.created_at DESC;
@@ -1183,9 +1180,9 @@ const lookupLicenseForNotice = async (id: string) => {
             COALESCE(NULLIF(l.contact_email, ''), c.admin_email, '') AS notify_email,
             COALESCE(NULLIF(l.contact_name, ''), c.contact_name, c.display_name, l.tenant_name) AS notify_name
        FROM admin_licenses l
-       LEFT JOIN admin_clients c
-         ON (LOWER(c.name) = LOWER(l.tenant_name)
-             OR (l.customer_id IS NOT NULL AND c.customer_id = l.customer_id))
+       -- By tenant name only: a customer_id join sent one tenant's licence notices to
+       -- the admin of whichever client held that id.
+       LEFT JOIN admin_clients c ON ${sqlTenantKey('c.name')} = ${sqlTenantKey('l.tenant_name')}
       WHERE l.id = $1 OR l.license_key = $1
       LIMIT 1`,
     [id]
@@ -1340,12 +1337,12 @@ export const verifyLicenseKey = async (req: Request, res: Response) => {
         l.seats, 
         l.status, 
         l.expires_at,
-        COALESCE(c.display_name, l.tenant_name) as display_name
+        COALESCE(c.display_name, l.tenant_name) as display_name,
+        c.customer_id AS client_customer_id
       FROM admin_licenses l
-      LEFT JOIN admin_clients c ON (
-        LOWER(c.name) = LOWER(l.tenant_name) 
-        OR (l.customer_id IS NOT NULL AND c.customer_id = l.customer_id)
-      )
+      -- The client is found by tenant name only. Joining on customer_id as well attached
+      -- a licence carrying another client's customer id to that client's record.
+      LEFT JOIN admin_clients c ON ${sqlTenantKey('c.name')} = ${sqlTenantKey('l.tenant_name')}
       WHERE l.license_key = $1
       LIMIT 1;
     `, [cleanKey]);
@@ -1368,7 +1365,8 @@ export const verifyLicenseKey = async (req: Request, res: Response) => {
         licenseKey: row.license_key,
         tenantName: row.tenant_name,
         displayName: row.display_name,
-        customerId: row.customer_id || (row.tier === 'partner' ? 'PART-9148' : 'CORP-4821'),
+        // No invented fallback: a hard-coded id here was a real client's id.
+        customerId: row.customer_id || row.client_customer_id || null,
         tier: row.tier === 'corp' ? 'corporate' : row.tier,
         seats: Number(row.seats) || 100,
         durationDays: row.duration_days,
@@ -1397,7 +1395,8 @@ export const verifyLicenseKey = async (req: Request, res: Response) => {
           valid: !isExpired,
           licenseKey: cleanKey,
           tenantName: tenant,
-          customerId: (tier === 'PARTNER' ? 'PART-' : 'CORP-') + '9148',
+          // An unregistered key has no client, so it has no customer id.
+          customerId: null,
           tier: tier === 'CORP' ? 'corporate' : tier.toLowerCase(),
           seats: 100,
           expiresAt: expiresAt.toISOString().split('T')[0],
@@ -1442,12 +1441,10 @@ export const sendLicenseEmail = async (req: Request, res: Response) => {
 
     if (!targetEmail || !targetCustId) {
       const lookup = await pool.query(`
-        SELECT l.*, c.admin_email, c.contact_name, c.display_name
+        SELECT l.*, c.admin_email, c.contact_name, c.display_name, c.customer_id AS client_customer_id
         FROM admin_licenses l
-        LEFT JOIN admin_clients c ON (
-          LOWER(c.name) = LOWER(l.tenant_name) 
-          OR (l.customer_id IS NOT NULL AND c.customer_id = l.customer_id)
-        )
+        -- By tenant name only: a customer_id join could address another client's admin.
+        LEFT JOIN admin_clients c ON ${sqlTenantKey('c.name')} = ${sqlTenantKey('l.tenant_name')}
         WHERE l.license_key = $1
         LIMIT 1
       `, [licenseKey]);
@@ -1459,7 +1456,7 @@ export const sendLicenseEmail = async (req: Request, res: Response) => {
         targetSeats = row.seats || targetSeats;
         targetTier = row.tier || targetTier;
         targetOrg = row.tenant_name || targetOrg;
-        targetCustId = targetCustId || row.customer_id || (targetTier === 'partner' ? 'PART-9148' : 'CORP-4821');
+        targetCustId = targetCustId || row.customer_id || row.client_customer_id || '';
         targetExpiry = targetExpiry || (row.expires_at ? new Date(row.expires_at).toISOString().split('T')[0] : '');
       }
     }
@@ -1468,7 +1465,7 @@ export const sendLicenseEmail = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Recipient email address is required. Please provide a contact email.' });
     }
 
-    const emailSubject = `QuarkShield Post-Quantum Security License Key [${targetOrg}] - ${targetCustId}`;
+    const emailSubject = `QuarkShield Post-Quantum Security License Key [${targetOrg}]${targetCustId ? ` - ${targetCustId}` : ''}`;
     
     // Formatted plain text email body
     const plainTextBody = `Hello ${targetName || 'Enterprise Partner'},
@@ -1477,7 +1474,7 @@ Your official QuarkShield Post-Quantum Cryptographic (PQC) Security License Key 
 
 ============================================================
 ORGANIZATION:    ${targetOrg}
-CUSTOMER ID:     ${targetCustId}
+CUSTOMER ID:     ${targetCustId || 'Not assigned'}
 TIER:            ${String(targetTier).toUpperCase()}
 ENDPOINT SEATS:  ${targetSeats} Seats
 EXPIRATION DATE: ${targetExpiry || '1 Year Active'}
@@ -1525,7 +1522,7 @@ License@quarkshield.ai
           </div>
 
           <table style="width: 100%; border-collapse: collapse; margin: 20px 0; font-size: 13px;">
-            <tr><td style="padding: 8px 0; color: #64748b; border-bottom: 1px solid rgba(255,255,255,0.06);">Customer ID</td><td style="padding: 8px 0; color: #ffffff; font-weight: 600; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">${targetCustId}</td></tr>
+            <tr><td style="padding: 8px 0; color: #64748b; border-bottom: 1px solid rgba(255,255,255,0.06);">Customer ID</td><td style="padding: 8px 0; color: #ffffff; font-weight: 600; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">${escapeHtml(targetCustId || 'Not assigned')}</td></tr>
             <tr><td style="padding: 8px 0; color: #64748b; border-bottom: 1px solid rgba(255,255,255,0.06);">Subscription Tier</td><td style="padding: 8px 0; color: #ffffff; font-weight: 600; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">${String(targetTier).toUpperCase()}</td></tr>
             <tr><td style="padding: 8px 0; color: #64748b; border-bottom: 1px solid rgba(255,255,255,0.06);">Endpoint Capacity</td><td style="padding: 8px 0; color: #ffffff; font-weight: 600; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06);">${targetSeats} Workstations / VMs</td></tr>
             <tr><td style="padding: 8px 0; color: #64748b;">Expiration Date</td><td style="padding: 8px 0; color: #4ade80; font-weight: 600; text-align: right;">${targetExpiry || '365 Days Active'}</td></tr>
@@ -3642,7 +3639,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       client: client || {
         name: cleanTenant,
         displayName: cleanTenant.toUpperCase(),
-        customerId: 'CORP-9812',
+        customerId: null,
         status: 'active',
         appPort: 5002,
         mcaLimit: 100

@@ -3613,7 +3613,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                     borderRadius: '4px',
                     fontWeight: 700
                   }}>
-                    {client.customerId || 'CORP-9812'}
+                    {client.customerId || '—'}
                   </span>
                   <span
                     title={`Corporate Tier license — ${machines.length} of ${totalCapacity} seats monitored · continuous asset tracking active`}
