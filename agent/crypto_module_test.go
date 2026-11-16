@@ -87,12 +87,12 @@ func TestParseOSRelease(t *testing.T) {
 }
 
 func TestParseWindowsProbe(t *testing.T) {
-	name, display, version, file := parseWindowsProbe("Windows 10 Pro|22H2|10.0.19045.4651|10.0.19041.4597\r\n")
+	name, display, version, file := parseWindowsProbe("Windows 10 Pro|22H2|10.0.19045.4651|10.0.19041.4597|1|\r\n")
 	if name != "Windows 10 Pro" || display != "22H2" || version != "10.0.19045.4651" || file != "10.0.19041.4597" {
 		t.Errorf("got %q %q %q %q", name, display, version, file)
 	}
 	// A missing registry value leaves a hole in the version: report no version, not a wrong one.
-	if _, _, version, _ := parseWindowsProbe("Windows Server 2016|| 10.0.14393.|10.0.14393.0"); version != "" {
+	if _, _, version, _ := parseWindowsProbe("Windows Server 2016|| 10.0.14393.|10.0.14393.0||"); version != "" {
 		t.Errorf("incomplete build accepted: %q", version)
 	}
 	if name, _, _, _ := parseWindowsProbe("Get-ItemProperty : access denied"); name != "" {
@@ -210,4 +210,35 @@ func TestHostCryptoModulesOnThisMachine(t *testing.T) {
 	}
 	b, _ := json.MarshalIndent(rep, "", "  ")
 	t.Logf("observed on this machine:\n%s", b)
+}
+
+func TestParseWindowsFipsPolicy(t *testing.T) {
+	cases := []struct{ in, enabled, mdm string }{
+		{"Windows 11 Pro|22H2|10.0.22621.4317|10.0.22621.1|1|", "1", ""},
+		{"Windows 11 Pro|22H2|10.0.22621.4317|10.0.22621.1|0|1", "0", "1"},
+		{"Windows 11 Pro|22H2|10.0.22621.4317|10.0.22621.1||", "", ""},
+		// Not a number: absent, never on or off.
+		{"Windows 11 Pro|22H2|10.0.22621.4317|10.0.22621.1|True|yes", "", ""},
+		{"access denied", "", ""},
+	}
+	for _, c := range cases {
+		enabled, mdm := parseWindowsFipsPolicy(c.in)
+		if enabled != c.enabled || mdm != c.mdm {
+			t.Errorf("parseWindowsFipsPolicy(%q) = %q %q", c.in, enabled, mdm)
+		}
+	}
+}
+
+func TestParseActiveProviders(t *testing.T) {
+	both := "Providers:\n  default\n    name: OpenSSL Default Provider\n    version: 3.0.7\n    status: active\n  fips\n    name: Red Hat Enterprise Linux 9 - OpenSSL FIPS Provider\n    version: 3.0.7-cda111b5812c30d4\n    status: active\n"
+	if got := strings.Join(parseActiveProviders(both), ","); got != "default,fips" {
+		t.Errorf("got %q", got)
+	}
+	inactive := "Providers:\n  default\n    name: OpenSSL Default Provider\n    status: active\n  fips\n    name: X\n    status: inactive\n"
+	if got := strings.Join(parseActiveProviders(inactive), ","); got != "default" {
+		t.Errorf("an inactive provider was reported active: %q", got)
+	}
+	if got := parseActiveProviders("list: unable to load provider"); len(got) != 0 {
+		t.Errorf("error text parsed as providers: %v", got)
+	}
 }

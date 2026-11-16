@@ -20,6 +20,7 @@ const safeHeader = (v: unknown): string => String(v ?? '').replace(/[\r\n]+/g, '
 import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
 import { fipsAlgorithmStatus } from '../lib/fipsAlgorithmStatus';
 import { moduleForConsole, hostModulesForConsole } from '../lib/hostCryptoModules';
+import { complianceVerdict as computeVerdict } from '../lib/complianceVerdict';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
 /**
@@ -3546,8 +3547,11 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       // CMVP module axis (Stage 3): only where a connector's API reported the module that holds
       // the key. Resolved on read from the versioned map; absent for every other asset.
       const { cryptoModuleDetail, ...row } = a;
-      const cmvp = a.cryptoModule ? { cmvp: moduleForConsole(a.cryptoModule, a.cryptoModuleEvidence, cryptoModuleDetail) } : {};
-      return { ...row, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft, ...cmvp };
+      const mod = a.cryptoModule ? moduleForConsole(a.cryptoModule, a.cryptoModuleEvidence, cryptoModuleDetail) : undefined;
+      const cmvp = mod ? { cmvp: mod } : {};
+      // Compliance verdict (Stage 5): the two axes crossed by one fixed table.
+      const complianceVerdict = computeVerdict(f.status, mod ? mod.status : 'not-assessed');
+      return { ...row, complianceVerdict, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft, ...cmvp };
     });
 
     // 4. Fetch Licenses strictly for this tenant (returning status so revoked keys are clearly identified)

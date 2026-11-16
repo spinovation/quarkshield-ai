@@ -43,3 +43,6 @@ func detectPlatformModules(env OperatingEnvironment) []CryptoModule {
 }
 
 func sshBinaryPath() string { return existingFile("/usr/bin/ssh") }
+
+// No host switch is read on this platform.
+func detectPlatformModeFacts() []ModeFact { return nil }

@@ -181,10 +181,16 @@ interface ModuleView {
     match: 'exact' | 'release' | 'version';
     matchNote: string;
   };
+  /** Host modules only (Stage 5): whether FIPS-approved mode was confirmed from host facts. */
+  fipsMode?: { state: 'confirmed' | 'off' | 'not-determined'; evidence: string };
   evidence?: string;     // the fact the module was derived from
   note?: string;
   mapVersion: string;
 }
+
+/** Algorithm axis x module axis (Stage 5). Computed server-side from one fixed table. */
+type ComplianceVerdict = 'compliant' | 'compliant_until' | 'validated_sunsetting' | 'validated_revoked'
+  | 'approved_unvalidated' | 'restricted_use' | 'noncompliant' | 'not_determined' | 'not_applicable';
 
 interface FleetMachine {
   id: string;
@@ -248,6 +254,7 @@ interface Asset {
   /** CMVP module axis: present when a KMS / vault connector reported the module holding the key
    *  (Stage 3), or the agent tied the finding to a module it observed on the host (Stage 4). */
   cmvp?: ModuleView;
+  complianceVerdict?: ComplianceVerdict;
   fipsTransitionDate?: string | null;
   fipsDraft?: boolean;
   createdAt: string;
@@ -341,6 +348,8 @@ const CMVP_CHIP: Record<NonNullable<Asset['cmvp']>['status'], { color: string; b
 const cmvpChipLabel = (c: NonNullable<Asset['cmvp']>): string => {
   if (c.basis === 'host-observed') {
     const name = `${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}`;
+    // Identity matched exactly and FIPS mode was confirmed: the certificate is reported as such.
+    if (c.certIds.length) return `${name} · CMVP #${c.certIds.join(' / #')}${c.status === 'active' ? '' : ` (${c.status})`} · FIPS mode confirmed`;
     if (c.candidate) return `${name} · candidate CMVP #${c.candidate.certId}${c.candidate.certStatus === 'active' ? '' : ` (${c.candidate.certStatus})`}`;
     return `${name} · ${c.status === 'none' ? 'no validated module' : 'no certificate matched'}`;
   }
@@ -359,7 +368,9 @@ const cmvpChipTitle = (c: NonNullable<Asset['cmvp']>): string => {
     if (c.candidate) {
       p.push(`Candidate certificate: CMVP #${c.candidate.certId} (${c.candidate.moduleName}, ${c.candidate.standard} Level ${c.candidate.level}, ${c.candidate.certStatus} on NIST${c.candidate.sunsetDate ? `, sunset ${c.candidate.sunsetDate}` : ''}).`);
       p.push(c.candidate.matchNote);
-      p.push('This is a match on identity, not a validation claim: whether the module runs in FIPS-approved mode was not checked.');
+      p.push(c.fipsMode
+        ? `FIPS mode: ${c.fipsMode.state}. ${c.fipsMode.evidence}`
+        : 'This is a match on identity, not a validation claim: whether the module runs in FIPS-approved mode was not checked.');
     } else if (c.note) p.push(c.note);
     if (c.evidence) p.push(`Basis: ${c.evidence}`);
     p.push(`CMVP map ${c.mapVersion}; QuarkShield did not test the module.`);
@@ -371,6 +382,28 @@ const cmvpChipTitle = (c: NonNullable<Asset['cmvp']>): string => {
   if (c.sunsetDate) parts.push(`Certificate sunset: ${c.sunsetDate}.`);
   if (c.note) parts.push(c.note);
   parts.push(`Certificate details as published by the provider and NIST CMVP (map ${c.mapVersion}); QuarkShield did not test the module.`);
+  return parts.join(' ');
+};
+
+// Compliance verdict chip (Stage 5). "Compliant" is only ever reached through a module whose
+// current certificate was matched; an approved algorithm alone reads "module not validated".
+const VERDICT_CHIP: Record<ComplianceVerdict, { label: string; color: string; bg: string; help: string }> = {
+  compliant:            { label: 'Compliant · validated module', color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)', help: 'Approved algorithm, performed by a module whose current CMVP certificate was matched.' },
+  compliant_until:      { label: 'Compliant · algorithm sunset', color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)', help: 'Approved algorithm with a published sunset date, performed by a module whose current CMVP certificate was matched.' },
+  validated_sunsetting: { label: 'Module certificate historical', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'Approved algorithm, but the matched module certificate has moved to the NIST Historical list.' },
+  validated_revoked:    { label: 'Module certificate revoked', color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)', help: 'Approved algorithm, but the matched module certificate is revoked.' },
+  approved_unvalidated: { label: 'Approved algorithm · module not validated', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'The algorithm is approved, but it is not confirmed to run in a CMVP-validated module in FIPS-approved mode.' },
+  restricted_use:       { label: 'Legacy use only', color: '#fb923c', bg: 'rgba(251, 146, 60, 0.12)', help: 'The algorithm is allowed only for legacy or verification use.' },
+  noncompliant:         { label: 'Non-compliant algorithm', color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)', help: 'The algorithm is disallowed or not FIPS-approved, whatever module performs it.' },
+  not_determined:       { label: 'Not determined', color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)', help: 'The algorithm could not be classified.' },
+  not_applicable:       { label: 'Not an algorithm', color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)', help: 'A package or module row, not an algorithm instance.' },
+};
+const verdictChipTitle = (a: Asset): string => {
+  const v = a.complianceVerdict ? VERDICT_CHIP[a.complianceVerdict] : undefined;
+  if (!v) return '';
+  const parts = [v.help];
+  if (a.cmvp?.fipsMode) parts.push(`FIPS mode: ${a.cmvp.fipsMode.state}. ${a.cmvp.fipsMode.evidence}`);
+  parts.push('Evidence as observed by QuarkShield, not a certification; QuarkShield did not test the module.');
   return parts.join(' ');
 };
 
@@ -664,6 +697,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState<boolean>(true);
   const [deploymentTierTab, setDeploymentTierTab] = useState<'tier1' | 'tier2' | 'tier3' | 'desktop'>('tier1');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [verdictFilter, setVerdictFilter] = useState<ComplianceVerdict | 'all'>('all');
+  const [isExportingEvidence, setIsExportingEvidence] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [searchAsset, setSearchAsset] = useState<string>('');
   const [assetPage, setAssetPage] = useState<number>(1);
@@ -1980,6 +2015,31 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     }
   };
 
+  // FIPS / CMVP compliance evidence (CSV). Risk Assurance add-on; the server enforces the gate.
+  const downloadComplianceEvidence = async () => {
+    try {
+      setIsExportingEvidence(true);
+      const tenantParam = encodeURIComponent(client?.name || cleanSlug);
+      const res = await fetch(`/api/compliance/fips-attestation.csv?tenant=${tenantParam}`, { credentials: 'include' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Server returned HTTP ${res.status}`);
+      }
+      const url = window.URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `QuarkShield-FIPS-CMVP-Evidence-${(client?.name || cleanSlug).toUpperCase()}-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`Compliance evidence export: ${err.message}`);
+    } finally {
+      setIsExportingEvidence(false);
+    }
+  };
+
   // Fetch Cryptographic Drift Events
   const fetchDriftEvents = async () => {
     try {
@@ -2183,7 +2243,15 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     return { nonCompliant, sunset, undetermined };
   }, [assets]);
 
+  // Compliance verdict counts (Stage 5): algorithm axis crossed with the module axis.
+  const verdictCounts = useMemo(() => {
+    const c: Partial<Record<ComplianceVerdict, number>> = {};
+    for (const a of assets) if (a.complianceVerdict) c[a.complianceVerdict] = (c[a.complianceVerdict] || 0) + 1;
+    return c;
+  }, [assets]);
+
   const filteredAssets = assets.filter(a => {
+    if (verdictFilter !== 'all' && a.complianceVerdict !== verdictFilter) return false;
     if (sourceFilter !== 'all') {
       const effectiveSource = a.source || 'endpoint';
       if (effectiveSource !== sourceFilter) return false;
@@ -4858,7 +4926,42 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 {sunset} approved with sunset · {undetermined} not determined
                               </div>
                               <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.2rem' }}>
-                                Algorithm approval only — CMVP not yet assessed
+                                Algorithm approval only — module validation is shown separately
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {(() => {
+                          // Compliance verdict (Stage 5): approved algorithm AND a matched, current module certificate.
+                          const n = (v: ComplianceVerdict) => verdictCounts[v] || 0;
+                          const compliant = n('compliant') + n('compliant_until');
+                          const stale = n('validated_sunsetting') + n('validated_revoked');
+                          const link = (label: string, v: ComplianceVerdict) => (
+                            <span onClick={() => setVerdictFilter(verdictFilter === v ? 'all' : v)}
+                              style={{ cursor: 'pointer', textDecoration: 'underline', color: verdictFilter === v ? '#38bdf8' : 'inherit' }}>{label}</span>
+                          );
+                          return (
+                            <div
+                              title="Approved algorithm performed by a module whose current CMVP certificate was matched: a provider-published certificate for a cloud key, or on a host an exact identity match with FIPS-approved mode confirmed. Evidence as observed, not a certification."
+                              style={{ background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '8px', padding: '1rem' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)', textTransform: 'uppercase', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+                                <span>In a Validated Module</span>
+                                <ShieldCheck size={15} color={compliant ? '#4ade80' : '#94a3b8'} />
+                              </div>
+                              <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#ffffff', margin: '0.3rem 0 0.15rem 0' }}>
+                                {compliant}
+                              </div>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary, #94a3b8)' }}>
+                                {n('approved_unvalidated')} {link('approved, module not validated', 'approved_unvalidated')}
+                                {stale ? <> · {stale} {link('certificate historical', 'validated_sunsetting')}</> : null}
+                              </div>
+                              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.2rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                                {compliant ? link('show compliant', 'compliant') : null}
+                                {verdictFilter !== 'all' && <span onClick={() => setVerdictFilter('all')} style={{ cursor: 'pointer', color: '#38bdf8' }}>clear filter</span>}
+                                <span onClick={() => { if (!isExportingEvidence) void downloadComplianceEvidence(); }} style={{ cursor: 'pointer', textDecoration: 'underline' }}>
+                                  {isExportingEvidence ? 'exporting…' : 'export evidence (CSV)'}
+                                </span>
                               </div>
                             </div>
                           );
@@ -5033,6 +5136,17 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                         padding: '0.1rem 0.4rem', borderRadius: '3px',
                                       }}>
                                         {cmvpChipLabel(a.cmvp)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {a.cmvp && a.complianceVerdict && VERDICT_CHIP[a.complianceVerdict] && (
+                                    <div style={{ marginTop: '0.3rem' }}>
+                                      <span title={verdictChipTitle(a)} style={{
+                                        fontSize: '0.66rem', fontWeight: 700, whiteSpace: 'nowrap',
+                                        color: VERDICT_CHIP[a.complianceVerdict].color, background: VERDICT_CHIP[a.complianceVerdict].bg,
+                                        padding: '0.1rem 0.4rem', borderRadius: '3px',
+                                      }}>
+                                        {VERDICT_CHIP[a.complianceVerdict].label}
                                       </span>
                                     </div>
                                   )}

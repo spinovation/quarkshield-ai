@@ -14,12 +14,14 @@ const windowsModuleProbe = `$v = Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Wind
 $f = Join-Path $env:SystemRoot 'System32\bcryptprimitives.dll'
 $fv = ''
 try { $fv = (Get-Item $f -ErrorAction Stop).VersionInfo.ProductVersion } catch {}
-"$($v.ProductName)|$($v.DisplayVersion)|$($v.CurrentMajorVersionNumber).$($v.CurrentMinorVersionNumber).$($v.CurrentBuild).$($v.UBR)|$fv"`
+$p = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy' -ErrorAction SilentlyContinue
+"$($v.ProductName)|$($v.DisplayVersion)|$($v.CurrentMajorVersionNumber).$($v.CurrentMinorVersionNumber).$($v.CurrentBuild).$($v.UBR)|$fv|$($p.Enabled)|$($p.MDMEnabled)"`
 
 var (
 	winProbeDone bool
 	winProbeEnv  OperatingEnvironment
 	winCNGFile   string
+	winModeFacts []ModeFact
 )
 
 func windowsProbe() {
@@ -37,6 +39,19 @@ func windowsProbe() {
 	winProbeEnv.Name = strings.TrimSpace(name + " " + display)
 	winProbeEnv.Version = version
 	winCNGFile = fileVersion
+	const key = `HKLM\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy`
+	enabled, mdm := parseWindowsFipsPolicy(out)
+	if enabled != "" {
+		winModeFacts = append(winModeFacts, ModeFact{Name: "windows.fips_policy.enabled", Value: enabled, Source: key + `\Enabled`})
+	}
+	if mdm != "" {
+		winModeFacts = append(winModeFacts, ModeFact{Name: "windows.fips_policy.mdm_enabled", Value: mdm, Source: key + `\MDMEnabled`})
+	}
+}
+
+func detectPlatformModeFacts() []ModeFact {
+	windowsProbe()
+	return winModeFacts
 }
 
 func detectOperatingEnvironment() OperatingEnvironment {

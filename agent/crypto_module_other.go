@@ -11,3 +11,6 @@ func detectOperatingEnvironment() OperatingEnvironment {
 func detectPlatformModules(_ OperatingEnvironment) []CryptoModule { return []CryptoModule{} }
 
 func sshBinaryPath() string { return "" }
+
+// No host switch is read on this platform.
+func detectPlatformModeFacts() []ModeFact { return nil }

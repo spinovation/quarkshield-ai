@@ -1,6 +1,6 @@
 # 🔏 QuarkShield — CMVP & FIPS Compliance Mapping
 **Feature Design & Scoping Specification**
-**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) is live in production (2026-11-14); Stage 2 (CBOM honesty fix) is live (2026-11-15); Stage 3 (CMVP module axis for KMS / vault connector keys) is live (2026-11-15); Stage 4 (module identity on hosts) is built, not deployed, and needs agent 2.3.2; Stages 5–6 not built. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a, §9.1b, §9.1c, §9.1d).**
+**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) is live in production (2026-11-14); Stage 2 (CBOM honesty fix) is live (2026-11-15); Stage 3 (CMVP module axis for KMS / vault connector keys) is live (2026-11-15); Stage 4 (module identity on hosts) is live on the server (2026-11-16) and needs agent 2.3.2 to produce data; Stage 5 (FIPS-mode gate, verdict, evidence export) is built, not deployed; Stage 6 not built. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a–§9.1e).**
 **Owner: Platform / Scanner Engineering · Drafted: 2026-11-13 · NIST refs: FIPS 140-2 / 140-3 (CMVP), SP 800-131A Rev. 2, FIPS 203 (ML-KEM) / 204 (ML-DSA) / 205 (SLH-DSA), SP 800-140-series, NSA CNSA 2.0**
 
 ---
@@ -286,7 +286,7 @@ Ordered so that **RFP-citable value ships before the hardest collection work**, 
 | **2 — CBOM honesty fix** ✅ | CBOM `nistQuantumSecurityLevel` reflects the real FIPS parameter set (or is omitted), plus `quarkshield:fipsStatus`/`fipsStandard`/`transitionDate` properties. | Replace `cyclonedx.ts:61` binary `nqsl`; add crypto properties (§6.3). | Stage 1 | **S** | No |
 | **3 — CMVP via connectors (A2, cheapest/highest-confidence)** ✅ | *"This KMS/HSM-backed key is performed by CMVP cert #\<n\> (Active, FIPS 140-3)."* | Vendor `cmvp_modules.json` (§5.2) + offline refresh job; teach KMS/HSM connectors (`pkiConnectorController.ts`) to report module name/vendor/cert for AWS KMS FIPS, CloudHSM, Luna, nShield; populate `cmvp_*` fields on those assets. Prereqs **P-c, P-d, P-e**. | Stages 1, §3.1 | **M** (data curation) | No (connector-side) |
 | **4 — CMVP module identity on hosts (A2, P-a)** ✅ built | *"OpenSSL FIPS Provider 3.0.0 on this host → cert #4282 (environment: RHEL 8 / x86-64)."* | Agent resolves providing module + version + operating environment per finding (extend `sbom_scanner.go` fingerprinting and tie it to the asset); new `AuditResult` module fields; `agent/cmvp.go` resolver with match-precedence gate. | Stage 3 | **M–L** | **Yes** |
-| **5 — Verdict + posture view + FIPS-mode gate (A2, P-b)** | *"Approved algorithm **and** validated module in confirmed FIPS mode → compliant"* vs `approved_unvalidated`. Full posture view + filters (gated); FIPS attestation export (§6.4). | Agent FIPS-mode probes per platform (OpenSSL provider state, CNG policy, BC-FIPS) → confidence `measured` vs `unverified`; cross-product `compliance_verdict` (§4.2); gated posture view + attestation PDF/CSV; provenance stamping. | Stage 4 | **M** | **Yes** |
+| **5 — Verdict + posture view + FIPS-mode gate (A2, P-b)** ✅ built | *"Approved algorithm **and** validated module in confirmed FIPS mode → compliant"* vs `approved_unvalidated`. Full posture view + filters (gated); FIPS attestation export (§6.4). | Agent FIPS-mode probes per platform (OpenSSL provider state, CNG policy, BC-FIPS) → confidence `measured` vs `unverified`; cross-product `compliance_verdict` (§4.2); gated posture view + attestation PDF/CSV; provenance stamping. | Stage 4 | **M** | **Yes** |
 | **6 — CAVP extension (A2′)** | *"The exact algorithm + mode this asset uses is on the module's CAVP list"* → `compliant` vs `compliant_module_algo_unverified`. | Vendor CAVP lists; add `cavpAlgorithms[]` to `cmvp_modules.json`; compute `cavp_covered`; surface as verdict refinement (§3.2). | Stage 5 | **M** (data curation) | No (data + server) |
 
 ### 9.1a Stage 1 — implemented 2026-11-14
@@ -373,7 +373,7 @@ The module axis (A2) now exists for keys discovered by the KMS / vault connector
   - the roadmap rollup and exec report still count approved algorithms as "module validation not yet determined" and do not use the module axis;
   - the connector's own asset list (`EnterprisePkiVaults.tsx`) does not show the module.
 
-### 9.1d Stage 4 — implemented 2026-11-15 (not deployed; needs agent 2.3.2)
+### 9.1d Stage 4 — implemented 2026-11-15, server side deployed 2026-11-16 (needs agent 2.3.2)
 
 The agent now reports which cryptographic modules are on a host, and the server compares that identity with a certificate map. **Needs an agent rebuild**: agents before 2.3.2 send no module report and their hosts are unchanged.
 
@@ -454,6 +454,61 @@ The agent now reports which cryptographic modules are on a host, and the server 
   - nginx / Apache TLS configuration is not tied to a module;
   - the roadmap rollup and exec report do not use the module axis;
   - map refresh is manual, as in Stage 3.
+
+### 9.1e Stage 5 — implemented 2026-11-16 (not deployed; needs agent 2.3.2)
+
+The FIPS-mode gate, the compliance verdict and the evidence export. Stage 4's sentence "a host module never resolves to `active`" is replaced by the gate below; everything else in §9.1d stands.
+
+- **The gate** (`server/src/lib/hostCryptoModules.ts`). A host module's candidate certificate becomes its reported certificate, with the status NIST gives it, only when **both** hold:
+  1. the identity match is `exact` (module version, operating system release and CPU architecture all as tested), and
+  2. the host facts the agent read satisfy the rule that certificate's Security Policy sets for approved mode.
+
+  Anything less stays `unverified`, keeps the candidate, and says which fact was missing or off.
+- **Agent: facts only** (`ModeFact` in `agent/crypto_module*.go`). The agent reports what it read and where; it draws no conclusion.
+
+  | Fact | Read from |
+  | :--- | :--- |
+  | `linux.kernel.fips_enabled` | `/proc/sys/crypto/fips_enabled` |
+  | `linux.crypto_policy.current` / `.config` | `/etc/crypto-policies/state/current`, `/etc/crypto-policies/config` |
+  | `linux.kernel.cmdline_fips` | `fips=` on `/proc/cmdline` |
+  | `openssl.default_providers` | providers shown `status: active` by plain `openssl list -providers` |
+  | `windows.fips_policy.enabled` / `.mdm_enabled` | `HKLM\SYSTEM\CurrentControlSet\Control\Lsa\FipsAlgorithmPolicy` |
+
+  A file that cannot be read produces no fact. Absence is never reported as "off".
+- **Mode rules** (`MODE_RULES`), each restating a Security Policy read on 2026-11-15:
+
+  | Rule | Certificates | Confirmed when |
+  | :--- | :--- | :--- |
+  | `rhel-system-fips` | RHEL 9 #5573 / #4857 / #4746, Oracle Linux 9 #5294, Amazon Linux 2023 #5438 / #5021 | kernel flag is 1, applied crypto policy starts with `FIPS`, and the fips provider is active with no provider other than `base` beside it |
+  | `ubuntu-system-fips` | Ubuntu 22.04 #4794, 24.04 #5115 | kernel flag is 1 and the fips provider is active with no provider other than `base` beside it |
+  | `windows-default` | Windows #5410 | on the validated build only: the Security Policy makes approved mode the module's normal operation and names no setting |
+  | `windows-fips-policy` | Windows #4825 | the FIPS security policy value is 1 |
+
+  - The RHEL Security Policy says to verify with `fips-mode-setup --check`; the two files behind that command are taken from Red Hat's script. For Oracle and Amazon the same two files are assumed, not documented by those vendors.
+  - "No other provider" follows the Security Policies' statement that when another OpenSSL provider is invoked the validated module is not the one in use.
+- **No rule, so never confirmed:**
+  - *Upstream OpenSSL FIPS providers (#5586, #4985, #4811).* Their Security Policies define approved mode by the installed module configuration (`fipsmodule.cnf` settings), which the agent does not read, and they name no system-wide switch.
+  - *Apple corecrypto.* Approved mode is the default with no configuration, but the module's own version cannot be read from the host, so its match is never `exact`.
+  - *Windows #4536, #3197.* Their Security Policies were not read.
+- **What this means in practice.** On hosts, `compliant` is reachable today for RHEL 9, Oracle Linux 9, Amazon Linux 2023 and Ubuntu Pro FIPS systems that run the exact validated provider build in system FIPS mode, and for Windows on the exact validated build (10.0.22621.30001 / 10.0.20348.30000). A Windows machine with any later cumulative update is a different build and stays `unverified`. This is deliberate: the certificate is for a specific binary. Loosening it is a product decision, not a data fix.
+- **Verdict** (`server/src/lib/complianceVerdict.ts`): the §4.2 table, unchanged. `not-assessed` (no module observed) is treated as `none` / `unverified`, so an approved algorithm in a certificate file reads `approved_unvalidated`. Added `not_applicable` for package rows. `compliant` is unreachable without an `active` module status.
+- **Where the verdict appears:**
+  - console: a verdict chip on assets that have a module, a tile "In a validated module" with counts that filter the asset table, and the FIPS-mode evidence in tooltips;
+  - CBOM: `quarkshield:complianceVerdict` on every component; for host assets `cmvpFipsMode` (`confirmed` / `off` / `not-determined`) and `cmvpFipsModeEvidence`; `cmvpCertId` is now set for a host asset that passed the gate;
+  - evidence export: `GET /api/compliance/fips-attestation.csv`, gated by the Risk Assurance add-on (§8) and by support access for platform sessions. One row per asset, stamped with both table versions and a header saying it is evidence as observed, not a certification. CSV only.
+- **What "confirmed" does and does not mean.** It describes the module's configuration as read from the host. It does not show that every application uses that module (Go, Java, NSS, GnuTLS and statically linked programs do not), and QuarkShield did not test the module. Exports say so.
+- **Verified:**
+  - gate, rules, verdict table and CSV (`server/test/hostCryptoModules.test.ts`); agent parsers (`agent/crypto_module_test.go`); full server and security-regression suites; server and UI `tsc --noEmit`; agent builds for Linux, Windows, macOS;
+  - the real Linux agent in a Red Hat UBI 9.9 container with FIPS off: facts reported, ingested into a local server and database, module left `unverified` with mode `off`, evidence CSV built from the stored rows; the export endpoint refuses a request with no session.
+- **Not verified:**
+  - **no host in real FIPS mode was scanned.** The `confirmed` path is covered by unit tests only;
+  - the Windows probe, including the FIPS policy read, has never run on Windows;
+  - the console tile, chips and export button were not viewed in a browser; the export endpoint was not called with a signed-in, entitled session.
+- **Not done:**
+  - PDF form of the evidence export (§6.4 asks for PDF and CSV);
+  - the roadmap rollup, exec report and QSG posture payload do not use the verdict (§6.1, §8);
+  - `compliance_verdict` is not persisted (§7.1); it is computed on read, as A1 is;
+  - Java (BC-FIPS) mode probes named in the Stage 5 row.
 
 ### 9.2 Sequencing rationale
 
