@@ -38,6 +38,11 @@ type AuditResult struct {
 	Cvss                 float64  `json:"cvss,omitempty"`
 	CveDetails           string   `json:"cveDetails,omitempty"`
 	Purl                 string   `json:"purl,omitempty"`
+	// CMVP/FIPS Stage 4: the host module that performs this finding's cryptography, as a
+	// reference into the host module report, and why the two are tied. Empty for data
+	// (certificate and key files), which no module on the host can be observed for.
+	CryptoModule         string `json:"cryptoModule,omitempty"`
+	CryptoModuleEvidence string `json:"cryptoModuleEvidence,omitempty"`
 }
 
 type LineViolation struct {

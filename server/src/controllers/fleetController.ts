@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
+import { sanitizeHostModuleReport, moduleDetailFor } from '../lib/hostCryptoModules';
 import { maybeSendAlert } from '../lib/alerts';
 import { canAccessTenant, resolveWriteTenant, superNeedsGrant, denyUnscoped } from '../middleware/auth';
 import { getTenantAggregates, totalsOf } from '../lib/tenantAggregates';
@@ -254,7 +255,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
     let query = `
       SELECT 
         a.id, a.type, a.name, a.path, a.algorithm, a.key_size, a.hash_algorithm, a.purpose,
-        a.crypto_module, a.crypto_module_evidence,
+        a.crypto_module, a.crypto_module_evidence, a.crypto_module_detail,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.created_at,
         a.machine_id, a.source, a.source_ref as "sourceRef",
@@ -340,6 +341,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         purpose: r.purpose,
         cryptoModule: r.crypto_module,
         cryptoModuleEvidence: r.crypto_module_evidence,
+        cryptoModuleDetail: r.crypto_module_detail,
         isVulnerable: r.is_vulnerable,
         assetKind: r.type,
         status: r.status,
@@ -821,6 +823,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     let mediumCount = 0;
 
     const processedAssets: any[] = [];
+    // CMVP/FIPS Stage 4: modules the agent observed on the host (absent from agents before 2.3.2).
+    const hostModuleReport = sanitizeHostModuleReport(req.body?.crypto_modules);
 
     for (let idx = 0; idx < safeAssets.length; idx++) {
       const rawAsset = safeAssets[idx];
@@ -941,7 +945,11 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         explainer,
         compliance_violations: complianceViolations,
         machine_id: machineId,
-        path: rawAsset.path || ''
+        path: rawAsset.path || '',
+        // Stage 4: the host module this finding is tied to, only when the agent's own
+        // module report contains the reference it names.
+        module_detail: moduleDetailFor(hostModuleReport, rawAsset.cryptoModule),
+        module_evidence: typeof rawAsset.cryptoModuleEvidence === 'string' ? rawAsset.cryptoModuleEvidence.slice(0, 600) : null
       });
     }
 
@@ -1070,6 +1078,13 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       await pool.query('UPDATE fleet_tokens SET status = $1, last_sync = CURRENT_TIMESTAMP WHERE id = $2', ['active', tokenRow.id]);
     }
 
+    // Stage 4: keep the host's module report from this scan. Scoped to the token the upsert just wrote, so a
+    // report the upsert's tenant guard refused cannot land on another tenant's machine row.
+    // An agent that sends no report (older than 2.3.2) clears it: a stale list must not outlive
+    // the scan it came from.
+    await pool.query('UPDATE fleet_machines SET crypto_modules = $1 WHERE id = $2 AND token_id IS NOT DISTINCT FROM $3',
+      [hostModuleReport ? JSON.stringify(hostModuleReport) : null, machineId, tokenRow.id]);
+
     // BILL-7: record + geolocate the machine's PUBLIC egress IP (from Cloudflare
     // headers on this report). Fire-and-forget; the stored `ip` above stays the
     // agent's local interface address.
@@ -1100,8 +1115,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         id, type, name, algorithm, key_size, hash_algorithm, 
         is_vulnerable, risk_level, status, description, 
         recommendation, explainer, compliance_violations, machine_id, path,
-        tenant_name, source, source_ref, purpose
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        tenant_name, source, source_ref, purpose,
+        crypto_module, crypto_module_evidence, crypto_module_detail
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         algorithm = EXCLUDED.algorithm,
@@ -1119,7 +1135,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         tenant_name = EXCLUDED.tenant_name,
         source = EXCLUDED.source,
         source_ref = EXCLUDED.source_ref,
-        purpose = EXCLUDED.purpose;
+        purpose = EXCLUDED.purpose,
+        crypto_module = EXCLUDED.crypto_module,
+        crypto_module_evidence = EXCLUDED.crypto_module_evidence,
+        crypto_module_detail = EXCLUDED.crypto_module_detail;
     `;
 
     for (const a of processedAssets) {
@@ -1134,7 +1153,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         a.id, a.type, a.name, a.algorithm, a.key_size, a.hash_algorithm,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.machine_id,
-        a.path, assignedTenant, 'endpoint_deploy', cleanHost, purpose
+        a.path, assignedTenant, 'endpoint_deploy', cleanHost, purpose,
+        a.module_detail ? a.module_detail.key : null,
+        a.module_detail ? a.module_evidence : null,
+        a.module_detail ? JSON.stringify(a.module_detail) : null
       ]);
     }
     await txn.query('COMMIT');

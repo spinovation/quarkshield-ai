@@ -73,6 +73,10 @@ CREATE INDEX IF NOT EXISTS idx_assets_purpose ON assets(purpose);
 -- stored certificate would go stale when NIST moves it to Historical. NULL = not observed.
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_module VARCHAR(60);
 ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_module_evidence TEXT;
+-- CMVP/FIPS Stage 4: host module identity reported by the agent (name, version, FIPS provider,
+-- operating environment). Identity only: the certificate is looked up on read, never stored.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_module_detail JSONB;
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS crypto_modules JSONB;
 ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);

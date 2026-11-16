@@ -156,6 +156,36 @@ interface TenantPortalProps {
   onWorkspaceResolved?: (workspace: string) => void;
 }
 
+/** A cryptographic module and what the CMVP map says about it. Resolved server-side. */
+interface ModuleView {
+  status: 'active' | 'historical' | 'revoked' | 'none' | 'unverified';
+  /** provider-reported: a cloud provider's published certificate for its service.
+   *  host-observed: a module the agent identified on a host. Never carries certIds: identity is
+   *  not validation, so at most a candidate certificate is shown. */
+  basis?: 'provider-reported' | 'host-observed';
+  moduleName: string;
+  moduleVersion?: string;
+  environment?: string;
+  vendor?: string;
+  certIds: string[];
+  standard?: string;     // 'FIPS 140-2' | 'FIPS 140-3'
+  level?: number;
+  sunsetDate?: string;
+  candidate?: {
+    certId: string;
+    moduleName: string;
+    standard: string;
+    level: number;
+    certStatus: 'active' | 'historical' | 'revoked';
+    sunsetDate?: string;
+    match: 'exact' | 'release' | 'version';
+    matchNote: string;
+  };
+  evidence?: string;     // the fact the module was derived from
+  note?: string;
+  mapVersion: string;
+}
+
 interface FleetMachine {
   id: string;
   hostname: string;
@@ -183,6 +213,8 @@ interface FleetMachine {
   tenantName: string;
   licenseKey: string;
   groupName?: string;
+  /** Stage 4: cryptographic modules the agent identified on this host (agents 2.3.2 and later). */
+  cryptoModules?: ModuleView[];
 }
 
 interface DailySnapshot {
@@ -213,19 +245,9 @@ interface Asset {
   // NOT CMVP module validation. Computed server-side by lib/fipsAlgorithmStatus.ts.
   fipsStatus?: 'pq_approved' | 'approved' | 'acceptable' | 'restricted' | 'disallowed' | 'non_fips' | 'not_applicable' | 'unknown';
   fipsStandard?: string;
-  /** CMVP module axis (Stage 3): present only when a KMS / vault connector reported the module holding the key. */
-  cmvp?: {
-    status: 'active' | 'historical' | 'revoked' | 'none' | 'unverified';
-    moduleName: string;
-    vendor?: string;
-    certIds: string[];
-    standard?: string;     // 'FIPS 140-2' | 'FIPS 140-3'
-    level?: number;
-    sunsetDate?: string;
-    evidence?: string;     // the API fact the module was derived from
-    note?: string;
-    mapVersion: string;
-  };
+  /** CMVP module axis: present when a KMS / vault connector reported the module holding the key
+   *  (Stage 3), or the agent tied the finding to a module it observed on the host (Stage 4). */
+  cmvp?: ModuleView;
   fipsTransitionDate?: string | null;
   fipsDraft?: boolean;
   createdAt: string;
@@ -317,6 +339,11 @@ const CMVP_CHIP: Record<NonNullable<Asset['cmvp']>['status'], { color: string; b
 };
 
 const cmvpChipLabel = (c: NonNullable<Asset['cmvp']>): string => {
+  if (c.basis === 'host-observed') {
+    const name = `${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}`;
+    if (c.candidate) return `${name} · candidate CMVP #${c.candidate.certId}${c.candidate.certStatus === 'active' ? '' : ` (${c.candidate.certStatus})`}`;
+    return `${name} · ${c.status === 'none' ? 'no validated module' : 'no certificate matched'}`;
+  }
   const certs = c.certIds.map(id => `#${id}`).join(' / ');
   const lvl = c.standard ? ` · ${c.standard}${c.level ? ` L${c.level}` : ''}` : '';
   if (c.status === 'active') return `CMVP ${certs}${lvl}`;
@@ -327,6 +354,17 @@ const cmvpChipLabel = (c: NonNullable<Asset['cmvp']>): string => {
 };
 
 const cmvpChipTitle = (c: NonNullable<Asset['cmvp']>): string => {
+  if (c.basis === 'host-observed') {
+    const p = [`Module identified on the host: ${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}${c.environment ? `, on ${c.environment}` : ''}.`];
+    if (c.candidate) {
+      p.push(`Candidate certificate: CMVP #${c.candidate.certId} (${c.candidate.moduleName}, ${c.candidate.standard} Level ${c.candidate.level}, ${c.candidate.certStatus} on NIST${c.candidate.sunsetDate ? `, sunset ${c.candidate.sunsetDate}` : ''}).`);
+      p.push(c.candidate.matchNote);
+      p.push('This is a match on identity, not a validation claim: whether the module runs in FIPS-approved mode was not checked.');
+    } else if (c.note) p.push(c.note);
+    if (c.evidence) p.push(`Basis: ${c.evidence}`);
+    p.push(`CMVP map ${c.mapVersion}; QuarkShield did not test the module.`);
+    return p.join(' ');
+  }
   const parts = [`Module: ${c.moduleName}${c.vendor ? ` (${c.vendor})` : ''}.`];
   if (c.evidence) parts.push(`Basis: ${c.evidence}.`);
   if (c.certIds.length > 1) parts.push('The provider lists more than one certificate for this service; which one serves this key is not visible to a customer.');
@@ -1755,11 +1793,17 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           ...(a.cmvp ? [
             { name: "quarkshield:cmvpModule", value: a.cmvp.moduleName },
             ...(a.cmvp.certIds.length ? [{ name: "quarkshield:cmvpCertId", value: a.cmvp.certIds.join(",") }] : []),
-            { name: "quarkshield:cmvpBasis", value: "provider-reported" },
+            ...(a.cmvp.moduleVersion ? [{ name: "quarkshield:cmvpModuleVersion", value: a.cmvp.moduleVersion }] : []),
+            ...(a.cmvp.candidate ? [
+              { name: "quarkshield:cmvpCandidateId", value: a.cmvp.candidate.certId },
+              { name: "quarkshield:cmvpCandidateMatch", value: a.cmvp.candidate.match },
+            ] : []),
+            ...(a.cmvp.basis === 'host-observed' ? [{ name: "quarkshield:cmvpFipsMode", value: "not-checked" }] : []),
+            { name: "quarkshield:cmvpBasis", value: a.cmvp.basis || "provider-reported" },
             { name: "quarkshield:cmvpMapVersion", value: a.cmvp.mapVersion },
           ] : []),
           ...(a.fipsTransitionDate ? [{ name: "quarkshield:transitionDate", value: a.fipsTransitionDate }] : []),
-          { name: "quarkshield:cmvpStatus", value: "not-assessed" },
+          { name: "quarkshield:cmvpStatus", value: a.cmvp ? a.cmvp.status : "not-assessed" },
           // Never default to a standard name: an absent value would read as a compliance claim in the exported CBOM.
           { name: "complianceStandards", value: (Array.isArray(a.complianceViolations) ? a.complianceViolations.join(', ') : a.complianceViolations) || 'None recorded' },
           { name: "hostMachine", value: a.hostname || "Workstation" },
@@ -4008,6 +4052,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 }}>
                                   {isMac ? 'macOS (arm64)' : isWin ? 'Windows (x64)' : m.os}
                                 </span>
+                                {(m.cryptoModules || []).map((c, i) => (
+                                  <div key={i} title={cmvpChipTitle(c)} style={{ fontSize: '0.66rem', color: '#94a3b8', marginTop: '0.25rem', cursor: 'help', maxWidth: '22rem' }}>
+                                    {cmvpChipLabel(c)}
+                                  </div>
+                                ))}
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem', color: 'var(--text-secondary, #94a3b8)' }}>
                                 <div style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
