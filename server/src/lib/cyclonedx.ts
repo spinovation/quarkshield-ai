@@ -4,6 +4,7 @@ import { isClassicalAsymmetric } from './threatGraph/cryptoPurpose';
 import { nistCertificateUrl } from './cmvpModules';
 import { resolveAssetModule, isHostResolution } from './hostCryptoModules';
 import { complianceVerdict } from './complianceVerdict';
+import { cavpCoverage, cavpValidationsOf } from './cavpCoverage';
 
 /**
  * CycloneDX 1.6 cryptographic-asset helpers (DEF-44 / DEF-45).
@@ -109,6 +110,8 @@ export const cbomComponent = (i: CbomAssetInput): any => {
     algorithm: i.algorithm || '', key_size: i.keySize, hash_algorithm: i.hashAlgorithm,
     purpose: i.purpose, type: i.assetKind,
   });
+  const cavp = cavpCoverage(cmvp.certIds, { algorithm: i.algorithm, hash_algorithm: i.hashAlgorithm, purpose: i.purpose });
+  const cavpIds = cavpValidationsOf(cavp);
 
   if (assetType === 'related-crypto-material') {
     cryptoProperties.relatedCryptoMaterialProperties = {
@@ -178,7 +181,13 @@ export const cbomComponent = (i: CbomAssetInput): any => {
     cmvp.moduleKey ? { name: 'quarkshield:cmvpMapVersion', value: cmvp.mapVersion } : null,
     // Algorithm axis x module axis (Stage 5, one fixed table). `compliant` is reachable only
     // through a module whose current certificate was matched; see complianceVerdict.ts.
-    { name: 'quarkshield:complianceVerdict', value: complianceVerdict(fips.status, cmvp.status) },
+    // CAVP coverage (Stage 6): only where a certificate is reported. `unknown` is stated as
+    // such and never changes the verdict; see cavpCoverage.ts.
+    cmvp.certIds.length ? { name: 'quarkshield:cavpCovered', value: cavp.state } : null,
+    cmvp.certIds.length && cavpIds.length ? { name: 'quarkshield:cavpValidations', value: cavpIds.join(',') } : null,
+    cmvp.certIds.length ? { name: 'quarkshield:cavpNote', value: cavp.note } : null,
+    cmvp.certIds.length ? { name: 'quarkshield:cavpMapVersion', value: cavp.mapVersion } : null,
+    { name: 'quarkshield:complianceVerdict', value: complianceVerdict(fips.status, cmvp.status, cavp.state) },
     i.riskLevel ? { name: 'quarkshield:riskLevel', value: String(i.riskLevel) } : null,
     i.recommendation ? { name: 'quarkshield:recommendation', value: String(i.recommendation) } : null,
     i.explainer ? { name: 'quarkshield:explainer', value: String(i.explainer) } : null,

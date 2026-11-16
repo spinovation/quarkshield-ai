@@ -11,6 +11,7 @@ import { fipsAlgorithmStatus, FIPS_TABLE_VERSION } from './fipsAlgorithmStatus';
 import { CMVP_MAP_VERSION, nistCertificateUrl } from './cmvpModules';
 import { resolveAssetModule, isHostResolution } from './hostCryptoModules';
 import { complianceVerdict, ComplianceVerdict, emptyVerdictCounts } from './complianceVerdict';
+import { cavpCoverage, cavpValidationsOf, CAVP_MAP_VERSION } from './cavpCoverage';
 
 export interface AttestationAssetRow {
   id: string; name: string; type?: string | null; hostname?: string | null; path?: string | null;
@@ -27,6 +28,8 @@ export interface AssetCompliance {
   basis?: 'provider-reported' | 'host-observed';
   candidateCertId?: string; candidateMatch?: string;
   fipsMode?: string; fipsModeEvidence?: string;
+  // Stage 6: is this algorithm on the reported certificate's approved-algorithm list?
+  cavpCovered: string; cavpCertId?: string; cavpValidations: string[]; cavpNote: string;
   note?: string;
 }
 
@@ -35,8 +38,9 @@ export const assessAsset = (a: AttestationAssetRow): AssetCompliance => {
   const f = fipsAlgorithmStatus({ algorithm: a.algorithm || '', key_size: a.key_size, hash_algorithm: a.hash_algorithm, purpose: a.purpose, type: a.type });
   const m = resolveAssetModule(a.crypto_module, a.crypto_module_detail);
   const host = isHostResolution(m) ? m : undefined;
+  const cavp = cavpCoverage(m.certIds, { algorithm: a.algorithm, hash_algorithm: a.hash_algorithm, purpose: a.purpose });
   return {
-    verdict: complianceVerdict(f.status, m.status),
+    verdict: complianceVerdict(f.status, m.status, cavp.state),
     fipsStatus: f.status, fipsStandard: f.standard, fipsRuleId: f.ruleId, fipsDisallowedAfter: f.disallowedAfter, fipsDraft: f.draft,
     cmvpStatus: m.status,
     moduleName: m.moduleName, moduleVersion: host?.moduleVersion, environment: host?.environment,
@@ -44,6 +48,7 @@ export const assessAsset = (a: AttestationAssetRow): AssetCompliance => {
     basis: m.moduleKey ? (host ? 'host-observed' : 'provider-reported') : undefined,
     candidateCertId: host?.candidate?.certId, candidateMatch: host?.candidate?.match,
     fipsMode: host?.fipsMode?.state, fipsModeEvidence: host?.fipsMode?.evidence,
+    cavpCovered: cavp.state, cavpCertId: m.certIds.length ? cavp.certId : undefined, cavpValidations: cavpValidationsOf(cavp), cavpNote: cavp.note,
     note: m.note,
   };
 };
@@ -61,6 +66,7 @@ export const ATTESTATION_COLUMNS = [
   'Module', 'Module version', 'Operating environment', 'Module basis',
   'CMVP status', 'CMVP certificate', 'Certificate URL', 'Standard / level', 'Certificate sunset',
   'Candidate certificate', 'Candidate match', 'FIPS mode', 'FIPS mode evidence', 'Module evidence',
+  'Algorithm on module CAVP list', 'CAVP validations', 'CAVP note',
   'Verdict', 'Note',
 ] as const;
 
@@ -75,7 +81,8 @@ export const buildAttestationCsv = (tenant: string, assets: AttestationAssetRow[
   meta('Generated', generatedAt.toISOString());
   meta('FIPS algorithm table', FIPS_TABLE_VERSION);
   meta('CMVP module map', CMVP_MAP_VERSION);
-  meta('Reading this report', 'Evidence as observed by QuarkShield, not a certification. "compliant" means an approved algorithm paired with a module whose current CMVP certificate was matched: for a cloud key the provider-published certificate, for a host an exact identity match with FIPS-approved mode confirmed from host facts. QuarkShield did not test any module. A blank cell means nothing was observed.');
+  meta('CAVP algorithm lists', CAVP_MAP_VERSION);
+  meta('Reading this report', 'Evidence as observed by QuarkShield, not a certification. "compliant" means an approved algorithm paired with a module whose current CMVP certificate was matched: for a cloud key the provider-published certificate, for a host an exact identity match with FIPS-approved mode confirmed from host facts. "Algorithm on module CAVP list" compares the algorithm and mode of the asset with the approved-algorithm list on the NIST certificate page of its module; key sizes and curves are not compared, and it is blank where no certificate is reported. QuarkShield did not test any module. A blank cell means nothing was observed.');
   lines.push(ATTESTATION_COLUMNS.map(cell).join(','));
   for (const a of assets) {
     const c = assessAsset(a);
@@ -87,6 +94,7 @@ export const buildAttestationCsv = (tenant: string, assets: AttestationAssetRow[
       c.cmvpStatus, c.certIds.map(id => `#${id}`).join(' '), c.certIds.map(nistCertificateUrl).join(' '),
       c.certIds.length && c.cmvpStandard ? `${c.cmvpStandard}${c.cmvpLevel ? ` Level ${c.cmvpLevel}` : ''}` : '', c.certIds.length ? c.cmvpSunsetDate : '',
       c.candidateCertId ? `#${c.candidateCertId}` : '', c.candidateMatch, c.fipsMode, c.fipsModeEvidence, a.crypto_module_evidence,
+      c.certIds.length ? c.cavpCovered : '', c.cavpValidations.join(' '), c.certIds.length ? c.cavpNote : '',
       c.verdict, c.note,
     ].map(cell).join(','));
   }

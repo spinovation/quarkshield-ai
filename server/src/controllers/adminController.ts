@@ -21,6 +21,7 @@ import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
 import { fipsAlgorithmStatus } from '../lib/fipsAlgorithmStatus';
 import { moduleForConsole, hostModulesForConsole } from '../lib/hostCryptoModules';
 import { complianceVerdict as computeVerdict } from '../lib/complianceVerdict';
+import { cavpCoverage, cavpValidationsOf } from '../lib/cavpCoverage';
 import { withUpgradeState } from '../lib/agentUpgradeState';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
@@ -3547,9 +3548,15 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       // the key. Resolved on read from the versioned map; absent for every other asset.
       const { cryptoModuleDetail, ...row } = a;
       const mod = a.cryptoModule ? moduleForConsole(a.cryptoModule, a.cryptoModuleEvidence, cryptoModuleDetail) : undefined;
-      const cmvp = mod ? { cmvp: mod } : {};
+      // CAVP coverage (Stage 6): only where a certificate is reported for the module. It rides
+      // on the module view, and can only refine `compliant`, never produce it.
+      const cavpR = mod && mod.certIds.length
+        ? cavpCoverage(mod.certIds, { algorithm: a.algorithm, hash_algorithm: a.hashAlgorithm, purpose: a.purpose })
+        : undefined;
+      const cavp = cavpR ? { state: cavpR.state, note: cavpR.note, validations: cavpValidationsOf(cavpR), mapVersion: cavpR.mapVersion } : undefined;
+      const cmvp = mod ? { cmvp: cavp ? { ...mod, cavp } : mod } : {};
       // Compliance verdict (Stage 5): the two axes crossed by one fixed table.
-      const complianceVerdict = computeVerdict(f.status, mod ? mod.status : 'not-assessed');
+      const complianceVerdict = computeVerdict(f.status, mod ? mod.status : 'not-assessed', cavpR?.state);
       return { ...row, complianceVerdict, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft, ...cmvp };
     });
 

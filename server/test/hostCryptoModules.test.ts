@@ -402,8 +402,14 @@ test('"compliant" is unreachable without an active module status', () => {
 
 test('assessAsset: host asset through the gate is compliant; the same asset without it is not', () => {
   const base = { id: 'a', name: 'key exchange', type: 'algorithm', algorithm: 'ML-KEM-768', purpose: 'key_establishment', crypto_module: 'openssl' };
+  // Stage 6: #5573's approved-algorithm list has AES-GCM but no ML-KEM, so the same gated
+  // module gives `compliant` for one and the refined verdict for the other.
+  const aes = assessAsset({ ...base, algorithm: 'AES-256-GCM', purpose: 'encryption', crypto_module_detail: rhel() });
+  assert.equal(aes.verdict, 'compliant');
+  assert.equal(aes.cavpCovered, 'covered');
   const on = assessAsset({ ...base, crypto_module_detail: rhel() });
-  assert.equal(on.verdict, 'compliant');
+  assert.equal(on.verdict, 'compliant_module_algo_unverified');
+  assert.equal(on.cavpCovered, 'not_covered');
   assert.deepEqual(on.certIds, ['5573']);
   assert.equal(on.fipsMode, 'confirmed');
   const off = assessAsset({ ...base, crypto_module_detail: rhel({ hostModeFacts: undefined }) });
@@ -411,12 +417,12 @@ test('assessAsset: host asset through the gate is compliant; the same asset with
   assert.equal(off.candidateCertId, '5573');
   assert.equal(assessAsset({ ...base, crypto_module: null }).verdict, 'approved_unvalidated');
   assert.equal(assessAsset({ ...base, algorithm: 'MD5', crypto_module_detail: rhel() }).verdict, 'noncompliant', 'a validated module does not rescue a disallowed algorithm');
-  assert.equal(assessAsset({ ...base, crypto_module: 'aws-kms-hsm' }).verdict, 'compliant');
+  assert.equal(assessAsset({ ...base, algorithm: 'AES-256-GCM', purpose: 'encryption', crypto_module: 'aws-kms-hsm' }).verdict, 'compliant');
 });
 
 test('evidence CSV: stamped, one row per asset, formula cells neutralised', () => {
   const out = buildAttestationCsv('Acme, Inc.', [
-    { id: '1', name: '=HYPERLINK("http://x","y")', type: 'algorithm', algorithm: 'ML-KEM-768', purpose: 'key_establishment', crypto_module: 'openssl', crypto_module_detail: rhel(), hostname: 'web01' },
+    { id: '1', name: '=HYPERLINK("http://x","y")', type: 'algorithm', algorithm: 'AES-256-GCM', purpose: 'encryption', crypto_module: 'openssl', crypto_module_detail: rhel(), hostname: 'web01' },
     { id: '2', name: 'CN=web', type: 'certificate', algorithm: 'RSA', key_size: 1024, hostname: '+cmd' },
   ], new Date('2026-11-16T00:00:00Z'));
   const lines = out.csv.trim().split('\r\n');

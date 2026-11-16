@@ -1,6 +1,6 @@
 # 🔏 QuarkShield — CMVP & FIPS Compliance Mapping
 **Feature Design & Scoping Specification**
-**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) is live in production (2026-11-14); Stage 2 (CBOM honesty fix) is live (2026-11-15); Stage 3 (CMVP module axis for KMS / vault connector keys) is live (2026-11-15); Stage 4 (module identity on hosts) is live on the server (2026-11-16) and needs agent 2.3.2 to produce data; Stage 5 (FIPS-mode gate, verdict, evidence export) is built, not deployed; Stage 6 not built. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a–§9.1e).**
+**Status: 🟡 ROADMAP / OPPORTUNITY — Stage 1 (FIPS algorithm axis) is live in production (2026-11-14); Stage 2 (CBOM honesty fix) is live (2026-11-15); Stage 3 (CMVP module axis for KMS / vault connector keys) is live (2026-11-15); Stage 4 (module identity on hosts) and Stage 5 (FIPS-mode gate, verdict, evidence export) are live on the server (2026-11-16) and need agent 2.3.2 to produce host data; Stage 6 (CAVP coverage) is built, not deployed. This document designs a capability; it does not describe current behavior unless a section is explicitly marked "Today" or ✅ (see §9.1a–§9.1f).**
 **Owner: Platform / Scanner Engineering · Drafted: 2026-11-13 · NIST refs: FIPS 140-2 / 140-3 (CMVP), SP 800-131A Rev. 2, FIPS 203 (ML-KEM) / 204 (ML-DSA) / 205 (SLH-DSA), SP 800-140-series, NSA CNSA 2.0**
 
 ---
@@ -455,7 +455,7 @@ The agent now reports which cryptographic modules are on a host, and the server 
   - the roadmap rollup and exec report do not use the module axis;
   - map refresh is manual, as in Stage 3.
 
-### 9.1e Stage 5 — implemented 2026-11-16 (not deployed; needs agent 2.3.2)
+### 9.1e Stage 5 — implemented and server side deployed 2026-11-16 (needs agent 2.3.2)
 
 The FIPS-mode gate, the compliance verdict and the evidence export. Stage 4's sentence "a host module never resolves to `active`" is replaced by the gate below; everything else in §9.1d stands.
 
@@ -509,6 +509,44 @@ The FIPS-mode gate, the compliance verdict and the evidence export. Stage 4's se
   - the roadmap rollup, exec report and QSG posture payload do not use the verdict (§6.1, §8);
   - `compliance_verdict` is not persisted (§7.1); it is computed on read, as A1 is;
   - Java (BC-FIPS) mode probes named in the Stage 5 row.
+
+### 9.1f Stage 6 — implemented 2026-11-16 (not deployed)
+
+CAVP coverage: for an asset whose module has a reported certificate, is the asset's algorithm on that certificate's approved-algorithm list? Server only; no agent change and no schema change.
+
+- **Data** (`server/src/lib/cavpData.ts`, generated). The "Approved Algorithms" list from each module's NIST CMVP certificate page, with the CAVP validation numbers NIST prints beside each name. 22 of the 27 certificates in the two module maps have a structured list (every FIPS 140-3 certificate); 1,205 entries. Pages were read on 2026-11-15 and 2026-11-16; the file is stamped `CAVP_DATA_READ = 2026-11-16`.
+  - The five without a list are FIPS 140-2 certificates (#3197, #3678, #4536, #4811, #4825), whose pages use a different layout. All five are Historical, so none can produce `compliant` and coverage would change nothing for them.
+  - Rebuild: save the certificate pages, then `python3 scripts/build-cavp-data.py <dir> [date]` from `server/`. The script reads only certificates named in the module maps and fetches nothing itself. There is still no scheduled refresh job (§5.2).
+  - §3.2 proposed `cavpAlgorithms[]` inside a `cmvp_modules.json`. The maps are TypeScript, so the lists live in their own generated file keyed by certificate number instead.
+- **Coverage** (`server/src/lib/cavpCoverage.ts`). The asset's recorded algorithm text is turned into one or more needs (for example `ECDHE-RSA-AES128-GCM-SHA256` needs AES-GCM, ECDH key agreement, RSA signature and SHA2-256), and each need is looked up on the list.
+
+  | Result | When |
+  | :--- | :--- |
+  | `covered` | every need has an entry on the list of a certificate reported for the module |
+  | `not_covered` | every reported certificate has a list, and none covers every need |
+  | `unknown` | no certificate is reported; or a reported certificate has no list; or the algorithm text maps to nothing CAVP-testable |
+
+  With several certificates, one that covers is enough, and a certificate without a list blocks `not_covered`.
+- **Granularity, stated in every result.** The certificate page lists algorithm and mode. Key sizes, curves, digest sizes inside a signature scheme and other tested capabilities are on the individual CAVP validations, which are not read. `covered` therefore means "this algorithm, and the mode if one was observed, was tested in this module", not "these exact parameters were". Where the asset names no mode (`AES-256`), the match is on the family and the result says the mode was not observed.
+- **Verdict** (`complianceVerdict.ts`). One new value, `compliant_module_algo_unverified`: approved algorithm, module with a current certificate, algorithm not on its list. Only `not_covered` produces it, and only from `compliant` or `compliant_until`. `covered` and `unknown` change nothing, coverage never improves a verdict, and a verdict that was not compliant is untouched. Tests enumerate the whole table to hold that.
+- **What it catches today, from the real lists:**
+  - ML-KEM, ML-DSA and SLH-DSA are on one list only: upstream OpenSSL 3.5.9 (#5586). An ML-DSA key in AWS KMS (#4884), or ML-KEM negotiated on a RHEL 9 host in FIPS mode (#5573), is an approved algorithm in a validated module that was not validated for it.
+  - EdDSA is likewise only on #5586; an Ed25519 SSH host key on RHEL 9 in FIPS mode is refined.
+  - Triple-DES is absent from the Windows #5410 list.
+- **Where it appears:**
+  - console: the verdict chip "Validated module · algorithm not on its list", the coverage note and validation numbers in the chip tooltip, and a count with a filter link on the "In a Validated Module" tile;
+  - CBOM (server and console exports): `quarkshield:cavpCovered`, `cavpValidations`, `cavpNote`, `cavpMapVersion`, present only where a certificate is reported; `complianceVerdict` uses the refinement;
+  - evidence CSV: columns "Algorithm on module CAVP list", "CAVP validations", "CAVP note", a `# CAVP algorithm lists` version line, and a sentence in the reading note. The cells are blank where no certificate is reported.
+- **Also fixed here (both left from earlier stages, found by using the console):**
+  - the console's own CBOM export wrote `cmvpFipsMode = not-checked` for every host module and omitted the verdict. It now writes the Stage 5 state and evidence, and `quarkshield:complianceVerdict`;
+  - the filter links on the "In a Validated Module" tile filtered the Asset Inventory table on the other sub-tab, so clicking them changed nothing under the tile. They now filter the table the tile sits above, and "show compliant" includes the sunset variant, as the tile's number does.
+- **Verified:** `server/test/cavpCoverage.test.ts` (data integrity, name mapping, coverage against the real lists, the verdict table, CSV and CBOM); full server and security-regression suites; server and UI `tsc --noEmit`.
+  - In a browser, against a local server and database seeded with three AWS KMS keys, two findings on a RHEL 9 host in FIPS mode and one plain certificate, signed in as a tenant admin: the verdict chips and their tooltips, the tile count, each filter link, and the evidence CSV downloaded with an entitled session (and refused with 403 for a tenant without the Risk Assurance add-on). This is also the first time the Stage 5 tile, chips and export were exercised in a browser.
+- **Not verified / not done:**
+  - coverage is reachable on real data only for cloud keys (Stage 3) until agent 2.3.2 reports host modules, and no customer KMS connector has been synced against a live account;
+  - parameter-level coverage (key size, curve) by reading the individual CAVP validations;
+  - lists for the five FIPS 140-2 certificates;
+  - the roadmap rollup, exec report and QSG posture payload still do not use the verdict (unchanged from Stage 5).
 
 ### 9.2 Sequencing rationale
 
