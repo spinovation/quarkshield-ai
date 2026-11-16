@@ -254,6 +254,7 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
     let query = `
       SELECT 
         a.id, a.type, a.name, a.path, a.algorithm, a.key_size, a.hash_algorithm, a.purpose,
+        a.crypto_module, a.crypto_module_evidence,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.created_at,
         a.machine_id, a.source, a.source_ref as "sourceRef",
@@ -337,6 +338,8 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         keySize: r.key_size,
         hashAlgorithm: r.hash_algorithm,
         purpose: r.purpose,
+        cryptoModule: r.crypto_module,
+        cryptoModuleEvidence: r.crypto_module_evidence,
         isVulnerable: r.is_vulnerable,
         assetKind: r.type,
         status: r.status,

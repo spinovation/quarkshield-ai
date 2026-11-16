@@ -213,6 +213,19 @@ interface Asset {
   // NOT CMVP module validation. Computed server-side by lib/fipsAlgorithmStatus.ts.
   fipsStatus?: 'pq_approved' | 'approved' | 'acceptable' | 'restricted' | 'disallowed' | 'non_fips' | 'not_applicable' | 'unknown';
   fipsStandard?: string;
+  /** CMVP module axis (Stage 3): present only when a KMS / vault connector reported the module holding the key. */
+  cmvp?: {
+    status: 'active' | 'historical' | 'revoked' | 'none' | 'unverified';
+    moduleName: string;
+    vendor?: string;
+    certIds: string[];
+    standard?: string;     // 'FIPS 140-2' | 'FIPS 140-3'
+    level?: number;
+    sunsetDate?: string;
+    evidence?: string;     // the API fact the module was derived from
+    note?: string;
+    mapVersion: string;
+  };
   fipsTransitionDate?: string | null;
   fipsDraft?: boolean;
   createdAt: string;
@@ -292,10 +305,41 @@ const FIPS_CHIP: Record<NonNullable<Asset['fipsStatus']>, { label: string; color
   unknown:        { label: 'FIPS: not determined',     color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)' },
 };
 
+// CMVP module chip. Wording discipline: a certificate is shown as what the PROVIDER publishes
+// for the service holding the key — QuarkShield did not test the module, and this is not a
+// compliance verdict (that needs the algorithm axis and FIPS-mode evidence together).
+const CMVP_CHIP: Record<NonNullable<Asset['cmvp']>['status'], { color: string; bg: string }> = {
+  active:     { color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)' },
+  historical: { color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)' },
+  revoked:    { color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)' },
+  none:       { color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)' },
+  unverified: { color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)' },
+};
+
+const cmvpChipLabel = (c: NonNullable<Asset['cmvp']>): string => {
+  const certs = c.certIds.map(id => `#${id}`).join(' / ');
+  const lvl = c.standard ? ` · ${c.standard}${c.level ? ` L${c.level}` : ''}` : '';
+  if (c.status === 'active') return `CMVP ${certs}${lvl}`;
+  if (c.status === 'historical') return `CMVP ${certs} · historical`;
+  if (c.status === 'revoked') return `CMVP ${certs} · revoked`;
+  if (c.status === 'none') return 'No validated module';
+  return 'Module not verified';
+};
+
+const cmvpChipTitle = (c: NonNullable<Asset['cmvp']>): string => {
+  const parts = [`Module: ${c.moduleName}${c.vendor ? ` (${c.vendor})` : ''}.`];
+  if (c.evidence) parts.push(`Basis: ${c.evidence}.`);
+  if (c.certIds.length > 1) parts.push('The provider lists more than one certificate for this service; which one serves this key is not visible to a customer.');
+  if (c.sunsetDate) parts.push(`Certificate sunset: ${c.sunsetDate}.`);
+  if (c.note) parts.push(c.note);
+  parts.push(`Certificate details as published by the provider and NIST CMVP (map ${c.mapVersion}); QuarkShield did not test the module.`);
+  return parts.join(' ');
+};
+
 const fipsChipTitle = (a: Asset): string => {
   const parts = [`FIPS algorithm status per ${a.fipsStandard || 'NIST guidance'}.`];
   if (a.fipsTransitionDate) parts.push(`Disallowed after ${a.fipsTransitionDate}${a.fipsDraft ? ' (NIST IR 8547 draft guidance)' : ''}.`);
-  parts.push('Algorithm approval only — CMVP module validation is not yet assessed.');
+  parts.push(a.cmvp ? 'Algorithm approval only — the module is shown separately.' : 'Algorithm approval only — CMVP module validation is not yet assessed for this asset.');
   return parts.join(' ');
 };
 
@@ -1708,6 +1752,12 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           // FIPS status of the ALGORITHM only; module (CMVP) validation is not assessed.
           ...(a.fipsStatus ? [{ name: "quarkshield:fipsStatus", value: a.fipsStatus }] : []),
           ...(a.fipsStandard ? [{ name: "quarkshield:fipsStandard", value: a.fipsStandard }] : []),
+          ...(a.cmvp ? [
+            { name: "quarkshield:cmvpModule", value: a.cmvp.moduleName },
+            ...(a.cmvp.certIds.length ? [{ name: "quarkshield:cmvpCertId", value: a.cmvp.certIds.join(",") }] : []),
+            { name: "quarkshield:cmvpBasis", value: "provider-reported" },
+            { name: "quarkshield:cmvpMapVersion", value: a.cmvp.mapVersion },
+          ] : []),
           ...(a.fipsTransitionDate ? [{ name: "quarkshield:transitionDate", value: a.fipsTransitionDate }] : []),
           { name: "quarkshield:cmvpStatus", value: "not-assessed" },
           // Never default to a standard name: an absent value would read as a compliance claim in the exported CBOM.
@@ -4923,6 +4973,17 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                         padding: '0.1rem 0.4rem', borderRadius: '3px',
                                       }}>
                                         {FIPS_CHIP[a.fipsStatus].label}{a.fipsTransitionDate ? ` · until ${a.fipsTransitionDate.slice(0, 4)}` : ''}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {a.cmvp && (
+                                    <div style={{ marginTop: '0.3rem' }}>
+                                      <span title={cmvpChipTitle(a.cmvp)} style={{
+                                        fontSize: '0.66rem', fontWeight: 700, whiteSpace: 'nowrap',
+                                        color: CMVP_CHIP[a.cmvp.status].color, background: CMVP_CHIP[a.cmvp.status].bg,
+                                        padding: '0.1rem 0.4rem', borderRadius: '3px',
+                                      }}>
+                                        {cmvpChipLabel(a.cmvp)}
                                       </span>
                                     </div>
                                   )}

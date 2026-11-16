@@ -1,4 +1,5 @@
 import { DiscoveredAsset } from './awsKms';
+import { ModuleObservation, vaultModule } from './cmvpModules';
 
 /**
  * Real HashiCorp Vault key discovery (DEF-51, Phase 2).
@@ -78,6 +79,17 @@ export const discoverVaultKeys = async (cfg: VaultConfig): Promise<DiscoveredAss
   const ns = cfg.namespace;
   const assets: DiscoveredAsset[] = [];
 
+  // Which build is this? sys/seal-status reports the version string (a FIPS build says so
+  // in it) and the seal type. Best effort: without it the module is simply not recorded.
+  let module: ModuleObservation | undefined;
+  try {
+    const ss = await vaultFetch(base, 'sys/seal-status', token, ns);
+    if (ss.ok) {
+      const sj: any = await ss.json();
+      module = vaultModule({ version: sj?.version, sealType: sj?.type });
+    }
+  } catch { /* module stays unrecorded */ }
+
   // Transit engine keys
   const transitMount = (cfg.transitMount || 'transit').replace(/\/+$/, '');
   const listRes = await vaultFetch(base, `${transitMount}/keys?list=true`, token, ns);
@@ -90,7 +102,7 @@ export const discoverVaultKeys = async (cfg: VaultConfig): Promise<DiscoveredAss
       const kd: any = await kr.json();
       const m = mapTransitType(kd?.data?.type || '');
       const rot = !!(kd?.data?.auto_rotate_period && kd.data.auto_rotate_period > 0);
-      assets.push({ name: `${transitMount}/${name}`, type: m.type, algo: m.algo, size: m.size, vuln: m.vuln, risk: m.risk, threat: m.threat, rot, expiresAt: null });
+      assets.push({ name: `${transitMount}/${name}`, type: m.type, algo: m.algo, size: m.size, vuln: m.vuln, risk: m.risk, threat: m.threat, rot, expiresAt: null, module });
     }
   } else if (listRes.status !== 404) {
     throw new Error(`Vault transit list failed (${listRes.status})`);
@@ -119,7 +131,7 @@ export const discoverVaultKeys = async (cfg: VaultConfig): Promise<DiscoveredAss
           else if (kt === 'ec') m = mapTransitType(`ecdsa-${(pk.namedCurve || 'p256').replace('prime256v1', 'p256')}`);
           else if (kt === 'ed25519') m = mapTransitType('ed25519');
           else m = mapTransitType(kt || 'unknown');
-          assets.push({ name: `${pki}/issuer/${keyInfo[id]?.issuer_name || id}`, type: 'ca_root', algo: m.algo, size: m.size, vuln: m.vuln, risk: m.risk, threat: `PKI issuer CA. ${m.threat}`, rot: false, expiresAt: cert.validTo ? new Date(cert.validTo) : null });
+          assets.push({ name: `${pki}/issuer/${keyInfo[id]?.issuer_name || id}`, type: 'ca_root', algo: m.algo, size: m.size, vuln: m.vuln, risk: m.risk, threat: `PKI issuer CA. ${m.threat}`, rot: false, expiresAt: cert.validTo ? new Date(cert.validTo) : null, module });
         } catch { /* skip unparseable issuer */ }
       }
     }

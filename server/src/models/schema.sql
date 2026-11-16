@@ -66,6 +66,13 @@ CREATE INDEX IF NOT EXISTS idx_assets_purpose ON assets(purpose);
 -- server/src/lib/fipsAlgorithmStatus.ts (single source of truth) — deliberately NOT persisted.
 -- A stored copy had no reader and would silently go stale on every FIPS_TABLE_VERSION change.
 -- Add a column (with a table-version stamp) only when a SQL-side filter actually needs one.
+-- CMVP & FIPS compliance mapping, Stage 3: the cryptographic MODULE that holds a key, as the
+-- KMS / vault connector's API reported it (a stable key into lib/cmvpModules.ts, e.g.
+-- 'gcp-kms-hsm'), plus the fact it was derived from. The CMVP certificate, its status and
+-- its sunset are resolved on read from the versioned map and deliberately NOT stored: a
+-- stored certificate would go stale when NIST moves it to Historical. NULL = not observed.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_module VARCHAR(60);
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_module_evidence TEXT;
 ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);

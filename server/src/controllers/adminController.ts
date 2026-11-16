@@ -19,6 +19,7 @@ const isValidEmail = (v: unknown): v is string =>
 const safeHeader = (v: unknown): string => String(v ?? '').replace(/[\r\n]+/g, ' ').slice(0, 500);
 import { assertPublicHost, resolvePublicHost } from '../utils/ssrf';
 import { fipsAlgorithmStatus } from '../lib/fipsAlgorithmStatus';
+import { cmvpForConsole } from '../lib/cmvpModules';
 import { verifyTotp, decryptSecret, consumeRecoveryCode } from '../utils/twofactor';
 
 /**
@@ -3519,6 +3520,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
         a.is_vulnerable as "isVulnerable", a.risk_level as "riskLevel", a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations as "complianceViolations", a.created_at as "createdAt",
         a.machine_id as "machineId", a.source, a.source_ref as "sourceRef", a.purpose,
+        a.crypto_module as "cryptoModule", a.crypto_module_evidence as "cryptoModuleEvidence",
         COALESCE(m.hostname, a.source_ref, 'Remote Repository') as hostname,
         COALESCE(m.computer_name, a.source_ref, 'Remote Asset') as "computerName",
         COALESCE(m.os, 'cloud') as os,
@@ -3536,7 +3538,10 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
     // approval only — not CMVP module validation.
     const assets = assetsQuery.rows.map((a: any) => {
       const f = fipsAlgorithmStatus({ algorithm: a.algorithm, key_size: a.keySize, hash_algorithm: a.hashAlgorithm, purpose: a.purpose, type: a.type });
-      return { ...a, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft };
+      // CMVP module axis (Stage 3): only where a connector's API reported the module that holds
+      // the key. Resolved on read from the versioned map; absent for every other asset.
+      const cmvp = a.cryptoModule ? { cmvp: cmvpForConsole(a.cryptoModule, a.cryptoModuleEvidence) } : {};
+      return { ...a, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft, ...cmvp };
     });
 
     // 4. Fetch Licenses strictly for this tenant (returning status so revoked keys are clearly identified)

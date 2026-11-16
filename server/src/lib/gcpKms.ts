@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import type { DiscoveredAsset } from './awsKms';
+import { gcpKmsModule } from './cmvpModules';
 
 /**
  * Google Cloud KMS key discovery (DEF-51 family, alongside AWS KMS / Azure Key Vault /
@@ -123,7 +124,7 @@ const listAll = async (f: FetchFn, token: string, url: string, field: string): P
  * and the purpose classifier understand; the threat text carries the key's use so
  * classifyPurpose() can tell signing keys from RSA key-transport keys.
  */
-export const mapGcpAlgorithm = (alg: string, protectionLevel?: string): Omit<DiscoveredAsset, 'name' | 'rot' | 'expiresAt'> => {
+export const mapGcpAlgorithm = (alg: string, protectionLevel?: string): Omit<DiscoveredAsset, 'name' | 'rot' | 'expiresAt' | 'module'> => {
   const a = String(alg || '').toUpperCase();
   const hsm = protectionLevel && protectionLevel !== 'SOFTWARE' ? ` Protection level: ${protectionLevel}.` : '';
   const sym = (algo: string, size: number, note: string) =>
@@ -224,6 +225,7 @@ export const discoverGcpKeys = async (cfg: GcpConfig, deps: GcpDeps = {}): Promi
             risk: state && state !== 'ENABLED' ? 'low' : mapped.risk,
             rot: !!k.rotationPeriod,
             expiresAt: null, // Cloud KMS keys do not expire (rotation is separate)
+            module: gcpKmsModule(level),
           });
         }
       }
