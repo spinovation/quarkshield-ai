@@ -585,3 +585,12 @@ test('TN4: the spelling backfill also covers licences', () => {
   const bf = schema.slice(schema.indexOf('TENANT ATTRIBUTION BACKFILL'));
   assert.ok(/UPDATE admin_licenses x\s+SET tenant_name = UPPER\(c\.name\)/.test(bf), 'licences are no longer re-attributed to their client');
 });
+
+test('TN5: no real customer id is used as a fallback, and licences never join a client by customer id', () => {
+  const ids = /['"`](PART|CORP)-(9148|4821|8830|4421|7033|5120|9812)['"`]/;
+  for (const f of ['server/src/controllers/adminController.ts', 'ui/src/components/AdminPanel.tsx', 'ui/src/components/TenantPortal.tsx']) {
+    assert.ok(!ids.test(read(f)), `${f} hard-codes a real client's customer id`);
+  }
+  const admin = read('server/src/controllers/adminController.ts');
+  assert.ok(!/c\.customer_id\s*=\s*l\.customer_id/.test(admin), 'a licence is matched to a client by customer id again');
+});

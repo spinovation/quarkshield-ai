@@ -616,7 +616,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
         map.set(orgKey, {
           orgKey,
           tenantName: lic.tenantName,
-          customerId: lic.customerId || (lic.tier === 'partner' ? 'PART-9148' : 'CORP-4821'),
+          customerId: lic.customerId || '',
           tier: lic.tier,
           contactEmail: lic.contactEmail || '',
           contactName: lic.contactName || '',
@@ -2142,7 +2142,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
               </div>
 
               <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-                User credentials and tenant workspace registered. Customer ID: <strong style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{onboardSuccessData.customerId || 'PART-9148'}</strong>. {onboardSuccessData.stripePaymentLink ? 'Credit card payment link is ready for delivery.' : 'Payment method set to ACH / Check / Invoice.'} Proceed to License Management to issue the official post-quantum license key.
+                User credentials and tenant workspace registered. Customer ID: <strong style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{onboardSuccessData.customerId || 'Not assigned'}</strong>. {onboardSuccessData.stripePaymentLink ? 'Credit card payment link is ready for delivery.' : 'Payment method set to ACH / Check / Invoice.'} Proceed to License Management to issue the official post-quantum license key.
               </div>
 
               <div style={{ 
@@ -2158,7 +2158,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
               }}>
                 <Mail size={16} />
                 <span>
-                  Welcome & Onboarding email dispatched from <strong>License@Quarkshield.ai</strong> to <strong>{onboardSuccessData.adminEmail || onboardAdminEmail}</strong> with organization details, Customer ID [<strong>{onboardSuccessData.customerId || 'CORP-9812'}</strong>], and next steps for license key provisioning.
+                  Welcome & Onboarding email dispatched from <strong>License@Quarkshield.ai</strong> to <strong>{onboardSuccessData.adminEmail || onboardAdminEmail}</strong> with organization details, Customer ID [<strong>{onboardSuccessData.customerId || 'Not assigned'}</strong>], and next steps for license key provisioning.
                 </span>
               </div>
 
@@ -2572,7 +2572,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                           border: '1px solid rgba(56, 189, 248, 0.25)',
                           whiteSpace: 'nowrap'
                         }}>
-                          {c.customerId || (c.accountType === 'partner' ? 'PART-9148' : 'CORP-4821')}
+                          {c.customerId || '—'}
                         </span>
                       </td>
                       <td style={{ fontWeight: 600, color: '#ffffff' }}>
@@ -4247,7 +4247,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
                             border: '1px solid rgba(56, 189, 248, 0.25)',
                             whiteSpace: 'nowrap'
                           }}>
-                            {c.customerId || (c.accountType === 'partner' ? 'PART-9148' : 'CORP-4821')}
+                            {c.customerId || '—'}
                           </span>
                         </td>
                         <td style={{ padding: '0.75rem 0.8rem', fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -4773,7 +4773,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ currentUserEmail, onLogo
               )}
 
               <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                <span>Customer ID: <strong style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{generatedLicense.customerId || (generatedLicense.tier === 'partner' ? 'PART-9148' : 'CORP-4821')}</strong></span>
+                <span>Customer ID: <strong style={{ color: '#38bdf8', fontFamily: 'monospace' }}>{generatedLicense.customerId || 'Not assigned'}</strong></span>
                 <span>Tier: <strong style={{ color: 'var(--text-primary)' }}>{generatedLicense.tier.toUpperCase()}</strong></span>
                 <span>Seats: <strong style={{ color: 'var(--text-primary)' }}>{generatedLicense.seats} Endpoints</strong></span>
                 <span>Validity: <strong style={{ color: 'var(--text-primary)' }}>{generatedLicense.durationDays} Days</strong> (Expires: {generatedLicense.expiresAt})</span>
