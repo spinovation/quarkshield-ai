@@ -579,3 +579,9 @@ test('ISO6: Copilot chat history in the browser belongs to the signed-in tenant 
   assert.ok(!/copilotStorageKey = `quarkshield_copilot_sessions_\$\{cleanSlug\}`/.test(portal), 'Copilot history is keyed by workspace only again');
   assert.ok(/copilotLoadedFor !== copilotStorageKey\) return;/.test(portal), 'Copilot history can be saved under another owner again');
 });
+
+test('TN4: the spelling backfill also covers licences', () => {
+  const schema = read('server/src/models/schema.sql');
+  const bf = schema.slice(schema.indexOf('TENANT ATTRIBUTION BACKFILL'));
+  assert.ok(/UPDATE admin_licenses x\s+SET tenant_name = UPPER\(c\.name\)/.test(bf), 'licences are no longer re-attributed to their client');
+});
