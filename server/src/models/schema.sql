@@ -1151,6 +1151,25 @@ WHERE COALESCE(x.tenant_name, '') <> ''
                 LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
                 NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')));
 
+-- Licences too. Licence screens and entitlement match a licence to its tenant by name
+-- only, so a licence filed under the client's display name ("Acme Corp Ltd" for client
+-- "acme") would drop out of that tenant's portal. The licence KEY is not touched: its
+-- signature covers the tenant embedded in the key string, not this column.
+UPDATE admin_licenses x
+SET tenant_name = UPPER(c.name)
+FROM admin_clients c
+WHERE COALESCE(x.tenant_name, '') <> ''
+  AND LOWER(x.tenant_name) <> LOWER(c.name)
+  AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+        LOWER(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g')),
+        NULLIF(LOWER(regexp_replace(COALESCE(c.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), ''))
+  AND NOT EXISTS (
+        SELECT 1 FROM admin_clients c2
+        WHERE c2.id <> c.id
+          AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+                LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
+                NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')));
+
 -- Daily snapshots are unique per (tenant_name, snapshot_date): skip a variant row when
 -- the tenant already has a snapshot for that date.
 UPDATE fleet_daily_snapshots x
