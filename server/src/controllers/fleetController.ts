@@ -2,8 +2,10 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
+import { sanitizeHostModuleReport, moduleDetailFor } from '../lib/hostCryptoModules';
 import { maybeSendAlert } from '../lib/alerts';
-import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
+import { canAccessTenant, resolveWriteTenant, superNeedsGrant, denyUnscoped } from '../middleware/auth';
+import { getTenantAggregates, totalsOf } from '../lib/tenantAggregates';
 import { geoLocateMachine } from '../lib/downloadTracker';
 import { validateProbeTargets, MAX_TARGETS_PER_COMMAND } from '../utils/probeTargets';
 import { classifyPurpose } from '../lib/threatGraph/cryptoPurpose';
@@ -85,15 +87,12 @@ export const createFleetToken = async (req: Request, res: Response) => {
     let assignedTenant = resolveWriteTenant(req, tenantName).trim();
     let assignedLicense = (licenseKey || '').trim();
 
+    if (!assignedTenant) assignedTenant = (getEffectiveTenant(req) || '').trim();
+    // An enrollment token decides which tenant every device enrolled with it lands in.
+    // It is never guessed from the token's own NAME (a token called like another tenant
+    // would feed that tenant's inventory): no tenant, no token.
     if (!assignedTenant) {
-      const effective = getEffectiveTenant(req);
-      if (effective) {
-        assignedTenant = effective;
-      } else if (name.toLowerCase().includes('spinovation') || name.toLowerCase() === 'engg') {
-        assignedTenant = 'SPINOVATIONCORP';
-      } else {
-        assignedTenant = name.trim();
-      }
+      return res.status(400).json({ error: 'A tenant is required to create an enrollment token.' });
     }
     assignedTenant = assignedTenant.toUpperCase();
 
@@ -138,7 +137,7 @@ export const revokeFleetToken = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const owner = await pool.query('SELECT tenant_name, name FROM fleet_tokens WHERE id = $1', [id]);
-    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant_name || owner.rows[0].name)) {
+    if (owner.rowCount === 0 || !canAccessTenant(req, owner.rows[0].tenant_name)) {
       return res.status(404).json({ error: 'Fleet token not found.' });
     }
     const result = await pool.query('DELETE FROM fleet_tokens WHERE id = $1 RETURNING id', [id]);
@@ -158,7 +157,22 @@ export const revokeFleetToken = async (req: Request, res: Response) => {
 
 export const getFleetMachines = async (req: Request, res: Response) => {
   try {
+    // Platform session without the tenant's support-access grant: per-tenant aggregates
+    // only — never host rows (hostname / IP / geo / licence-per-host).
+    if (superNeedsGrant(req)) {
+      const tenants = await getTenantAggregates(req.supportScope?.tenant);
+      return res.json({
+        aggregateOnly: true,
+        supportAccessRequired: true,
+        tenant: req.supportScope?.tenant || null,
+        tenants,
+        totals: totalsOf(tenants),
+        machines: [],
+      });
+    }
     const tenant = getEffectiveTenant(req);
+    // Host rows are always one tenant's. No tenant scope → refuse, never the whole fleet.
+    if (!tenant) return denyUnscoped(res);
     let query = `
       SELECT 
         m.id,
@@ -191,9 +205,9 @@ export const getFleetMachines = async (req: Request, res: Response) => {
     const params: any[] = [];
     if (tenant) {
       // SECURITY: EXACT tenant match (was `%tenant%` substring → cross-tenant machine leak).
-      // The spinovation/engg branch is the operator's own org alias, gated to that session only.
+      // No per-tenant aliases: every tenant is matched by its own name, nothing else.
       params.push(tenant);
-      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) = LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) = LOWER($1) OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))`;
+      query += ` WHERE (LOWER(COALESCE(m.tenant_name, '')) = LOWER($1) OR LOWER(COALESCE(t.tenant_name, '')) = LOWER($1))`;
     }
     query += ` ORDER BY m.last_seen DESC;`;
     const result = await pool.query(query, params);
@@ -259,11 +273,14 @@ export const deleteFleetMachine = async (req: Request, res: Response) => {
 export const getFleetCBOM = async (req: Request, res: Response) => {
   try {
     const effectiveTenant = (req.query.tenant && req.query.tenant !== 'all') ? String(req.query.tenant) : getEffectiveTenant(req);
+    // A CBOM is always one tenant's. No tenant scope → refuse, never every tenant's assets.
+    if (!effectiveTenant) return denyUnscoped(res);
     const { machine_id, attestation, cdxa, source } = req.query;
     const isAttested = attestation === 'true' || cdxa === 'true';
     let query = `
       SELECT 
-        a.id, a.type, a.name, a.path, a.algorithm, a.key_size, a.hash_algorithm,
+        a.id, a.type, a.name, a.path, a.algorithm, a.key_size, a.hash_algorithm, a.purpose,
+        a.crypto_module, a.crypto_module_evidence, a.crypto_module_detail,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.created_at,
         a.machine_id, a.source, a.source_ref as "sourceRef",
@@ -285,9 +302,9 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
 
     if (effectiveTenant) {
       // SECURITY: EXACT tenant match (was `%tenant%` ILIKE → cross-tenant CBOM/asset leak);
-      // dropped the `t.name ILIKE` arm. spinovation/engg alias stays gated to that session.
+      // dropped the `t.name ILIKE` arm. No per-tenant aliases.
       values.push(effectiveTenant);
-      conditions.push(`(LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($${values.length}) OR (LOWER($${values.length}) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) LIKE '%spinovation%'))`);
+      conditions.push(`(LOWER(COALESCE(a.tenant_name, m.tenant_name, '')) = LOWER($${values.length}))`);
     }
 
     if (source && source !== 'all') {
@@ -346,6 +363,10 @@ export const getFleetCBOM = async (req: Request, res: Response) => {
         algorithm: r.algorithm,
         keySize: r.key_size,
         hashAlgorithm: r.hash_algorithm,
+        purpose: r.purpose,
+        cryptoModule: r.crypto_module,
+        cryptoModuleEvidence: r.crypto_module_evidence,
+        cryptoModuleDetail: r.crypto_module_detail,
         isVulnerable: r.is_vulnerable,
         assetKind: r.type,
         status: r.status,
@@ -728,12 +749,13 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     // tenant a device belongs to. We must NEVER trust req.body.tenant_name — a client
     // could send a variant spelling ("Acme" vs "acme corp") and land the same physical
     // device under a second tenant string, which the seat counter would see as a second
-    // seat. Fall back to the token's own name only when the token carries no tenant_name.
-    const tokenTenant = (tokenRow.tenant_name || '').trim();
-    const assignedTenant = tokenTenant
-      || (tokenRow.name?.toLowerCase().includes('spinovation') || tokenRow.name?.toLowerCase() === 'engg'
-            ? 'SPINOVATIONCORP'
-            : ((tokenRow.name || '').trim() || 'DEFAULT_FLEET'));
+    // seat. A token that carries no tenant is refused: its NAME is a label, not a tenant,
+    // and filing its devices under that name would put them in the inventory of whichever
+    // tenant is (or is later) called the same.
+    const assignedTenant = (tokenRow.tenant_name || '').trim();
+    if (!assignedTenant) {
+      return res.status(403).json({ error: 'This enrollment token is not attached to a tenant. Ask your administrator to issue a new token.' });
+    }
     const assignedLicense = tokenRow.license_key || req.body.license_key || 'QS-STANDARD-ACTIVE';
 
     const cleanHwUUID = (hardware_uuid || '').trim();
@@ -826,6 +848,8 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     let mediumCount = 0;
 
     const processedAssets: any[] = [];
+    // CMVP/FIPS Stage 4: modules the agent observed on the host (absent from agents before 2.3.2).
+    const hostModuleReport = sanitizeHostModuleReport(req.body?.crypto_modules);
 
     for (let idx = 0; idx < safeAssets.length; idx++) {
       const rawAsset = safeAssets[idx];
@@ -946,7 +970,11 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         explainer,
         compliance_violations: complianceViolations,
         machine_id: machineId,
-        path: rawAsset.path || ''
+        path: rawAsset.path || '',
+        // Stage 4: the host module this finding is tied to, only when the agent's own
+        // module report contains the reference it names.
+        module_detail: moduleDetailFor(hostModuleReport, rawAsset.cryptoModule),
+        module_evidence: typeof rawAsset.cryptoModuleEvidence === 'string' ? rawAsset.cryptoModuleEvidence.slice(0, 600) : null
       });
     }
 
@@ -1075,6 +1103,13 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
       await pool.query('UPDATE fleet_tokens SET status = $1, last_sync = CURRENT_TIMESTAMP WHERE id = $2', ['active', tokenRow.id]);
     }
 
+    // Stage 4: keep the host's module report from this scan. Scoped to the token the upsert just wrote, so a
+    // report the upsert's tenant guard refused cannot land on another tenant's machine row.
+    // An agent that sends no report (older than 2.3.2) clears it: a stale list must not outlive
+    // the scan it came from.
+    await pool.query('UPDATE fleet_machines SET crypto_modules = $1 WHERE id = $2 AND token_id IS NOT DISTINCT FROM $3',
+      [hostModuleReport ? JSON.stringify(hostModuleReport) : null, machineId, tokenRow.id]);
+
     // BILL-7: record + geolocate the machine's PUBLIC egress IP (from Cloudflare
     // headers on this report). Fire-and-forget; the stored `ip` above stays the
     // agent's local interface address.
@@ -1105,8 +1140,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         id, type, name, algorithm, key_size, hash_algorithm, 
         is_vulnerable, risk_level, status, description, 
         recommendation, explainer, compliance_violations, machine_id, path,
-        tenant_name, source, source_ref, purpose
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        tenant_name, source, source_ref, purpose,
+        crypto_module, crypto_module_evidence, crypto_module_detail
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         algorithm = EXCLUDED.algorithm,
@@ -1124,7 +1160,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         tenant_name = EXCLUDED.tenant_name,
         source = EXCLUDED.source,
         source_ref = EXCLUDED.source_ref,
-        purpose = EXCLUDED.purpose;
+        purpose = EXCLUDED.purpose,
+        crypto_module = EXCLUDED.crypto_module,
+        crypto_module_evidence = EXCLUDED.crypto_module_evidence,
+        crypto_module_detail = EXCLUDED.crypto_module_detail;
     `;
 
     for (const a of processedAssets) {
@@ -1139,7 +1178,10 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         a.id, a.type, a.name, a.algorithm, a.key_size, a.hash_algorithm,
         a.is_vulnerable, a.risk_level, a.status, a.description,
         a.recommendation, a.explainer, a.compliance_violations, a.machine_id,
-        a.path, assignedTenant, 'endpoint_deploy', cleanHost, purpose
+        a.path, assignedTenant, 'endpoint_deploy', cleanHost, purpose,
+        a.module_detail ? a.module_detail.key : null,
+        a.module_detail ? a.module_evidence : null,
+        a.module_detail ? JSON.stringify(a.module_detail) : null
       ]);
     }
     await txn.query('COMMIT');
@@ -1378,12 +1420,13 @@ export const enqueuePullCommand = async (req: Request, res: Response) => {
 export const getFleetDrift = async (req: Request, res: Response) => {
   try {
     const tenant = getEffectiveTenant(req);
+    if (!tenant) return denyUnscoped(res);
     const machineId = (req.query.machine_id as string) || '';
     const limit = Math.min(Number(req.query.limit) || 100, 500);
     const params: any[] = [];
     let where = '';
     // SECURITY: EXACT tenant match (was `%tenant%` → cross-tenant drift-history leak).
-    if (tenant) { params.push(tenant); where += `${params.length === 1 ? ' WHERE' : ' AND'} (LOWER(COALESCE(tenant_name,'')) = LOWER($${params.length}) OR (LOWER($${params.length}) IN ('spinovation','spinovationcorp') AND LOWER(COALESCE(tenant_name,'')) LIKE '%spinovation%'))`; }
+    if (tenant) { params.push(tenant); where += `${params.length === 1 ? ' WHERE' : ' AND'} (LOWER(COALESCE(tenant_name,'')) = LOWER($${params.length}))`; }
     if (machineId) { params.push(machineId); where += `${params.length === 1 ? ' WHERE' : ' AND'} machine_id = $${params.length}`; }
     params.push(limit);
     const result = await pool.query(
@@ -1422,8 +1465,7 @@ export const enqueuePullsForScope = async (
        FROM fleet_machines m
        LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE (LOWER(m.tenant_name) = LOWER($1)
-          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-          OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', '')))
         ${groupClause}`,
     params
   );
@@ -1783,8 +1825,7 @@ export const enqueueProbesForScope = async (
        FROM fleet_machines m
        LEFT JOIN fleet_tokens t ON m.token_id = t.id
       WHERE (LOWER(m.tenant_name) = LOWER($1)
-          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-          OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+          OR LOWER(REPLACE(m.tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', '')))
         ${groupClause}`,
     params
   );
@@ -1998,8 +2039,7 @@ export const listFleetGroups = async (req: Request, res: Response) => {
            FROM fleet_machines m
            LEFT JOIN fleet_tokens t ON m.token_id = t.id
           WHERE (LOWER(m.tenant_name) = LOWER($1)
-              OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($1,' ',''))
-              OR (LOWER($1) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+              OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($1,' ','')))
           GROUP BY 1
        ),
        defined AS (
@@ -2061,8 +2101,7 @@ export const deleteFleetGroup = async (req: Request, res: Response) => {
          WHERE id IN (
            SELECT m.id FROM fleet_machines m LEFT JOIN fleet_tokens t ON m.token_id = t.id
             WHERE (LOWER(m.tenant_name) = LOWER($2)
-                OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($2,' ',''))
-                OR (LOWER($2) IN ('spinovation','spinovationcorp') AND (LOWER(m.tenant_name) LIKE '%spinovation%' OR LOWER(t.name) = 'engg')))
+                OR LOWER(REPLACE(m.tenant_name,' ','')) = LOWER(REPLACE($2,' ','')))
               AND LOWER(${EFFECTIVE_GROUP}) = LOWER($1)
          )`,
       [name, tenant]
@@ -2177,7 +2216,6 @@ export const getTenantDailySnapshots = async (req: Request, res: Response) => {
       FROM fleet_daily_snapshots
       WHERE LOWER(tenant_name) = LOWER($1) 
          OR LOWER(REPLACE(tenant_name, ' ', '')) = LOWER(REPLACE($1, ' ', ''))
-         OR (LOWER($1) IN ('spinovation', 'spinovationcorp') AND LOWER(tenant_name) LIKE '%spinovation%')
       ORDER BY snapshot_date ASC
       LIMIT 30;
     `, [cleanTenant]);

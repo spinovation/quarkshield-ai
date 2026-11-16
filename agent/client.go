@@ -117,6 +117,8 @@ type FleetPayload struct {
 	LicenseKey   string        `json:"license_key,omitempty"`
 	TenantName   string        `json:"tenant_name,omitempty"`
 	Assets       []AuditResult `json:"assets"`
+	// CMVP/FIPS Stage 4: cryptographic modules observed on this host (identity only).
+	CryptoModules *HostModuleReport `json:"crypto_modules,omitempty"`
 }
 
 // SendFleetTelemetry sends scan findings to the centralized QuarkShield.AI endpoint
@@ -146,18 +148,22 @@ func SendFleetTelemetry(serverURL string, token string, hostname string, osName 
 		return err
 	}
 
+	// Tie findings to the host module that performs them, where the host says which.
+	assets, moduleReport := withModuleLinks(assets)
+
 	payloadObj := FleetPayload{
-		Hostname:     hostname,
-		ComputerName: compName,
-		HardwareUUID: hwUUID,
-		OS:           osName,
-		Arch:         archName,
-		IP:           ip,
-		AgentVersion: AgentReleaseVersion,
-		Token:        token,
-		LicenseKey:   licenseKey,
-		TenantName:   tenantName,
-		Assets:       assets,
+		CryptoModules: &moduleReport,
+		Hostname:      hostname,
+		ComputerName:  compName,
+		HardwareUUID:  hwUUID,
+		OS:            osName,
+		Arch:          archName,
+		IP:            ip,
+		AgentVersion:  AgentReleaseVersion,
+		Token:         token,
+		LicenseKey:    licenseKey,
+		TenantName:    tenantName,
+		Assets:        assets,
 	}
 
 	payload, err := json.Marshal(payloadObj)

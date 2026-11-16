@@ -72,6 +72,7 @@ import { PqcProxyGateway } from './PqcProxyGateway';
 import { GitRepoAuditor } from './GitRepoAuditor';
 import SbomInventory from './SbomInventory';
 import SupportAccessCard from './SupportAccessCard';
+import { SupportAccessRequired } from './SupportAccessGate';
 import ComplianceProjects from './ComplianceProjects';
 
 // Threat & Risk Graph pulls in React Flow; load it only when the tab is opened.
@@ -152,7 +153,45 @@ interface TenantPortalProps {
   onLogout?: () => void;
   isSupportMirror?: boolean;
   onExitMirror?: () => void;
+  /** Sign-in resolved the session's own workspace and it differs from the URL's slug. */
+  onWorkspaceResolved?: (workspace: string) => void;
 }
+
+/** A cryptographic module and what the CMVP map says about it. Resolved server-side. */
+interface ModuleView {
+  status: 'active' | 'historical' | 'revoked' | 'none' | 'unverified';
+  /** provider-reported: a cloud provider's published certificate for its service.
+   *  host-observed: a module the agent identified on a host. Never carries certIds: identity is
+   *  not validation, so at most a candidate certificate is shown. */
+  basis?: 'provider-reported' | 'host-observed';
+  moduleName: string;
+  moduleVersion?: string;
+  environment?: string;
+  vendor?: string;
+  certIds: string[];
+  standard?: string;     // 'FIPS 140-2' | 'FIPS 140-3'
+  level?: number;
+  sunsetDate?: string;
+  candidate?: {
+    certId: string;
+    moduleName: string;
+    standard: string;
+    level: number;
+    certStatus: 'active' | 'historical' | 'revoked';
+    sunsetDate?: string;
+    match: 'exact' | 'release' | 'version';
+    matchNote: string;
+  };
+  /** Host modules only (Stage 5): whether FIPS-approved mode was confirmed from host facts. */
+  fipsMode?: { state: 'confirmed' | 'off' | 'not-determined'; evidence: string };
+  evidence?: string;     // the fact the module was derived from
+  note?: string;
+  mapVersion: string;
+}
+
+/** Algorithm axis x module axis (Stage 5). Computed server-side from one fixed table. */
+type ComplianceVerdict = 'compliant' | 'compliant_until' | 'validated_sunsetting' | 'validated_revoked'
+  | 'approved_unvalidated' | 'restricted_use' | 'noncompliant' | 'not_determined' | 'not_applicable';
 
 interface FleetMachine {
   id: string;
@@ -185,6 +224,8 @@ interface FleetMachine {
   tenantName: string;
   licenseKey: string;
   groupName?: string;
+  /** Stage 4: cryptographic modules the agent identified on this host (agents 2.3.2 and later). */
+  cryptoModules?: ModuleView[];
 }
 
 interface DailySnapshot {
@@ -215,6 +256,10 @@ interface Asset {
   // NOT CMVP module validation. Computed server-side by lib/fipsAlgorithmStatus.ts.
   fipsStatus?: 'pq_approved' | 'approved' | 'acceptable' | 'restricted' | 'disallowed' | 'non_fips' | 'not_applicable' | 'unknown';
   fipsStandard?: string;
+  /** CMVP module axis: present when a KMS / vault connector reported the module holding the key
+   *  (Stage 3), or the agent tied the finding to a module it observed on the host (Stage 4). */
+  cmvp?: ModuleView;
+  complianceVerdict?: ComplianceVerdict;
   fipsTransitionDate?: string | null;
   fipsDraft?: boolean;
   createdAt: string;
@@ -294,10 +339,83 @@ const FIPS_CHIP: Record<NonNullable<Asset['fipsStatus']>, { label: string; color
   unknown:        { label: 'FIPS: not determined',     color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)' },
 };
 
+// CMVP module chip. Wording discipline: a certificate is shown as what the PROVIDER publishes
+// for the service holding the key — QuarkShield did not test the module, and this is not a
+// compliance verdict (that needs the algorithm axis and FIPS-mode evidence together).
+const CMVP_CHIP: Record<NonNullable<Asset['cmvp']>['status'], { color: string; bg: string }> = {
+  active:     { color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)' },
+  historical: { color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)' },
+  revoked:    { color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)' },
+  none:       { color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)' },
+  unverified: { color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)' },
+};
+
+const cmvpChipLabel = (c: NonNullable<Asset['cmvp']>): string => {
+  if (c.basis === 'host-observed') {
+    const name = `${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}`;
+    // Identity matched exactly and FIPS mode was confirmed: the certificate is reported as such.
+    if (c.certIds.length) return `${name} · CMVP #${c.certIds.join(' / #')}${c.status === 'active' ? '' : ` (${c.status})`} · FIPS mode confirmed`;
+    if (c.candidate) return `${name} · candidate CMVP #${c.candidate.certId}${c.candidate.certStatus === 'active' ? '' : ` (${c.candidate.certStatus})`}`;
+    return `${name} · ${c.status === 'none' ? 'no validated module' : 'no certificate matched'}`;
+  }
+  const certs = c.certIds.map(id => `#${id}`).join(' / ');
+  const lvl = c.standard ? ` · ${c.standard}${c.level ? ` L${c.level}` : ''}` : '';
+  if (c.status === 'active') return `CMVP ${certs}${lvl}`;
+  if (c.status === 'historical') return `CMVP ${certs} · historical`;
+  if (c.status === 'revoked') return `CMVP ${certs} · revoked`;
+  if (c.status === 'none') return 'No validated module';
+  return 'Module not verified';
+};
+
+const cmvpChipTitle = (c: NonNullable<Asset['cmvp']>): string => {
+  if (c.basis === 'host-observed') {
+    const p = [`Module identified on the host: ${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}${c.environment ? `, on ${c.environment}` : ''}.`];
+    if (c.candidate) {
+      p.push(`Candidate certificate: CMVP #${c.candidate.certId} (${c.candidate.moduleName}, ${c.candidate.standard} Level ${c.candidate.level}, ${c.candidate.certStatus} on NIST${c.candidate.sunsetDate ? `, sunset ${c.candidate.sunsetDate}` : ''}).`);
+      p.push(c.candidate.matchNote);
+      p.push(c.fipsMode
+        ? `FIPS mode: ${c.fipsMode.state}. ${c.fipsMode.evidence}`
+        : 'This is a match on identity, not a validation claim: whether the module runs in FIPS-approved mode was not checked.');
+    } else if (c.note) p.push(c.note);
+    if (c.evidence) p.push(`Basis: ${c.evidence}`);
+    p.push(`CMVP map ${c.mapVersion}; QuarkShield did not test the module.`);
+    return p.join(' ');
+  }
+  const parts = [`Module: ${c.moduleName}${c.vendor ? ` (${c.vendor})` : ''}.`];
+  if (c.evidence) parts.push(`Basis: ${c.evidence}.`);
+  if (c.certIds.length > 1) parts.push('The provider lists more than one certificate for this service; which one serves this key is not visible to a customer.');
+  if (c.sunsetDate) parts.push(`Certificate sunset: ${c.sunsetDate}.`);
+  if (c.note) parts.push(c.note);
+  parts.push(`Certificate details as published by the provider and NIST CMVP (map ${c.mapVersion}); QuarkShield did not test the module.`);
+  return parts.join(' ');
+};
+
+// Compliance verdict chip (Stage 5). "Compliant" is only ever reached through a module whose
+// current certificate was matched; an approved algorithm alone reads "module not validated".
+const VERDICT_CHIP: Record<ComplianceVerdict, { label: string; color: string; bg: string; help: string }> = {
+  compliant:            { label: 'Compliant · validated module', color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)', help: 'Approved algorithm, performed by a module whose current CMVP certificate was matched.' },
+  compliant_until:      { label: 'Compliant · algorithm sunset', color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)', help: 'Approved algorithm with a published sunset date, performed by a module whose current CMVP certificate was matched.' },
+  validated_sunsetting: { label: 'Module certificate historical', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'Approved algorithm, but the matched module certificate has moved to the NIST Historical list.' },
+  validated_revoked:    { label: 'Module certificate revoked', color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)', help: 'Approved algorithm, but the matched module certificate is revoked.' },
+  approved_unvalidated: { label: 'Approved algorithm · module not validated', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'The algorithm is approved, but it is not confirmed to run in a CMVP-validated module in FIPS-approved mode.' },
+  restricted_use:       { label: 'Legacy use only', color: '#fb923c', bg: 'rgba(251, 146, 60, 0.12)', help: 'The algorithm is allowed only for legacy or verification use.' },
+  noncompliant:         { label: 'Non-compliant algorithm', color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)', help: 'The algorithm is disallowed or not FIPS-approved, whatever module performs it.' },
+  not_determined:       { label: 'Not determined', color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)', help: 'The algorithm could not be classified.' },
+  not_applicable:       { label: 'Not an algorithm', color: '#94a3b8', bg: 'rgba(255, 255, 255, 0.05)', help: 'A package or module row, not an algorithm instance.' },
+};
+const verdictChipTitle = (a: Asset): string => {
+  const v = a.complianceVerdict ? VERDICT_CHIP[a.complianceVerdict] : undefined;
+  if (!v) return '';
+  const parts = [v.help];
+  if (a.cmvp?.fipsMode) parts.push(`FIPS mode: ${a.cmvp.fipsMode.state}. ${a.cmvp.fipsMode.evidence}`);
+  parts.push('Evidence as observed by QuarkShield, not a certification; QuarkShield did not test the module.');
+  return parts.join(' ');
+};
+
 const fipsChipTitle = (a: Asset): string => {
   const parts = [`FIPS algorithm status per ${a.fipsStandard || 'NIST guidance'}.`];
   if (a.fipsTransitionDate) parts.push(`Disallowed after ${a.fipsTransitionDate}${a.fipsDraft ? ' (NIST IR 8547 draft guidance)' : ''}.`);
-  parts.push('Algorithm approval only — CMVP module validation is not yet assessed.');
+  parts.push(a.cmvp ? 'Algorithm approval only — the module is shown separately.' : 'Algorithm approval only — CMVP module validation is not yet assessed for this asset.');
   return parts.join(' ');
 };
 
@@ -457,9 +575,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   onNavigateHome,
   onLogout,
   isSupportMirror,
-  onExitMirror
+  onExitMirror,
+  onWorkspaceResolved
 }) => {
-  const cleanSlug = (tenantSlug || 'spinovationcorp').toLowerCase().replace(/[^a-z0-9-]/g, '');
+  const cleanSlug = (tenantSlug || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
 
   // Auth State - always show tenant login screen first until explicit sign-in, or if support mirror session is active
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
@@ -517,35 +636,21 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   // Dashboard Data State
   const [loading, setLoading] = useState<boolean>(true);
   const [client, setClient] = useState<TenantClient>(() => {
-    if (cleanSlug.includes('algomeld')) {
-      return {
-        id: 'client-algomeld',
-        name: 'algomeld',
-        displayName: 'Algo Meld MSP',
-        customerId: 'PART-4421',
-        appPort: 5003,
-        dbPort: 5435,
-        status: 'active',
-        subscriptionTier: 'partner',
-        mcaLimit: 50,
-        contactName: 'Tenant Administrator',
-        adminEmail: 'admin@algomeld.com',
-        accountType: 'partner'
-      };
-    }
+    // Placeholder shown until /portal-data answers. Built from the slug alone — the
+    // same for every tenant; the real record replaces it as soon as it loads.
     return {
       id: `client-${cleanSlug}`,
       name: cleanSlug,
-      displayName: cleanSlug.includes('spinovation') ? 'Spinovation Corp' : cleanSlug.includes('amberoon') ? 'Amberoon' : cleanSlug.toUpperCase(),
-      customerId: cleanSlug.includes('spinovation') ? 'CORP-9812' : cleanSlug.includes('amberoon') ? 'PART-7033' : `CORP-${cleanSlug.slice(0, 4).toUpperCase()}`,
+      displayName: cleanSlug.toUpperCase(),
+      customerId: '',
       appPort: 5050,
       dbPort: 5432,
       status: 'active',
-      subscriptionTier: (cleanSlug.includes('partner') || cleanSlug.includes('amberoon')) ? 'partner' : 'growth',
+      subscriptionTier: 'growth',
       mcaLimit: 100,
       contactName: 'Tenant Administrator',
       adminEmail: `admin@${cleanSlug}.com`,
-      accountType: (cleanSlug.includes('partner') || cleanSlug.includes('amberoon')) ? 'partner' : 'corporate'
+      accountType: 'corporate'
     };
   });
 
@@ -570,6 +675,9 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     avgRiskScore: 87
   });
   const [sessionExpired, setSessionExpired] = useState(false);
+  // Support mirror without the tenant's support-access grant: the server returns
+  // aggregates only (no machines / assets / tokens).
+  const [supportLocked, setSupportLocked] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'cbom' | 'assets' | 'sbom' | 'integrations' | 'repositories' | 'git' | 'pki' | 'proxy' | 'copilot' | 'compliance' | 'threat' | 'planner' | 'license' | 'deployment' | 'users' | 'settings' | 'profile'>(() => {
     try {
       const p = new URLSearchParams(window.location.search);
@@ -594,6 +702,8 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState<boolean>(true);
   const [deploymentTierTab, setDeploymentTierTab] = useState<'tier1' | 'tier2' | 'tier3' | 'desktop'>('tier1');
   const [sourceFilter, setSourceFilter] = useState<string>('all');
+  const [verdictFilter, setVerdictFilter] = useState<ComplianceVerdict | 'all'>('all');
+  const [isExportingEvidence, setIsExportingEvidence] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [searchAsset, setSearchAsset] = useState<string>('');
   const [assetPage, setAssetPage] = useState<number>(1);
@@ -637,12 +747,10 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   });
 
   const isPartner = client.accountType === 'partner' ||
-    (client.customerId && client.customerId.startsWith('PART-')) ||
-    cleanSlug.includes('algomeld') ||
-    cleanSlug.includes('partner');
+    (!!client.customerId && client.customerId.startsWith('PART-'));
 
-  const displayCustomerId = client.customerId || (cleanSlug.includes('algomeld') ? 'PART-4421' : (cleanSlug.includes('partner') || isPartner ? 'PART-7000' : `CORP-${cleanSlug.slice(0, 4).toUpperCase()}`));
-  const displayCustomerName = client.displayName || (cleanSlug.includes('algomeld') ? 'Algomeld' : (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1)));
+  const displayCustomerId = client.customerId || '—';
+  const displayCustomerName = client.displayName || (cleanSlug.charAt(0).toUpperCase() + cleanSlug.slice(1));
   const displayRole = currentUserRole || (isPartner ? 'Partner Admin' : 'Corporate Admin');
   const activeLicKey = (licenses && licenses.length > 0 && licenses[0].licenseKey)
     ? licenses[0].licenseKey
@@ -880,7 +988,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const [isGeneratingReport, setIsGeneratingReport] = useState<boolean>(false);
 
   // 4. PQC Copilot Multi-Session State
-  const copilotStorageKey = `quarkshield_copilot_sessions_${cleanSlug}`;
+  // Chat history is kept in this browser, so it is keyed by the SIGNED-IN identity the
+  // server reports (tenant + user), never by the workspace in the address bar: a browser
+  // shared by two tenants, or by two users, must not show one's transcript to the other.
+  // Empty until the session is confirmed; nothing is read or written without an owner.
+  const [copilotOwner, setCopilotOwner] = useState<string>('');
+  const [copilotLoadedFor, setCopilotLoadedFor] = useState<string>('');
+  const copilotStorageKey = copilotOwner ? `quarkshield_copilot_sessions_${copilotOwner}` : '';
 
   const createDefaultSession = (): CopilotSession => ({
     id: 'session-' + Date.now(),
@@ -891,24 +1005,13 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       {
         id: 'msg-welcome',
         sender: 'ai',
-        text: `Hello! I am QuarkShield AI, your dedicated Post-Quantum Cryptographic Remediation Copilot for ${client.displayName || (cleanSlug.includes('spinovation') ? 'Spinovation Corp' : cleanSlug.toUpperCase())}.\n\nI have active context of your enterprise cryptographic inventory.\n\nAsk me anything about:\n• **Onboarding & Next Steps**: Admin initial credentials, running your first desktop scan, staff onboarding & seat allocation.\n• **Roadmap & Platform Features**: CI/CD CBOM security gate, Enterprise PKI & Vault connectors, Transparent Hybrid Quantum TLS proxy, and 3-tier deployment.\n• **PQC & Cryptanalysis**: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), Shor's/Grover's threats, NGINX hybrid TLS, OpenSSH 9.8+, or CNSA 2.0 roadmaps!`,
+        text: `Hello! I am QuarkShield AI, your dedicated Post-Quantum Cryptographic Remediation Copilot for ${client.displayName || cleanSlug.toUpperCase()}.\n\nI have active context of your enterprise cryptographic inventory.\n\nAsk me anything about:\n• **Onboarding & Next Steps**: Admin initial credentials, running your first desktop scan, staff onboarding & seat allocation.\n• **Roadmap & Platform Features**: CI/CD CBOM security gate, Enterprise PKI & Vault connectors, Transparent Hybrid Quantum TLS proxy, and 3-tier deployment.\n• **PQC & Cryptanalysis**: FIPS 203 (ML-KEM), FIPS 204 (ML-DSA), Shor's/Grover's threats, NGINX hybrid TLS, OpenSSH 9.8+, or CNSA 2.0 roadmaps!`,
         timestamp: new Date().toISOString()
       }
     ]
   });
 
-  const [copilotSessions, setCopilotSessions] = useState<CopilotSession[]>(() => {
-    try {
-      const saved = localStorage.getItem(copilotStorageKey);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch (e) {
-      console.warn('Failed to load saved copilot sessions:', e);
-    }
-    return [createDefaultSession()];
-  });
+  const [copilotSessions, setCopilotSessions] = useState<CopilotSession[]>(() => [createDefaultSession()]);
 
   const [activeSessionId, setActiveSessionId] = useState<string>(() => {
     return copilotSessions[0]?.id || 'session-default';
@@ -924,14 +1027,54 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
 
-  // Sync sessions to localStorage
+  // Who owns the chat history: the tenant + user of the server session.
   useEffect(() => {
+    // The old key held one history per workspace, shared by every user of the browser.
+    try { if (cleanSlug) localStorage.removeItem(`quarkshield_copilot_sessions_${cleanSlug}`); } catch { /* ignore */ }
+    if (!isAuthenticated && !isSupportMirror) { setCopilotOwner(''); return; }
+    let cancelled = false;
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => {
+        if (cancelled) return;
+        const u = d?.user;
+        const who = String(u?.email || u?.sub || '').toLowerCase().trim();
+        const tenantKey = String(u?.tenant || cleanSlug || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        setCopilotOwner(who && tenantKey ? `${tenantKey}:${who}` : '');
+      })
+      .catch(() => { if (!cancelled) setCopilotOwner(''); });
+    return () => { cancelled = true; };
+  }, [isAuthenticated, isSupportMirror, cleanSlug]);
+
+  // Owner changed (sign-in, sign-out, another workspace): drop what is on screen and
+  // load that owner's own history. Never carry one owner's transcript over to the next.
+  useEffect(() => {
+    let next: CopilotSession[] | null = null;
+    if (copilotStorageKey) {
+      try {
+        const saved = localStorage.getItem(copilotStorageKey);
+        const parsed = saved ? JSON.parse(saved) : null;
+        if (Array.isArray(parsed) && parsed.length > 0) next = parsed;
+      } catch (e) {
+        console.warn('Failed to load saved copilot sessions:', e);
+      }
+    }
+    const sessions = next || [createDefaultSession()];
+    setCopilotSessions(sessions);
+    setActiveSessionId(sessions[0].id);
+    setCopilotLoadedFor(copilotStorageKey);
+  }, [copilotStorageKey]);
+
+  // Save only once this owner's history is the one loaded, so a transcript still on
+  // screen from the previous owner can never be written under the new owner's key.
+  useEffect(() => {
+    if (!copilotStorageKey || copilotLoadedFor !== copilotStorageKey) return;
     try {
       localStorage.setItem(copilotStorageKey, JSON.stringify(copilotSessions));
     } catch (e) {
       console.warn('Failed to save copilot sessions:', e);
     }
-  }, [copilotSessions, copilotStorageKey]);
+  }, [copilotSessions, copilotStorageKey, copilotLoadedFor]);
 
   // Active session helper
   const currentSession = copilotSessions.find(s => s.id === activeSessionId) || copilotSessions[0];
@@ -1109,6 +1252,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
 
   // Fetch Tenant Data from Backend
   const fetchTenantData = async () => {
+    if (!cleanSlug) { setLoading(false); return; }
     setLoading(true);
     try {
       const res = await fetch(`/api/tenant/${cleanSlug}/portal-data`);
@@ -1122,6 +1266,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           try { sessionStorage.setItem(`tenant_auth_${cleanSlug}`, 'true'); } catch { /* ignore */ }
         }
         setSessionExpired(false);
+        setSupportLocked(!!data.aggregateOnly);
         if (data.client) setClient(data.client);
         if (data.machines) setMachines(data.machines);
         if (data.assets) setAssets(data.assets);
@@ -1543,6 +1688,14 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       // The pre-login portal-data fetch 401s and latches "session expired"; clear
       // that now and load the real data for this session.
       setSessionExpired(false);
+      // The session's own workspace is authoritative. If the URL reached this portal
+      // under another name, switch to the real one; the data loads when the slug changes.
+      const ws = String(data.workspace || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+      if (ws && ws !== cleanSlug && onWorkspaceResolved) {
+        try { sessionStorage.setItem(`tenant_auth_${ws}`, 'true'); } catch { /* ignore */ }
+        onWorkspaceResolved(ws);
+        return;
+      }
       fetchTenantData();
       fetchPullSchedules();
       fetchFleetGroups();
@@ -1647,7 +1800,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     localStorage.removeItem(`tenant_auth_${cleanSlug}`);
     // Copilot transcripts can contain hostnames and remediation details; never leave
     // them for the next user of this browser.
-    try { localStorage.removeItem(`quarkshield_copilot_sessions_${cleanSlug}`); } catch { /* ignore */ }
+    try {
+      localStorage.removeItem(`quarkshield_copilot_sessions_${cleanSlug}`);
+      if (copilotStorageKey) localStorage.removeItem(copilotStorageKey);
+    } catch { /* ignore */ }
+    setCopilotOwner('');
     if (onLogout) onLogout();
   };
 
@@ -1708,8 +1865,9 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
           algorithmProperties: {
             name: a.algorithm,
             parameterSetIdentifier: String(a.keySize || ""),
-            classicalSecurityLevel: a.isVulnerable ? 0 : 256,
-            nistQuantumSecurityLevel: a.isVulnerable ? 0 : 3
+            // 0 = not quantum-safe. For anything else the real NIST category is only known
+            // server-side, so it is left out here rather than asserting "3" for every asset.
+            ...(a.isVulnerable ? { nistQuantumSecurityLevel: 0 } : {})
           },
           oid: a.path || "",
           certificate: {
@@ -1719,6 +1877,23 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
         properties: [
           { name: "quantumVulnerability", value: a.isVulnerable ? "Vulnerable (Shor's Algorithm)" : "Post-Quantum Ready" },
           { name: "riskLevel", value: a.riskLevel },
+          // FIPS status of the ALGORITHM only; module (CMVP) validation is not assessed.
+          ...(a.fipsStatus ? [{ name: "quarkshield:fipsStatus", value: a.fipsStatus }] : []),
+          ...(a.fipsStandard ? [{ name: "quarkshield:fipsStandard", value: a.fipsStandard }] : []),
+          ...(a.cmvp ? [
+            { name: "quarkshield:cmvpModule", value: a.cmvp.moduleName },
+            ...(a.cmvp.certIds.length ? [{ name: "quarkshield:cmvpCertId", value: a.cmvp.certIds.join(",") }] : []),
+            ...(a.cmvp.moduleVersion ? [{ name: "quarkshield:cmvpModuleVersion", value: a.cmvp.moduleVersion }] : []),
+            ...(a.cmvp.candidate ? [
+              { name: "quarkshield:cmvpCandidateId", value: a.cmvp.candidate.certId },
+              { name: "quarkshield:cmvpCandidateMatch", value: a.cmvp.candidate.match },
+            ] : []),
+            ...(a.cmvp.basis === 'host-observed' ? [{ name: "quarkshield:cmvpFipsMode", value: "not-checked" }] : []),
+            { name: "quarkshield:cmvpBasis", value: a.cmvp.basis || "provider-reported" },
+            { name: "quarkshield:cmvpMapVersion", value: a.cmvp.mapVersion },
+          ] : []),
+          ...(a.fipsTransitionDate ? [{ name: "quarkshield:transitionDate", value: a.fipsTransitionDate }] : []),
+          { name: "quarkshield:cmvpStatus", value: a.cmvp ? a.cmvp.status : "not-assessed" },
           // Never default to a standard name: an absent value would read as a compliance claim in the exported CBOM.
           { name: "complianceStandards", value: (Array.isArray(a.complianceViolations) ? a.complianceViolations.join(', ') : a.complianceViolations) || 'None recorded' },
           { name: "hostMachine", value: a.hostname || "Workstation" },
@@ -1892,6 +2067,31 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
       alert(`PQC roadmap report error: ${err.message}`);
     } finally {
       setIsGeneratingReport(false);
+    }
+  };
+
+  // FIPS / CMVP compliance evidence (CSV). Risk Assurance add-on; the server enforces the gate.
+  const downloadComplianceEvidence = async () => {
+    try {
+      setIsExportingEvidence(true);
+      const tenantParam = encodeURIComponent(client?.name || cleanSlug);
+      const res = await fetch(`/api/compliance/fips-attestation.csv?tenant=${tenantParam}`, { credentials: 'include' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Server returned HTTP ${res.status}`);
+      }
+      const url = window.URL.createObjectURL(await res.blob());
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `QuarkShield-FIPS-CMVP-Evidence-${(client?.name || cleanSlug).toUpperCase()}-${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      alert(`Compliance evidence export: ${err.message}`);
+    } finally {
+      setIsExportingEvidence(false);
     }
   };
 
@@ -2098,7 +2298,15 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
     return { nonCompliant, sunset, undetermined };
   }, [assets]);
 
+  // Compliance verdict counts (Stage 5): algorithm axis crossed with the module axis.
+  const verdictCounts = useMemo(() => {
+    const c: Partial<Record<ComplianceVerdict, number>> = {};
+    for (const a of assets) if (a.complianceVerdict) c[a.complianceVerdict] = (c[a.complianceVerdict] || 0) + 1;
+    return c;
+  }, [assets]);
+
   const filteredAssets = assets.filter(a => {
+    if (verdictFilter !== 'all' && a.complianceVerdict !== verdictFilter) return false;
     if (sourceFilter !== 'all') {
       const effectiveSource = a.source || 'endpoint';
       if (effectiveSource !== sourceFilter) return false;
@@ -2893,7 +3101,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               Diagnostic Session for Tenant: <strong style={{ color: '#ffffff', textDecoration: 'underline' }}>{client.displayName || cleanSlug}</strong> ({cleanSlug}.quarkshield.ai)
             </span>
             <span style={{ fontSize: '0.75rem', color: '#fef9c3', opacity: 0.85 }}>
-              • Live Diagnostic Telemetry • Passwordless Support Inspection
+              • {supportLocked ? 'Aggregate metrics only — tenant has not granted support access' : 'Tenant-granted support access · every request is audit-logged'}
             </span>
           </div>
 
@@ -2931,6 +3139,15 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
               <LogOut size={14} /> Exit Support Mirror & Return to Super Admin
             </button>
           </div>
+        </div>
+      )}
+      {isSupportMirror && supportLocked && (
+        <div style={{ padding: '0.75rem 1.25rem', flexShrink: 0, background: 'var(--bg-dark, #07090E)' }}>
+          <SupportAccessRequired
+            compact
+            tenantLabel={client.displayName || cleanSlug}
+            what="endpoints, cryptographic assets, enrollment tokens and findings"
+          />
         </div>
       )}
 
@@ -3507,7 +3724,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
             {activeTab === 'overview' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
                 {/* Tenant-controlled support access (GDPR drill-down window) */}
-                <SupportAccessCard apiUrl="" canManage={/admin|owner/i.test(currentUserRole || '')} />
+                <SupportAccessCard
+                  apiUrl=""
+                  canManage={!isSupportMirror && /admin|owner/i.test(currentUserRole || '')}
+                  viewTenant={isSupportMirror ? cleanSlug : undefined}
+                />
                 {/* 4 Metric Cards */}
                 <div style={{
                   display: 'grid',
@@ -4004,6 +4225,11 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 }}>
                                   {isMac ? 'macOS (arm64)' : isWin ? 'Windows (x64)' : m.os}
                                 </span>
+                                {(m.cryptoModules || []).map((c, i) => (
+                                  <div key={i} title={cmvpChipTitle(c)} style={{ fontSize: '0.66rem', color: '#94a3b8', marginTop: '0.25rem', cursor: 'help', maxWidth: '22rem' }}>
+                                    {cmvpChipLabel(c)}
+                                  </div>
+                                ))}
                               </td>
                               <td style={{ padding: '0.85rem 0.5rem', color: 'var(--text-secondary, #94a3b8)' }}>
                                 <div style={{ fontFamily: 'monospace', fontSize: '0.82rem' }}>
@@ -4830,7 +5056,42 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 {sunset} approved with sunset · {undetermined} not determined
                               </div>
                               <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.2rem' }}>
-                                Algorithm approval only — CMVP not yet assessed
+                                Algorithm approval only — module validation is shown separately
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {(() => {
+                          // Compliance verdict (Stage 5): approved algorithm AND a matched, current module certificate.
+                          const n = (v: ComplianceVerdict) => verdictCounts[v] || 0;
+                          const compliant = n('compliant') + n('compliant_until');
+                          const stale = n('validated_sunsetting') + n('validated_revoked');
+                          const link = (label: string, v: ComplianceVerdict) => (
+                            <span onClick={() => setVerdictFilter(verdictFilter === v ? 'all' : v)}
+                              style={{ cursor: 'pointer', textDecoration: 'underline', color: verdictFilter === v ? '#38bdf8' : 'inherit' }}>{label}</span>
+                          );
+                          return (
+                            <div
+                              title="Approved algorithm performed by a module whose current CMVP certificate was matched: a provider-published certificate for a cloud key, or on a host an exact identity match with FIPS-approved mode confirmed. Evidence as observed, not a certification."
+                              style={{ background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '8px', padding: '1rem' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)', textTransform: 'uppercase', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
+                                <span>In a Validated Module</span>
+                                <ShieldCheck size={15} color={compliant ? '#4ade80' : '#94a3b8'} />
+                              </div>
+                              <div style={{ fontSize: '1.75rem', fontWeight: 800, color: '#ffffff', margin: '0.3rem 0 0.15rem 0' }}>
+                                {compliant}
+                              </div>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary, #94a3b8)' }}>
+                                {n('approved_unvalidated')} {link('approved, module not validated', 'approved_unvalidated')}
+                                {stale ? <> · {stale} {link('certificate historical', 'validated_sunsetting')}</> : null}
+                              </div>
+                              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.2rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                                {compliant ? link('show compliant', 'compliant') : null}
+                                {verdictFilter !== 'all' && <span onClick={() => setVerdictFilter('all')} style={{ cursor: 'pointer', color: '#38bdf8' }}>clear filter</span>}
+                                <span onClick={() => { if (!isExportingEvidence) void downloadComplianceEvidence(); }} style={{ cursor: 'pointer', textDecoration: 'underline' }}>
+                                  {isExportingEvidence ? 'exporting…' : 'export evidence (CSV)'}
+                                </span>
                               </div>
                             </div>
                           );
@@ -4994,6 +5255,28 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                         padding: '0.1rem 0.4rem', borderRadius: '3px',
                                       }}>
                                         {FIPS_CHIP[a.fipsStatus].label}{a.fipsTransitionDate ? ` · until ${a.fipsTransitionDate.slice(0, 4)}` : ''}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {a.cmvp && (
+                                    <div style={{ marginTop: '0.3rem' }}>
+                                      <span title={cmvpChipTitle(a.cmvp)} style={{
+                                        fontSize: '0.66rem', fontWeight: 700, whiteSpace: 'nowrap',
+                                        color: CMVP_CHIP[a.cmvp.status].color, background: CMVP_CHIP[a.cmvp.status].bg,
+                                        padding: '0.1rem 0.4rem', borderRadius: '3px',
+                                      }}>
+                                        {cmvpChipLabel(a.cmvp)}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {a.cmvp && a.complianceVerdict && VERDICT_CHIP[a.complianceVerdict] && (
+                                    <div style={{ marginTop: '0.3rem' }}>
+                                      <span title={verdictChipTitle(a)} style={{
+                                        fontSize: '0.66rem', fontWeight: 700, whiteSpace: 'nowrap',
+                                        color: VERDICT_CHIP[a.complianceVerdict].color, background: VERDICT_CHIP[a.complianceVerdict].bg,
+                                        padding: '0.1rem 0.4rem', borderRadius: '3px',
+                                      }}>
+                                        {VERDICT_CHIP[a.complianceVerdict].label}
                                       </span>
                                     </div>
                                   )}

@@ -7,6 +7,7 @@ import {
   listRiskAssets, getAssetRiskDetail, updateRemediation, overrideAssetContext, rebuildThreatGraph,
   listRebuildRuns, getThreatGraphCatalog, scheduleRebuild, getThreatIntelStatus, syncThreatIntelNow,
 } from '../controllers/threatGraphController';
+import { downloadFipsAttestation } from '../controllers/fipsAttestationController';
 import { exportExecutiveReport, getReportStakeholders, saveReportStakeholders, sendRoadmapReport } from '../controllers/reportController';
 import { twoFactorStatusSafe as twoFactorStatus, twoFactorSetupSafe as twoFactorSetup, twoFactorVerifySafe as twoFactorVerify, twoFactorDisableSafe as twoFactorDisable } from '../controllers/twoFactorController';
 import {
@@ -83,6 +84,7 @@ import {
   probeEndpoint,
   unifiedLogin,
   getTenantPortalData,
+  getFleetSummary,
   getOperators,
   inviteOperator,
   resetOperatorPassword,
@@ -254,6 +256,8 @@ router.delete('/service-tokens/:id', requireAuth, requireTenantAccess, requireTe
 // ==========================================
 // ADMIN PANEL ROUTES (super admin only)
 // ==========================================
+// Aggregate-only fleet metadata per tenant (no host/asset rows) for the central console.
+router.get('/admin/fleet/summary', requireSuperAdmin, getFleetSummary);
 router.get('/admin/clients', requireSuperAdmin, getClients);
 router.get('/admin/clients/:name/stats', requireSuperAdmin, getClientStats);
 router.post('/admin/clients/deploy-inline', requirePlatformAdmin, deployInlineClient);
@@ -395,6 +399,8 @@ router.put('/threat-graph/assets/:id/context', ...tg, overrideAssetContext);
 router.patch('/threat-graph/remediations/:id', ...tg, updateRemediation);
 router.post('/threat-graph/rebuild', ...tg, rebuildThreatGraph);
 router.get('/threat-graph/runs', ...tg, listRebuildRuns);
+// FIPS / CMVP compliance evidence export (CMVP/FIPS Stage 5) — same gate as the Risk Graph.
+router.get('/compliance/fips-attestation.csv', ...tg, downloadFipsAttestation);
 router.get('/threat-intel/status', requireAuth, getThreatIntelStatus);
 router.post('/threat-intel/sync', requirePlatformAdmin, syncThreatIntelNow);
 

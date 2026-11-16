@@ -66,6 +66,17 @@ CREATE INDEX IF NOT EXISTS idx_assets_purpose ON assets(purpose);
 -- server/src/lib/fipsAlgorithmStatus.ts (single source of truth) — deliberately NOT persisted.
 -- A stored copy had no reader and would silently go stale on every FIPS_TABLE_VERSION change.
 -- Add a column (with a table-version stamp) only when a SQL-side filter actually needs one.
+-- CMVP & FIPS compliance mapping, Stage 3: the cryptographic MODULE that holds a key, as the
+-- KMS / vault connector's API reported it (a stable key into lib/cmvpModules.ts, e.g.
+-- 'gcp-kms-hsm'), plus the fact it was derived from. The CMVP certificate, its status and
+-- its sunset are resolved on read from the versioned map and deliberately NOT stored: a
+-- stored certificate would go stale when NIST moves it to Historical. NULL = not observed.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_module VARCHAR(60);
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_module_evidence TEXT;
+-- CMVP/FIPS Stage 4: host module identity reported by the agent (name, version, FIPS provider,
+-- operating environment). Identity only: the certificate is looked up on read, never stored.
+ALTER TABLE assets ADD COLUMN IF NOT EXISTS crypto_module_detail JSONB;
+ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS crypto_modules JSONB;
 ALTER TABLE git_scans ADD COLUMN IF NOT EXISTS tenant_name VARCHAR(255);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS hardware_uuid VARCHAR(100);
 ALTER TABLE fleet_machines ADD COLUMN IF NOT EXISTS computer_name VARCHAR(255);
@@ -337,23 +348,10 @@ VALUES
    'QuarkShield Core', true, CURRENT_TIMESTAMP)
 ON CONFLICT (email) DO NOTHING;  -- create-only; never overwrite a real password on restart
 
--- Seed initial client organizations / tenants for quarkshield.ai
-INSERT INTO admin_clients (id, name, display_name, app_port, db_port, status, subscription_tier, mca_limit, two_factor_policy, user_count, asset_count, account_type, customer_id, admin_email, contact_name)
-VALUES 
-  ('client-demo', 'democlient', 'Demo Client Workspace', 5001, 5433, 'active', 'growth', 250, 'optional', 1, 6, 'corporate', 'CORP-5120', 'democlient@example.com', 'Demo Administrator'),
-  ('client-090e8814', 'spinovationcorp', 'Spinovation Corp', 5002, 5434, 'active', 'growth', 100, 'optional', 1, 10, 'corporate', 'CORP-9812', 'sridhargs@spinovation.com', 'GS Sridhar'),
-  ('client-8518769e', 'algomeld', 'Algomeld', 5004, 5438, 'active', 'growth', 100, 'optional', 1, 10, 'partner', 'PART-4421', 'sridhargs@algomeld.ai', 'GS Sridhar')
-ON CONFLICT (name) DO NOTHING;  -- seed only, do not overwrite tenant edits on restart (DEF-18)
-
--- Seed tenant admins WITHOUT passwords. Each sets their own via the reset/invite
--- email. One canonical row per person; the algomeld .ai/.com alias is resolved in
--- the controller, so no duplicate rows are needed.
-INSERT INTO tenant_users
-  (id, tenant_name, email, first_name, last_name, role, status, password_hash, salt, must_change_password)
-VALUES
-  ('tu-sridhar-spin',    'spinovationcorp', 'sridhargs@spinovation.com', 'Sridhar', 'GS', 'admin', 'active', NULL, NULL, true),
-  ('tu-sridhar-algo-ai', 'algomeld',        'sridhargs@algomeld.ai',     'Sridhar', 'GS', 'admin', 'active', NULL, NULL, true)
-ON CONFLICT (tenant_name, email) DO NOTHING;  -- CRITICAL: create-only. NEVER DO UPDATE the password_hash.
+-- (Removed) Seed rows for specific client organizations and their tenant admins. They
+-- were re-inserted on every boot, so a named tenant could never be deleted and got an
+-- account no other tenant gets. Tenants and their admins are created only through
+-- onboarding (Super Admin console / self-registration), the same way for everyone.
 
 -- SECURITY: the license keys that used to be seeded here were committed to a public
 -- repository and are accepted as fleet enrollment credentials by /api/scan/agent/ingest.
@@ -1024,3 +1022,175 @@ CREATE TABLE IF NOT EXISTS ti_feed_runs (
   finished_at TIMESTAMP WITH TIME ZONE
 );
 CREATE INDEX IF NOT EXISTS idx_ti_feed_runs_feed ON ti_feed_runs (feed, started_at DESC);
+
+-- =========================================================================
+-- TENANT ATTRIBUTION BACKFILL (generic — names no tenant)
+-- Older rows were written before every enrollment token carried a tenant, and the
+-- code used to make up for it with per-tenant name matching in queries. That matching
+-- is gone: every tenant is matched by its own name only. These idempotent statements
+-- give the old rows a proper tenant_name instead, using only relationships that hold
+-- for every tenant (licence -> token -> machine -> asset).
+-- =========================================================================
+
+-- 1. A token with no tenant takes the tenant of the licence it was issued under.
+UPDATE fleet_tokens t
+SET tenant_name = l.tenant_name
+FROM admin_licenses l
+WHERE COALESCE(t.tenant_name, '') = ''
+  AND COALESCE(t.license_key, '') <> ''
+  AND UPPER(TRIM(l.license_key)) = UPPER(TRIM(t.license_key))
+  AND COALESCE(l.tenant_name, '') <> '';
+
+-- 2. Otherwise it takes the tenant of the machines enrolled with it, when they all agree.
+UPDATE fleet_tokens t
+SET tenant_name = s.tenant_name
+FROM (
+  SELECT token_id, MIN(tenant_name) AS tenant_name
+  FROM fleet_machines
+  WHERE COALESCE(tenant_name, '') <> '' AND token_id IS NOT NULL
+  GROUP BY token_id
+  HAVING COUNT(DISTINCT LOWER(regexp_replace(tenant_name, '[^a-zA-Z0-9]', '', 'g'))) = 1
+) s
+WHERE t.id = s.token_id AND COALESCE(t.tenant_name, '') = '';
+
+-- 3. A machine with no tenant takes its enrollment token's tenant.
+UPDATE fleet_machines m
+SET tenant_name = t.tenant_name
+FROM fleet_tokens t
+WHERE m.token_id = t.id
+  AND COALESCE(m.tenant_name, '') = ''
+  AND COALESCE(t.tenant_name, '') <> '';
+
+-- 4. An asset or drift event with no tenant takes its machine's tenant.
+UPDATE assets a
+SET tenant_name = m.tenant_name
+FROM fleet_machines m
+WHERE a.machine_id = m.id
+  AND COALESCE(a.tenant_name, '') = ''
+  AND COALESCE(m.tenant_name, '') <> '';
+
+UPDATE fleet_drift_events d
+SET tenant_name = m.tenant_name
+FROM fleet_machines m
+WHERE d.machine_id = m.id
+  AND COALESCE(d.tenant_name, '') = ''
+  AND COALESCE(m.tenant_name, '') <> '';
+
+-- 5. One spelling per tenant. A row whose tenant_name is a spelling variant of exactly
+--    one registered client (same letters and digits as its name or display name, e.g.
+--    "Acme Corp" for client "acmecorp") is rewritten to that client's name. A variant
+--    that could mean two clients is left alone.
+UPDATE fleet_tokens x
+SET tenant_name = UPPER(c.name)
+FROM admin_clients c
+WHERE COALESCE(x.tenant_name, '') <> ''
+  AND LOWER(x.tenant_name) <> LOWER(c.name)
+  AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+        LOWER(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g')),
+        NULLIF(LOWER(regexp_replace(COALESCE(c.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), ''))
+  AND NOT EXISTS (
+        SELECT 1 FROM admin_clients c2
+        WHERE c2.id <> c.id
+          AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+                LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
+                NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')));
+
+UPDATE fleet_machines x
+SET tenant_name = UPPER(c.name)
+FROM admin_clients c
+WHERE COALESCE(x.tenant_name, '') <> ''
+  AND LOWER(x.tenant_name) <> LOWER(c.name)
+  AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+        LOWER(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g')),
+        NULLIF(LOWER(regexp_replace(COALESCE(c.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), ''))
+  AND NOT EXISTS (
+        SELECT 1 FROM admin_clients c2
+        WHERE c2.id <> c.id
+          AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+                LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
+                NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')));
+
+UPDATE assets x
+SET tenant_name = UPPER(c.name)
+FROM admin_clients c
+WHERE COALESCE(x.tenant_name, '') <> ''
+  AND LOWER(x.tenant_name) <> LOWER(c.name)
+  AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+        LOWER(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g')),
+        NULLIF(LOWER(regexp_replace(COALESCE(c.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), ''))
+  AND NOT EXISTS (
+        SELECT 1 FROM admin_clients c2
+        WHERE c2.id <> c.id
+          AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+                LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
+                NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')));
+
+UPDATE fleet_drift_events x
+SET tenant_name = UPPER(c.name)
+FROM admin_clients c
+WHERE COALESCE(x.tenant_name, '') <> ''
+  AND LOWER(x.tenant_name) <> LOWER(c.name)
+  AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+        LOWER(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g')),
+        NULLIF(LOWER(regexp_replace(COALESCE(c.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), ''))
+  AND NOT EXISTS (
+        SELECT 1 FROM admin_clients c2
+        WHERE c2.id <> c.id
+          AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+                LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
+                NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')));
+
+UPDATE git_scans x
+SET tenant_name = UPPER(c.name)
+FROM admin_clients c
+WHERE COALESCE(x.tenant_name, '') <> ''
+  AND LOWER(x.tenant_name) <> LOWER(c.name)
+  AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+        LOWER(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g')),
+        NULLIF(LOWER(regexp_replace(COALESCE(c.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), ''))
+  AND NOT EXISTS (
+        SELECT 1 FROM admin_clients c2
+        WHERE c2.id <> c.id
+          AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+                LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
+                NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')));
+
+-- Licences too. Licence screens and entitlement match a licence to its tenant by name
+-- only, so a licence filed under the client's display name ("Acme Corp Ltd" for client
+-- "acme") would drop out of that tenant's portal. The licence KEY is not touched: its
+-- signature covers the tenant embedded in the key string, not this column.
+UPDATE admin_licenses x
+SET tenant_name = UPPER(c.name)
+FROM admin_clients c
+WHERE COALESCE(x.tenant_name, '') <> ''
+  AND LOWER(x.tenant_name) <> LOWER(c.name)
+  AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+        LOWER(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g')),
+        NULLIF(LOWER(regexp_replace(COALESCE(c.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), ''))
+  AND NOT EXISTS (
+        SELECT 1 FROM admin_clients c2
+        WHERE c2.id <> c.id
+          AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+                LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
+                NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')));
+
+-- Daily snapshots are unique per (tenant_name, snapshot_date): skip a variant row when
+-- the tenant already has a snapshot for that date.
+UPDATE fleet_daily_snapshots x
+SET tenant_name = UPPER(c.name)
+FROM admin_clients c
+WHERE COALESCE(x.tenant_name, '') <> ''
+  AND LOWER(x.tenant_name) <> LOWER(c.name)
+  AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+        LOWER(regexp_replace(c.name, '[^a-zA-Z0-9]', '', 'g')),
+        NULLIF(LOWER(regexp_replace(COALESCE(c.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), ''))
+  AND NOT EXISTS (
+        SELECT 1 FROM admin_clients c2
+        WHERE c2.id <> c.id
+          AND LOWER(regexp_replace(x.tenant_name, '[^a-zA-Z0-9]', '', 'g')) IN (
+                LOWER(regexp_replace(c2.name, '[^a-zA-Z0-9]', '', 'g')),
+                NULLIF(LOWER(regexp_replace(COALESCE(c2.display_name, ''), '[^a-zA-Z0-9]', '', 'g')), '')))
+  AND NOT EXISTS (
+        SELECT 1 FROM fleet_daily_snapshots y
+        WHERE y.id <> x.id AND y.snapshot_date = x.snapshot_date
+          AND LOWER(y.tenant_name) = LOWER(c.name));

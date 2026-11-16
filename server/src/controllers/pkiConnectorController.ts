@@ -5,7 +5,7 @@ import { discoverKmsKeys, pingKms, DiscoveredAsset } from '../lib/awsKms';
 import { discoverVaultKeys, pingVault } from '../lib/hashiVault';
 import { discoverAzureKeys, pingAzure } from '../lib/azureKeyVault';
 import { discoverGcpKeys, pingGcp } from '../lib/gcpKms';
-import { canAccessTenant, resolveWriteTenant } from '../middleware/auth';
+import { canAccessTenant, resolveWriteTenant, scopedTenant, denyUnscoped } from '../middleware/auth';
 import { assertPublicHost } from '../utils/ssrf';
 import {
   rawConfig,
@@ -69,23 +69,27 @@ const assertConnectorTargetsPublic = async (row: any): Promise<void> => {
   for (const t of targets) await assertConnectorHostPublic(t);
 };
 
+/**
+ * The CBOM rows one connector produced: $1 connector id, $2 connector name, $3 its tenant.
+ * Rows are tagged with the connector NAME, and names repeat across tenants (every tenant's
+ * agent reports "AD CS: Enterprise CA"), so without the tenant a sync, re-report or delete
+ * in one tenant removed the same-named connector's assets from every other tenant.
+ */
+const CONNECTOR_ASSETS =
+  "source IN ('cloud_kms', 'enterprise_pki') AND (source_ref = $1 OR source_ref = $2) AND LOWER(COALESCE(tenant_name, '')) = LOWER($3)";
+
 export const getPkiConnectors = async (req: Request, res: Response) => {
   try {
-    const { tenant } = req.query;
-    let query = 'SELECT * FROM pki_connectors';
-    const params: any[] = [];
-
-    if (tenant && typeof tenant === 'string' && tenant.trim()) {
-      query += ' WHERE LOWER(tenant_name) = LOWER($1)';
-      params.push(tenant.trim());
-    }
-
-    query += ' ORDER BY created_at DESC';
-    const result = await pool.query(query, params);
+    const tenant = scopedTenant(req);
+    if (!tenant) return denyUnscoped(res);
+    const result = await pool.query(
+      'SELECT * FROM pki_connectors WHERE LOWER(tenant_name) = LOWER($1) ORDER BY created_at DESC',
+      [tenant]
+    );
 
     // Auto-syndicate connectors into CBOM assets if not already syndicated
     for (const c of result.rows) {
-      pool.query("SELECT COUNT(*) FROM assets WHERE source IN ('cloud_kms', 'enterprise_pki') AND (source_ref = $1 OR source_ref = $2)", [c.id, c.name])
+      pool.query(`SELECT COUNT(*) FROM assets WHERE ${CONNECTOR_ASSETS}`, [c.id, c.name, c.tenant_name])
         .then(chk => {
           if (parseInt(chk.rows[0]?.count || '0', 10) === 0) {
             executeDiscoverySync(c.id, c.tenant_name, c.provider, c.name).catch(() => {});
@@ -103,7 +107,7 @@ export const getPkiConnectors = async (req: Request, res: Response) => {
 export const createPkiConnector = async (req: Request, res: Response) => {
   try {
     const {
-      tenantName = 'SPINOVATIONCORP',
+      tenantName = '',
       name,
       provider, // 'aws_kms', 'azure_keyvault', 'hashicorp_vault', 'gcp_kms', 'ad_cs'
       endpointUrl,
@@ -134,7 +138,7 @@ export const createPkiConnector = async (req: Request, res: Response) => {
     const id = 'conn-' + crypto.randomUUID().substring(0, 10);
     // Pin the connector to the session's tenant (super roles may target the
     // requested tenant); a body-supplied tenantName cannot write into another.
-    // M4: reject empty-tenant writes rather than silently defaulting to SPINOVATIONCORP.
+    // M4: reject empty-tenant writes rather than silently defaulting to any tenant.
     const cleanTenant = (resolveWriteTenant(req, tenantName) || '').toUpperCase().trim();
     if (!cleanTenant) return res.status(400).json({ error: 'Unable to resolve a tenant for this request.' });
 
@@ -279,7 +283,7 @@ export const deletePkiConnector = async (req: Request, res: Response) => {
     }
 
     await pool.query('DELETE FROM pki_synced_assets WHERE connector_id = $1', [id]);
-    await pool.query("DELETE FROM assets WHERE source IN ('cloud_kms', 'enterprise_pki') AND (source_ref = $1 OR source_ref = $2)", [c.id, c.name]).catch(() => {});
+    await pool.query(`DELETE FROM assets WHERE ${CONNECTOR_ASSETS}`, [c.id, c.name, c.tenant_name]).catch(() => {});
     await pool.query('DELETE FROM pki_connectors WHERE id = $1', [id]);
 
     res.json({ success: true, message: 'Connector and all associated cryptographic assets deleted.' });
@@ -291,14 +295,13 @@ export const deletePkiConnector = async (req: Request, res: Response) => {
 
 export const getPkiSyncedAssets = async (req: Request, res: Response) => {
   try {
-    const { tenant, connectorId, limit = 100 } = req.query;
-    let query = 'SELECT a.*, c.name as connector_name, c.provider FROM pki_synced_assets a JOIN pki_connectors c ON c.id = a.connector_id';
-    const params: any[] = [];
-
-    if (tenant && typeof tenant === 'string' && tenant.trim()) {
-      query += ' WHERE LOWER(a.tenant_name) = LOWER($' + (params.length + 1) + ')';
-      params.push(tenant.trim());
-    }
+    const { connectorId, limit = 100 } = req.query;
+    const tenant = scopedTenant(req);
+    if (!tenant) return denyUnscoped(res);
+    // Both the asset row and its connector must belong to the tenant.
+    let query = 'SELECT a.*, c.name as connector_name, c.provider FROM pki_synced_assets a JOIN pki_connectors c ON c.id = a.connector_id'
+      + ' WHERE LOWER(a.tenant_name) = LOWER($1) AND LOWER(c.tenant_name) = LOWER($1)';
+    const params: any[] = [tenant];
 
     if (connectorId && typeof connectorId === 'string' && connectorId.trim()) {
       query += (params.length > 0 ? ' AND' : ' WHERE') + ' a.connector_id = $' + (params.length + 1);
@@ -379,7 +382,7 @@ export const reportAdcs = async (req: Request, res: Response) => {
 
     // A fresh report replaces the connector's inventory (idempotent re-reports).
     await pool.query('DELETE FROM pki_synced_assets WHERE connector_id = $1', [connectorId]);
-    await pool.query("DELETE FROM assets WHERE source = 'enterprise_pki' AND (source_ref = $1 OR source_ref = $2)", [connectorId, connName]).catch(() => {});
+    await pool.query(`DELETE FROM assets WHERE ${CONNECTOR_ASSETS}`, [connectorId, connName, tenant]).catch(() => {});
 
     const result = await persistAssets(connectorId, tenant, 'ad_cs', connName, norm);
     return res.json({ success: true, connectorId, tenant, ...result, message: `Ingested ${result.total} AD CS objects.` });
@@ -420,7 +423,7 @@ async function executeDiscoverySync(connectorId: string, tenantName: string, pro
 
   // Clear old assets for this connector
   await pool.query('DELETE FROM pki_synced_assets WHERE connector_id = $1', [connectorId]);
-  await pool.query("DELETE FROM assets WHERE source IN ('cloud_kms', 'enterprise_pki') AND (source_ref = $1 OR source_ref = $2)", [connectorId, connectorName]).catch(() => {});
+  await pool.query(`DELETE FROM assets WHERE ${CONNECTOR_ASSETS}`, [connectorId, connectorName, tenantName]).catch(() => {});
 
   // Real discovery for implemented providers (AWS KMS). On error we record the
   // failure on the connector and surface zero assets rather than faking success.
@@ -514,8 +517,8 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
     await pool.query(`
       INSERT INTO pki_synced_assets (
         id, connector_id, tenant_name, asset_name, asset_type, algorithm,
-        key_size, is_vulnerable, risk_level, quantum_threat, status, rotation_enabled, expires_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Active', $11, COALESCE($12, NOW() + INTERVAL '365 days'))
+        key_size, is_vulnerable, risk_level, quantum_threat, status, rotation_enabled, expires_at, raw_metadata
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'Active', $11, COALESCE($12, NOW() + INTERVAL '365 days'), $13::jsonb)
     `, [
       pkiAssetId,
       connectorId,
@@ -528,20 +531,24 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
       a.risk,
       a.threat,
       a.rot,
-      a.expiresAt || null
+      a.expiresAt || null,
+      JSON.stringify(a.module ? { cryptoModule: a.module.key, cryptoModuleEvidence: a.module.evidence } : {})
     ]);
 
     // Syndicate into central assets inventory for unified CBOM & source filtering
     await pool.query(`
       INSERT INTO assets (
-        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14)
+        id, type, name, path, algorithm, key_size, is_vulnerable, risk_level, status, description, recommendation, source, source_ref, tenant_name, purpose,
+        crypto_module, crypto_module_evidence
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'active', $9, $10, $11, $12, $13, $14, $15, $16)
       ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         path = EXCLUDED.path,
         algorithm = EXCLUDED.algorithm,
         tenant_name = EXCLUDED.tenant_name,
-        purpose = EXCLUDED.purpose
+        purpose = EXCLUDED.purpose,
+        crypto_module = EXCLUDED.crypto_module,
+        crypto_module_evidence = EXCLUDED.crypto_module_evidence
     `, [
       cbomAssetId,
       a.type,
@@ -557,6 +564,9 @@ async function persistAssets(connectorId: string, tenantName: string, provider: 
       connectorName,
       tenantName,
       classifyPurpose({ type: a.type, name: a.name, algorithm: a.algo, key_size: a.size, description: a.threat }),
+      // The module the provider's API reported for this key (CMVP Stage 3); null when not observed.
+      a.module?.key || null,
+      a.module?.evidence || null,
     ]).catch(err => {
       console.warn('Failed to syndicate PKI asset to CBOM:', err);
     });

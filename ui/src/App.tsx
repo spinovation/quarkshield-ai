@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { SupportAccessRequired, SupportAccessActive, TenantAggregateTable } from './components/SupportAccessGate';
+import { FleetSummary, GrantStatus, TenantAggregate, fetchFleetSummary, fetchGrantStatus, setSupportTenant, isPlatformTenant } from './lib/supportScope';
 import { 
   Laptop, 
   Server, 
@@ -189,6 +191,11 @@ const cbomKeyLen = (comp: any): number | undefined => {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 };
 const cbomVulnerable = (comp: any): boolean => {
+  // The server states vulnerability explicitly; the NIST level is omitted when no
+  // category can honestly be stated, so it can no longer be the only signal.
+  const flag = cbomProp(comp, 'quarkshield:quantumVulnerable');
+  if (flag === 'true') return true;
+  if (flag === 'false') return false;
   const nq = comp?.cryptoProperties?.algorithmProperties?.nistQuantumSecurityLevel;
   if (nq === 0) return true;
   if (typeof nq === 'number') return false; // explicit secure level (e.g. 3)
@@ -200,6 +207,13 @@ const cbomVulnerable = (comp: any): boolean => {
   if (/ml-?kem|ml-?dsa|slh-?dsa|kyber|dilithium|sphincs|falcon|sntrup|aes-?256|chacha20/.test(a)) return false;
   return true;
 };
+// NIST quantum security level as exported: 0 = not quantum-safe, 1-5 = NIST category,
+// undefined = not stated (never guessed).
+const cbomNistLevel = (comp: any): number | undefined => {
+  const nq = comp?.cryptoProperties?.algorithmProperties?.nistQuantumSecurityLevel;
+  if (typeof nq === 'number') return nq;
+  return cbomVulnerable(comp) ? 0 : undefined;
+};
 
 export default function App() {
   const [tenantSlug, setTenantSlug] = useState<string>(() => {
@@ -210,28 +224,23 @@ export default function App() {
     const path = window.location.pathname.toLowerCase();
     if (path.startsWith('/tenant/')) {
       return path.split('/')[2].trim();
-    } else if (path === '/spinovation' || path === '/spinovationcorp') {
-      return 'spinovationcorp';
     }
-
-    const port = window.location.port;
-    if (port === '5001') return 'democlient';
-    if (port === '5002') return 'spinovationcorp';
-    if (port === '5003') return 'vanguard-logistics';
-    if (port === '5052') return 'apex-cyber';
-    if (port === '5053') return 'cybershield-partners';
 
     const host = window.location.hostname.toLowerCase();
     if (host.startsWith('scanner.')) {
       return '';
     }
     if (host.includes('.quarkshield.ai') && !host.startsWith('www.') && !host.startsWith('quarkshield.ai') && !host.startsWith('scanner.')) {
-      const sub = host.split('.')[0];
-      return (sub === 'spinovation' || sub === 'spinovationcorp') ? 'spinovationcorp' : sub;
+      // The subdomain is only a hint for the sign-in page. Once a session exists the
+      // workspace is the session's own tenant (see the /api/auth/me effect below), so
+      // no tenant needs a hand-written subdomain alias here.
+      return host.split('.')[0];
     }
     if (host.includes('.fedmitigate.com') && !host.startsWith('www.') && !host.startsWith('fedmitigate.com')) {
-      const sub = host.split('.')[0];
-      return (sub === 'spinovation' || sub === 'spinovationcorp') ? 'spinovationcorp' : sub;
+      // The subdomain is only a hint for the sign-in page. Once a session exists the
+      // workspace is the session's own tenant (see the /api/auth/me effect below), so
+      // no tenant needs a hand-written subdomain alias here.
+      return host.split('.')[0];
     }
 
     return localStorage.getItem('quarkshield_tenant_slug') || sessionStorage.getItem('quarkshield_tenant_slug') || '';
@@ -248,14 +257,13 @@ export default function App() {
   const [showRoadmapModal, setShowRoadmapModal] = useState<boolean>(false);
 
   const [viewMode, setViewMode] = useState<'landing' | 'console' | 'tenant'>(() => {
-    // HARD SECURITY BARRIER: On dedicated tenant subdomains (e.g. algomeld.quarkshield.ai, spinovationcorp.quarkshield.ai),
+    // HARD SECURITY BARRIER: On dedicated tenant subdomains (<tenant>.quarkshield.ai),
     // viewMode is permanently locked to 'tenant'. Global console view is strictly forbidden.
     if (isTenantHost) {
       return 'tenant';
     }
 
     const urlParams = new URLSearchParams(window.location.search);
-    const port = window.location.port;
     const path = window.location.pathname.toLowerCase();
 
     // Check if scanner console subdomain
@@ -264,12 +272,7 @@ export default function App() {
     }
 
     // Check if tenant query param or path
-    if (urlParams.get('tenant') || urlParams.get('workspace') || path.startsWith('/tenant/') || path === '/spinovation' || path === '/spinovationcorp') {
-      return 'tenant';
-    }
-
-    // Check if dedicated tenant port
-    if (['5001', '5002', '5003', '5052', '5053'].includes(port)) {
+    if (urlParams.get('tenant') || urlParams.get('workspace') || path.startsWith('/tenant/')) {
       return 'tenant';
     }
 
@@ -389,12 +392,45 @@ export default function App() {
           sessionStorage.setItem('quarkshield_account_type', 'superadmin');
           localStorage.setItem('quarkshield_role', 'Super Admin');
           sessionStorage.setItem('quarkshield_role', 'Super Admin');
-        } else if (currentAccountType === 'superadmin') {
-          // Stored state claims superadmin but the server disagrees: demote.
-          setCurrentAccountType(u.accountType || 'user');
-          setCurrentUserRole('Security Operator');
-          localStorage.setItem('quarkshield_account_type', u.accountType || 'user');
-          sessionStorage.setItem('quarkshield_account_type', u.accountType || 'user');
+          // A super admin belongs to no tenant: forget any workspace an earlier
+          // tenant sign-in left in this browser.
+          ['quarkshield_workspace', 'quarkshield_tenant_slug']
+            .forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
+        } else {
+          if (currentAccountType === 'superadmin') {
+            // Stored state claims superadmin but the server disagrees: demote, and
+            // drop the super admin identity left over from an earlier sign-in on
+            // this browser (it was being shown next to the tenant user's email).
+            setCurrentAccountType(u.accountType || 'user');
+            setCurrentUserRole('Security Operator');
+            setCurrentCustomerId('');
+            setCurrentCustomerName('');
+            localStorage.setItem('quarkshield_account_type', u.accountType || 'user');
+            sessionStorage.setItem('quarkshield_account_type', u.accountType || 'user');
+            ['quarkshield_role', 'quarkshield_customer_id', 'quarkshield_customer_name', 'quarkshield_license_tier']
+              .forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
+          }
+          // The central console is the Super Admin's. A tenant (Fleet Admin) session
+          // that reaches it — a bookmarked ?view=console, or a browser that last
+          // signed in as super admin — belongs in its own tenant portal, which is
+          // where its licence, users, groups and Copilot live.
+          // (Platform operators have no tenant and stay where they are.)
+          const slug = String(u.tenant || '').toLowerCase().replace(/[^a-z0-9-]/g, '');
+          // A tenant session's workspace is its own tenant, whatever name the URL used
+          // to reach the portal (a short subdomain, an old bookmark). Same rule for
+          // every tenant; nothing here knows any tenant's name.
+          if (viewMode === 'tenant' && slug && slug !== tenantSlug) {
+            setTenantSlug(slug);
+            localStorage.setItem('quarkshield_tenant_slug', slug);
+            sessionStorage.setItem('quarkshield_tenant_slug', slug);
+          }
+          if (viewMode === 'console' && slug) {
+            try { window.history.replaceState({}, '', window.location.pathname); } catch { /* ignore */ }
+            setTenantSlug(slug);
+            localStorage.setItem('quarkshield_tenant_slug', slug);
+            sessionStorage.setItem('quarkshield_tenant_slug', slug);
+            setViewMode('tenant');
+          }
         }
         if (u.email && u.email !== currentUserEmail) setCurrentUserEmail(u.email);
       } catch { /* offline: keep whatever the server last told us */ }
@@ -437,6 +473,10 @@ export default function App() {
     sessionStorage.removeItem('quarkshield_customer_id');
     localStorage.removeItem('quarkshield_license_tier');
     sessionStorage.removeItem('quarkshield_license_tier');
+    localStorage.removeItem('quarkshield_workspace');
+    sessionStorage.removeItem('quarkshield_workspace');
+    localStorage.removeItem('quarkshield_tenant_slug');
+    sessionStorage.removeItem('quarkshield_tenant_slug');
     localStorage.removeItem('quarkshield_view_mode');
     sessionStorage.removeItem('quarkshield_view_mode');
     localStorage.removeItem('quarkshield_active_tab');
@@ -452,6 +492,11 @@ export default function App() {
   const [machines, setMachines] = useState<FleetMachine[]>([]);
   const [tokens, setTokens] = useState<FleetToken[]>([]);
   const [cbomData, setCbomData] = useState<any | null>(null);
+  // Per-tenant aggregates (always available) + the selected tenant's support-access grant.
+  const [fleetSummary, setFleetSummary] = useState<FleetSummary | null>(null);
+  const [supportGrant, setSupportGrant] = useState<GrantStatus>({ active: false, expiresAt: null });
+  const supportTenantRef = useRef<string | null>(null);
+  const reportTenantRef = useRef<string | null>(null); // canonical name of the selected tenant
   const [loading, setLoading] = useState(false);
 
   // Filters & Search
@@ -482,7 +527,7 @@ export default function App() {
   // Token creation & deployment states
   const [showCreateTokenModal, setShowCreateTokenModal] = useState(false);
   const [newTokenName, setNewTokenName] = useState('');
-  const [newTokenTenant, setNewTokenTenant] = useState('SPINOVATIONCORP');
+  const [newTokenTenant, setNewTokenTenant] = useState('');
   const [selectedDeploymentToken, setSelectedDeploymentToken] = useState<string>('');
   const [deploymentMethod, setDeploymentMethod] = useState<'desktop' | 'curl' | 'jamf' | 'intune' | 'ansible' | 'docker'>('desktop');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
@@ -494,13 +539,21 @@ export default function App() {
   const apiOrigin = window.location.origin;
 
   // 1. Fetch Fleet Machines
+  // Tenant data belongs to the tenant: the console always loads per-tenant AGGREGATES,
+  // and host rows only for the one selected tenant that has an active support-access
+  // grant (supportTenantRef — set by the support-scope effect below).
   const fetchMachines = async () => {
     try {
       setLoading(true);
-      const res = await fetch('/api/fleet/machines');
+      const summary = await fetchFleetSummary();
+      if (summary) setFleetSummary(summary);
+      const tenant = supportTenantRef.current;
+      if (!tenant) { setMachines([]); return; }
+      const res = await fetch(`/api/fleet/machines?tenant=${encodeURIComponent(tenant)}`);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data = await res.json();
-      setMachines(data);
+      // Without a grant the server answers { aggregateOnly, tenants } instead of host rows.
+      setMachines(Array.isArray(data) ? data : []);
     } catch (err: any) {
       // No sample fleet: an empty list and the real error, never invented machines.
       console.warn('Could not fetch machines from server:', err);
@@ -532,7 +585,10 @@ export default function App() {
   // 3. Fetch CBOM
   const fetchCBOM = async (machineId?: string) => {
     try {
-      const url = machineId && machineId !== 'all' ? `/api/fleet/cbom?machine_id=${machineId}` : '/api/fleet/cbom';
+      const tenant = supportTenantRef.current;
+      if (!tenant) { setCbomData(null); return; } // CBOM is tenant detail: needs a support grant
+      const base = `/api/fleet/cbom?tenant=${encodeURIComponent(tenant)}`;
+      const url = machineId && machineId !== 'all' ? `${base}&machine_id=${encodeURIComponent(machineId)}` : base;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
       const data = await res.json();
@@ -562,9 +618,8 @@ export default function App() {
 
   useEffect(() => {
     if (viewMode !== 'landing') {
-      fetchMachines();
+      // Machines + CBOM are loaded by the support-scope effect (they depend on the grant).
       fetchTokens();
-      fetchCBOM();
       fetchClients();
     }
   }, [viewMode]);
@@ -585,15 +640,14 @@ export default function App() {
   }, [isTenantDropdownOpen]);
 
   const handleCreateToken = async () => {
-    if (!newTokenName.trim()) return;
+    if (!newTokenName.trim() || !newTokenTenant) return;
     try {
       const res = await fetch('/api/fleet/tokens', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           name: newTokenName.trim(),
-          tenantName: newTokenTenant || 'SPINOVATIONCORP',
-          licenseKey: newTokenTenant === 'SPINOVATIONCORP' ? 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8' : undefined
+          tenantName: newTokenTenant
         })
       });
       if (res.ok) {
@@ -634,7 +688,7 @@ export default function App() {
       const isFleet = selectedTenantFilter === 'all';
       const qs = isFleet
         ? `scope=collective&format=${format}`
-        : `tenant=${encodeURIComponent(selectedTenantFilter)}&format=${format}`;
+        : `tenant=${encodeURIComponent(reportTenantRef.current || selectedTenantFilter)}&format=${format}`;
       const res = await fetch(`/api/reports/executive?${qs}`, { credentials: 'include' });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
@@ -668,7 +722,7 @@ export default function App() {
     const recipients = input.split(',').map(e => e.trim()).filter(e => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)).map(email => ({ email }));
     if (!recipients.length) { alert('No valid email addresses entered.'); return; }
     try {
-      const body: any = isFleet ? { scope: 'collective', recipients } : { tenant: selectedTenantFilter, recipients };
+      const body: any = isFleet ? { scope: 'collective', recipients } : { tenant: reportTenantRef.current || selectedTenantFilter, recipients };
       const res = await fetch('/api/reports/executive/send', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
@@ -797,13 +851,18 @@ export default function App() {
   };
 
   // Fleet Global Statistics
-  const totalMachines = machines.length;
-  const onlineMachines = machines.filter(m => m.status === 'online').length;
-  const avgRiskScore = totalMachines > 0 
-    ? Math.round(machines.reduce((sum, m) => sum + (m.quantumRiskScore || 0), 0) / totalMachines) 
-    : 0;
-  const totalDiscoveredAssets = machines.reduce((sum, m) => sum + (m.assetCount || 0), 0);
-  const totalVulnerableAssets = machines.reduce((sum, m) => sum + (m.vulnerableCount || 0), 0);
+  // Derived from the per-tenant aggregate summary, never from host rows (those are only
+  // loaded for a tenant that has granted support access).
+  const summaryTenants: TenantAggregate[] = fleetSummary?.tenants || [];
+  const weightedRisk = (list: TenantAggregate[]) => {
+    const n = list.reduce((sum, t) => sum + t.machineCount, 0);
+    return n > 0 ? Math.round(list.reduce((sum, t) => sum + t.avgRiskScore * t.machineCount, 0) / n) : 0;
+  };
+  const totalMachines = summaryTenants.reduce((sum, t) => sum + t.machineCount, 0);
+  const onlineMachines = summaryTenants.reduce((sum, t) => sum + t.onlineCount, 0);
+  const avgRiskScore = weightedRisk(summaryTenants);
+  const totalDiscoveredAssets = summaryTenants.reduce((sum, t) => sum + t.assetCount, 0);
+  const totalVulnerableAssets = summaryTenants.reduce((sum, t) => sum + t.vulnerableCount, 0);
 
   // Filter Machines Table by Search (hostname, IP, group, tenant, or license)
   const filteredMachines = machines.filter(m => {
@@ -834,14 +893,11 @@ export default function App() {
   const tenantGroups: TenantGroup[] = React.useMemo(() => {
     const map = new Map<string, TenantGroup>();
     filteredMachines.forEach(m => {
-      let tenant = m.tenantName || 'Default Enterprise Fleet';
-      if (tenant.toUpperCase().includes('SPINOVATION') || (m.groupName && m.groupName.toLowerCase() === 'engg')) {
-        tenant = 'SPINOVATIONCORP';
-      }
+      const tenant = m.tenantName || 'Default Enterprise Fleet';
       if (!map.has(tenant)) {
         map.set(tenant, {
           tenantName: tenant,
-          licenseKey: tenant === 'SPINOVATIONCORP' ? 'QS-CORP-SPINOVATIONCORP-6C894B76-DA9EF3D8' : (m.licenseKey || 'QS-CORP-DEMOCLIENT-6AF00609-C7486296'),
+          licenseKey: m.licenseKey || '',
           tier: m.licenseTier || (tenant.toLowerCase().includes('partner') || tenant.toLowerCase().includes('msp') ? 'MSP Partner' : 'Enterprise Pro'),
           machines: [],
           totalVulnerable: 0,
@@ -909,11 +965,7 @@ export default function App() {
       const key = rawName.toLowerCase().trim();
       if (!key) return;
 
-      let displayName = (c.displayName || c.name || '').trim();
-      if (displayName.toLowerCase() === 'spinovationcorp') displayName = 'Spinovation Corp';
-      else if (displayName.toLowerCase() === 'amberoon') displayName = 'Amberoon';
-      else if (displayName.toLowerCase() === 'algomeld') displayName = 'Algomeld';
-      else if (displayName.toLowerCase() === 'democlient') displayName = 'Demo Client Workspace';
+      const displayName = (c.displayName || c.name || '').trim();
 
       const customerId = c.customerId || (c.id?.startsWith('PART-') || c.id?.startsWith('CORP-') ? c.id : undefined);
       const isMSP = c.accountType === 'partner' 
@@ -930,10 +982,6 @@ export default function App() {
         aliases.add(customerId.toLowerCase());
         aliases.add(customerId.toLowerCase().replace(/[^a-z0-9]/g, ''));
       }
-      if (key === 'spinovationcorp') {
-        aliases.add('spinovation');
-        aliases.add('spinovation corp');
-      }
 
       tenantMap.set(key, {
         key,
@@ -948,7 +996,7 @@ export default function App() {
     });
 
     // 2. Discover and merge any tenants from enrolled machines
-    machines.forEach((m: any) => {
+    summaryTenants.forEach((m: any) => {
       const machineTenant = (m.tenantName || m.groupName || '').trim();
       if (!machineTenant) return;
 
@@ -969,10 +1017,7 @@ export default function App() {
         if (!opt.aliases.includes(norm)) opt.aliases.push(norm);
       } else {
         const isMSP = norm.includes('msp') || norm.includes('partner');
-        let displayName = machineTenant;
-        if (norm === 'spinovationcorp') displayName = 'Spinovation Corp';
-        else if (norm === 'algomeld') displayName = 'Algomeld';
-        else if (norm === 'amberoon') displayName = 'Amberoon';
+        const displayName = machineTenant;
 
         tenantMap.set(clean || norm, {
           key: clean || norm,
@@ -990,12 +1035,12 @@ export default function App() {
 
     // 4. Calculate enrolled machine count for each tenant
     const list = Array.from(tenantMap.values()).map(tenant => {
-      const count = machines.filter(m => {
-        const mTenant = (m.tenantName || m.groupName || '').toLowerCase().trim();
+      const count = summaryTenants.filter(m => {
+        const mTenant = (m.tenantName || '').toLowerCase().trim();
         const mClean = mTenant.replace(/[^a-z0-9]/g, '');
         return tenant.aliases.includes(mTenant) || 
                tenant.aliases.some(a => a.replace(/[^a-z0-9]/g, '') === mClean);
-      }).length;
+      }).reduce((sum, m) => sum + m.machineCount, 0);
       return { ...tenant, machineCount: count };
     });
 
@@ -1003,7 +1048,7 @@ export default function App() {
     list.sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' }));
 
     return list;
-  }, [registeredClients, machines]);
+  }, [registeredClients, fleetSummary]);
 
   // Selected Tenant Option metadata
   const selectedTenantOption = useMemo(() => {
@@ -1045,13 +1090,60 @@ export default function App() {
     });
   }, [machines, selectedTenantFilter, selectedTenantOption]);
 
-  const cbomTotalEndpoints = cbomScopedMachines.length;
-  const cbomOnlineEndpoints = cbomScopedMachines.filter(m => m.status === 'online').length;
-  const cbomFleetRiskScore = cbomTotalEndpoints > 0
-    ? Math.round(cbomScopedMachines.reduce((sum, m) => sum + (m.quantumRiskScore || 0), 0) / cbomTotalEndpoints)
-    : 0;
-  const cbomDiscoveredCrypto = cbomScopedMachines.reduce((sum, m) => sum + (m.assetCount || 0), 0);
-  const cbomVulnerableAssets = cbomScopedMachines.reduce((sum, m) => sum + (m.vulnerableCount || 0), 0);
+  // Aggregates for the selected scope (whole fleet, or the selected tenant).
+  const scopedAggregates = useMemo(() => {
+    if (selectedTenantFilter === 'all') return summaryTenants;
+    const filterNorm = selectedTenantFilter.toLowerCase().trim();
+    return summaryTenants.filter(t => {
+      const n = (t.tenantName || '').toLowerCase().trim();
+      const c = n.replace(/[^a-z0-9]/g, '');
+      return n === filterNorm || c === filterNorm.replace(/[^a-z0-9]/g, '') ||
+        (!!selectedTenantOption && (selectedTenantOption.aliases.includes(n) || selectedTenantOption.aliases.some(a => a.replace(/[^a-z0-9]/g, '') === c)));
+    });
+  }, [fleetSummary, selectedTenantFilter, selectedTenantOption]);
+
+  const cbomTotalEndpoints = scopedAggregates.reduce((sum, t) => sum + t.machineCount, 0);
+  const cbomOnlineEndpoints = scopedAggregates.reduce((sum, t) => sum + t.onlineCount, 0);
+  const cbomFleetRiskScore = weightedRisk(scopedAggregates);
+  const cbomDiscoveredCrypto = scopedAggregates.reduce((sum, t) => sum + t.assetCount, 0);
+  const cbomVulnerableAssets = scopedAggregates.reduce((sum, t) => sum + t.vulnerableCount, 0);
+
+  // ---- Support scope -------------------------------------------------------------
+  // The one tenant (if any) whose detail this console may load: the selected tenant,
+  // and only while it has an active support-access grant. The server enforces this;
+  // the console just avoids asking for what it will be refused and shows why.
+  const supportTenantName = selectedTenantFilter === 'all'
+    ? null
+    : (selectedTenantOption?.rawName || selectedTenantOption?.key || selectedTenantFilter);
+  const supportTenantLabel = selectedTenantFilter === 'all' ? null : (selectedTenantOption?.displayName || selectedTenantFilter);
+  const supportUnlocked = !!supportTenantName && supportGrant.active;
+  reportTenantRef.current = supportTenantName;
+
+  useEffect(() => {
+    if (viewMode === 'landing') return;
+    // Support mirror: the tenant portal runs under the platform session, so name the
+    // mirrored tenant on its API calls. (Naming grants nothing — the server decides.)
+    if (viewMode === 'tenant') {
+      setSupportTenant(isSupportMirror ? (tenantSlug || null) : null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const grant: GrantStatus = !supportTenantName
+        ? { active: false, expiresAt: null }
+        : isPlatformTenant(supportTenantName)
+          ? { active: true, expiresAt: null }
+          : await fetchGrantStatus(supportTenantName);
+      if (cancelled) return;
+      supportTenantRef.current = grant.active ? supportTenantName : null;
+      setSupportTenant(supportTenantRef.current);
+      setSupportGrant(grant);
+      setSelectedMachineFilter('all');
+      fetchMachines();
+      fetchCBOM();
+    })();
+    return () => { cancelled = true; };
+  }, [supportTenantName, viewMode, isSupportMirror, tenantSlug]);
 
   const tenantScopedHostnames = useMemo(() => new Set(cbomScopedMachines.map(m => m.hostname)), [cbomScopedMachines]);
 
@@ -1222,10 +1314,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           if (actype) setCurrentAccountType(actype);
 
           const workspace = localStorage.getItem('quarkshield_workspace') || sessionStorage.getItem('quarkshield_workspace');
-          const isTenantUser = actype === 'corporate' || actype === 'partner' || actype === 'tenant' || !!workspace;
+          // A leftover workspace from an earlier tenant sign-in must never pull a
+          // super admin into that tenant's portal.
+          const isTenantUser = actype !== 'superadmin' && (actype === 'corporate' || actype === 'partner' || actype === 'tenant' || !!workspace);
           
           if (isTenantUser) {
-            const targetSlug = workspace || (userEmail && userEmail.includes('spinovation') ? 'spinovationcorp' : (userEmail && userEmail.includes('algomeld') ? 'algomeld' : ''));
+            const targetSlug = workspace || '';
             if (targetSlug) {
               setTenantSlug(targetSlug);
               localStorage.setItem('quarkshield_view_mode', 'tenant');
@@ -1260,7 +1354,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
     return (
       <PortalErrorBoundary>
         <TenantPortal
-          tenantSlug={tenantSlug || 'spinovationcorp'}
+          tenantSlug={tenantSlug}
+          onWorkspaceResolved={(ws) => {
+            setTenantSlug(ws);
+            localStorage.setItem('quarkshield_tenant_slug', ws);
+            sessionStorage.setItem('quarkshield_tenant_slug', ws);
+          }}
           isSupportMirror={isSupportMirror}
           onExitMirror={() => {
             setIsSupportMirror(false);
@@ -1284,8 +1383,8 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           }}
           onLogout={() => {
             setIsSupportMirror(false);
-            sessionStorage.removeItem(`tenant_auth_${tenantSlug || 'spinovationcorp'}`);
-            localStorage.removeItem(`tenant_auth_${tenantSlug || 'spinovationcorp'}`);
+            sessionStorage.removeItem(`tenant_auth_${tenantSlug}`);
+            localStorage.removeItem(`tenant_auth_${tenantSlug}`);
             localStorage.removeItem('quarkshield_user');
             sessionStorage.removeItem('quarkshield_user');
             localStorage.removeItem('quarkshield_role');
@@ -1370,7 +1469,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           >
             <Laptop size={17} color={activeTab === 'dashboard' ? 'var(--accent-cyan)' : 'var(--text-muted)'} />
             <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Global Fleet Overview ({machines.length})
+              Global Fleet Overview ({totalMachines})
             </span>
           </button>
 
@@ -1630,14 +1729,14 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#ffffff' }}>Scale Monitored</span>
                 <span style={{ fontSize: '0.95rem', fontWeight: 800, color: '#ffffff' }}>
-                  {machines.length} <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.82rem' }}>/</span> {currentAccountType === 'partner' ? '50' : '250'}
+                  {totalMachines} <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '0.82rem' }}>/</span> {currentAccountType === 'partner' ? '50' : '250'}
                 </span>
               </div>
 
               {/* Progress Bar */}
               <div style={{ width: '100%', height: '4px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden' }}>
                 <div style={{
-                  width: `${Math.min(100, Math.max(8, Math.round((machines.length / (currentAccountType === 'partner' ? 50 : 250)) * 100)))}%`,
+                  width: `${Math.min(100, Math.max(8, Math.round((totalMachines / (currentAccountType === 'partner' ? 50 : 250)) * 100)))}%`,
                   height: '100%',
                   background: 'linear-gradient(90deg, #00f2fe 0%, #4facfe 100%)',
                   borderRadius: '2px',
@@ -1909,10 +2008,21 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                 </div>
               </div>
 
-              {/* Tenant Directory Groupings */}
-              {tenantGroups.length === 0 ? (
+              {/* Per-tenant aggregates — always shown; no host rows */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', marginBottom: '1rem' }}>
+                {supportUnlocked && supportTenantLabel && !isPlatformTenant(supportTenantName)
+                  ? <SupportAccessActive tenantLabel={supportTenantLabel} expiresAt={supportGrant.expiresAt} />
+                  : !supportUnlocked && <SupportAccessRequired tenantLabel={supportTenantLabel} what="hostnames, IPs and per-endpoint detail" />}
+                <TenantAggregateTable
+                  tenants={summaryTenants.filter(t => !searchQuery.trim() || t.tenantName.toLowerCase().includes(searchQuery.toLowerCase().trim()))}
+                  onSelect={(name) => setSelectedTenantFilter(name)}
+                />
+              </div>
+
+              {/* Tenant Directory Groupings — host rows, only under an active support grant */}
+              {supportUnlocked && (tenantGroups.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                  No endpoints or tenants found matching your criteria. Deploy an agent or create a tenant token to see real-time telemetry.
+                  No endpoints found for this tenant matching your criteria.
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -2107,7 +2217,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                     );
                   })}
                 </div>
-              )}
+              ))}
             </div>
           </div>
         )}
@@ -2217,7 +2327,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                             🌐 Global Fleet (All Tenants)
                           </div>
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
-                            {machines.length} Total Enrolled Endpoints Across Entire Fleet
+                            {totalMachines} Total Enrolled Endpoints Across Entire Fleet
                           </div>
                         </div>
                       </>
@@ -2283,7 +2393,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                         <input
                           ref={tenantSearchInputRef}
                           type="text"
-                          placeholder="Search partner or tenant name, ID (e.g. Algomeld)..."
+                          placeholder="Search partner or tenant name, ID ..."
                           value={tenantSearchQuery}
                           onChange={e => setTenantSearchQuery(e.target.value)}
                           style={{
@@ -2363,7 +2473,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                           <span style={{ fontSize: '0.72rem', background: 'rgba(255,255,255,0.06)', padding: '0.1rem 0.45rem', borderRadius: '4px', color: 'var(--text-muted)' }}>
-                            {machines.length} devices
+                            {totalMachines} devices
                           </span>
                           {selectedTenantFilter === 'all' && <Check size={14} color="var(--accent-cyan)" />}
                         </div>
@@ -2679,6 +2789,10 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                 <div style={{ marginTop: '0.75rem' }}>
                   <SbomInventory tenant={selectedTenantFilter === 'all' ? 'quarkshield.ai' : (selectedTenantOption?.rawName || selectedTenantOption?.key || selectedTenantFilter)} apiUrl="" isSuperAdmin={true} />
                 </div>
+              ) : !supportUnlocked ? (
+                <div style={{ marginTop: '0.75rem' }}>
+                  <SupportAccessRequired tenantLabel={supportTenantLabel} what="the cryptographic asset inventory (CBOM components, paths and hosts)" />
+                </div>
               ) : (
                 <>
                   {/* Filters Row */}
@@ -2819,7 +2933,7 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                               </td>
                               <td>
                                 <span className={`badge ${riskProp === 'critical' || riskProp === 'high' ? 'danger' : (riskProp === 'secure' ? 'success' : 'warning')}`}>
-                                  NIST Level {cbomVulnerable(c) ? 0 : 3}
+                                  {cbomNistLevel(c) === undefined ? 'NIST level not stated' : `NIST Level ${cbomNistLevel(c)}`}
                                 </span>
                               </td>
                               <td>
@@ -2985,15 +3099,18 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
             </div>
 
             {/* Sub-tab content */}
-            {activeTab === 'git' && (
+            {!supportUnlocked && (
+              <SupportAccessRequired tenantLabel={supportTenantLabel} what="repository scans, PKI / vault connectors and gateway configuration" />
+            )}
+            {supportUnlocked && activeTab === 'git' && (
               <GitRepoAuditor onAssetsChanged={() => fetchCBOM()} />
             )}
-            {activeTab === 'pki' && (
+            {supportUnlocked && activeTab === 'pki' && (
               <div style={{ padding: '0.5rem 0' }}>
                 <EnterprisePkiVaults tenantName={selectedTenantFilter !== 'all' ? selectedTenantFilter : undefined} onAssetsChanged={() => fetchCBOM()} />
               </div>
             )}
-            {activeTab === 'proxy' && (
+            {supportUnlocked && activeTab === 'proxy' && (
               <div style={{ padding: '0.5rem 0' }}>
                 <PqcProxyGateway onAssetsChanged={() => fetchCBOM()} />
               </div>
@@ -3006,6 +3123,10 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
           selectedTenantFilter === 'all' ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
               Select a tenant in the tenant filter to view its Threat &amp; Risk Graph.
+            </div>
+          ) : !supportUnlocked ? (
+            <div style={{ padding: '1rem 0' }}>
+              <SupportAccessRequired tenantLabel={supportTenantLabel} what="the Threat &amp; Risk Graph" />
             </div>
           ) : (
             <React.Suspense fallback={<div style={{ padding: '1rem', color: 'var(--text-muted)' }}>Loading Threat &amp; Risk Graph…</div>}>
@@ -3065,11 +3186,12 @@ docker run --rm -v /etc/ssl:/etc/ssl:ro -v /etc/ssh:/etc/ssh:ro \\
                     fontSize: '0.85rem'
                   }}
                 >
-                  <option value="SPINOVATIONCORP">Spinovation Corp [CORP-9812]</option>
-                  <option value="APEXCYBERDEFENSEMSP">Apex Cyber Defense MSP [PART-9148]</option>
-                  <option value="APEXDEFENSELABS">Apex Defense Labs [CORP-4821]</option>
-                  <option value="DEMOCLIENT">Demo Client Enterprise [CORP-5120]</option>
-                  <option value="PARTNERTEST">CyberShield Sec MSP [PART-8830]</option>
+                  <option value="">Select a tenant…</option>
+                  {(registeredClients || []).filter((c: any) => c?.name).map((c: any) => (
+                    <option key={c.id || c.name} value={String(c.name).toUpperCase()}>
+                      {c.displayName || c.name}{c.customerId ? ` [${c.customerId}]` : ''}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -3411,7 +3533,7 @@ echo "✓ Linux host ${inoculationScriptModal.hostname} successfully hardened."`
                   </div>
                   <div>
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem', display: 'block' }}>Active Monitored Endpoints</span>
-                    <strong style={{ color: 'var(--accent-cyan)' }}>{machines.length} Active Devices</strong>
+                    <strong style={{ color: 'var(--accent-cyan)' }}>{totalMachines} Active Devices</strong>
                   </div>
                   <div style={{ gridColumn: '1 / -1' }}>
                     <span style={{ color: 'var(--text-muted)', fontSize: '0.72rem', display: 'block' }}>{isSuperAdmin ? 'Root Master Authority Key' : 'Cryptographic License Key'}</span>

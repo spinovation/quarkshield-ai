@@ -38,7 +38,7 @@ interface TenantUserManagementProps {
 }
 
 export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({ 
-  currentTenant = 'spinovationcorp',
+  currentTenant = '',
   allowTenantSwitch = false 
 }) => {
   const [selectedTenant, setSelectedTenant] = useState<string>(currentTenant);
@@ -108,7 +108,7 @@ export const TenantUserManagement: React.FC<TenantUserManagementProps> = ({
       }
     } catch (err) {
       // Never fabricate a user list on failure — the old fallback hardcoded real
-      // admin emails (e.g. sridhargs@spinovation.com) and invented fake users,
+      // admin emails and invented fake users,
       // which both leaked addresses and misled whoever was viewing. Show an
       // honest empty state + error instead.
       console.warn('Failed to load tenant users:', err);

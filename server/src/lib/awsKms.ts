@@ -14,6 +14,8 @@ import { STSClient, AssumeRoleCommand } from '@aws-sdk/client-sts';
  *   kms:ListKeys, kms:DescribeKey, kms:ListAliases, kms:GetKeyRotationStatus
  */
 
+import { ModuleObservation, awsKmsModule } from './cmvpModules';
+
 export interface KmsConfig {
   roleArn?: string;
   externalId?: string;
@@ -34,6 +36,8 @@ export interface DiscoveredAsset {
   threat: string;
   rot: boolean;
   expiresAt: Date | null;
+  /** Which cryptographic module holds the key, as the provider's API reported it (CMVP Stage 3). */
+  module?: ModuleObservation;
 }
 
 /** Map an AWS KMS KeySpec to algorithm metadata and quantum-vulnerability. */
@@ -150,6 +154,7 @@ export const discoverKmsKeys = async (cfg: KmsConfig): Promise<DiscoveredAsset[]
           threat: `[${region}] ${m.threat}`,
           rot,
           expiresAt: md.ValidTo || md.DeletionDate || null,
+          module: awsKmsModule({ origin: md.Origin, region, customKeyStoreId: md.CustomKeyStoreId }),
         });
       }
       marker = list.Truncated ? list.NextMarker : undefined;

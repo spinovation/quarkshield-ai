@@ -101,7 +101,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
   // ---------------------------------------------------------
   // Anonymized "sample enterprise" posture for the public hero panel. The public
   // /api/cbom/fleet endpoint returns representative (not real-tenant) data.
-  const [spinovationPosture, setSpinovationPosture] = useState<PostureMetrics>(() =>
+  const [samplePosture, setSamplePosture] = useState<PostureMetrics>(() =>
     calculatePostureMetrics([], [], {
       totalAssets: 1284,
       quantumVuln: 517,
@@ -118,9 +118,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       .then(data => {
         if (data && data.summary) {
           // Authoritative aggregate counts come from the endpoint's summary.
-          setSpinovationPosture(calculatePostureMetrics([], data.machines || [], data.summary));
+          setSamplePosture(calculatePostureMetrics([], data.machines || [], data.summary));
         } else if (data && data.assets && data.assets.length > 0) {
-          setSpinovationPosture(calculatePostureMetrics(data.assets, data.machines || []));
+          setSamplePosture(calculatePostureMetrics(data.assets, data.machines || []));
         }
       })
       .catch(() => {});
@@ -572,6 +572,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       sessionStorage.setItem('quarkshield_customer_name', data.customerName || 'INTERNAL USER');
       localStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
       sessionStorage.setItem('quarkshield_license_tier', 'INTERNAL ROOT');
+      // A super admin belongs to no tenant: drop any workspace left by an earlier
+      // tenant sign-in on this browser, or the console would open that tenant.
+      ['quarkshield_workspace', 'quarkshield_tenant_slug']
+        .forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
       // The session lives in the httpOnly cookie only; never mirror the JWT into
       // web storage where any XSS could read it.
       setSignInSuccessMsg('Verified Internal Super Admin. Launching Management Console...');
@@ -593,7 +597,9 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
       sessionStorage.setItem('quarkshield_customer_name', data.customerName || '');
       localStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
       sessionStorage.setItem('quarkshield_license_tier', data.licenseTier || 'CORPORATE ENTERPRISE');
-      const ws = data.workspace || (cleanEmail.includes('algomeld') ? 'algomeld' : (cleanEmail.includes('spinovation') ? 'spinovationcorp' : ''));
+      const ws = data.workspace || '';
+      ['quarkshield_workspace', 'quarkshield_tenant_slug']
+        .forEach(k => { try { localStorage.removeItem(k); sessionStorage.removeItem(k); } catch { /* ignore */ } });
       if (ws) {
         localStorage.setItem('quarkshield_workspace', ws);
         sessionStorage.setItem('quarkshield_workspace', ws);
@@ -940,32 +946,32 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
             <div className="kpis">
               <div className="kpi">
                 <div className="label">Total Assets</div>
-                <div className="num">{(spinovationPosture?.totalAssets ?? 4812).toLocaleString()}</div>
+                <div className="num">{(samplePosture?.totalAssets ?? 4812).toLocaleString()}</div>
                 <div className="bar"><span style={{ width: '100%', background: 'var(--muted)' }}></span></div>
               </div>
               <div className="kpi crit">
                 <div className="label">Quantum-Vuln</div>
-                <div className="num">{(spinovationPosture?.quantumVuln ?? 1367).toLocaleString()}</div>
+                <div className="num">{(samplePosture?.quantumVuln ?? 1367).toLocaleString()}</div>
                 <div className="bar"><span style={{ width: '78%', background: 'var(--critical)' }}></span></div>
               </div>
               <div className="kpi warn">
                 <div className="label">HNDL Exposed</div>
-                <div className="num">{(spinovationPosture?.hndlExposed ?? 214).toLocaleString()}</div>
+                <div className="num">{(samplePosture?.hndlExposed ?? 214).toLocaleString()}</div>
                 <div className="bar"><span style={{ width: '44%', background: 'var(--warning)' }}></span></div>
               </div>
               <div className="kpi warn">
                 <div className="label">Config Findings</div>
-                <div className="num">{(spinovationPosture?.configFindings ?? 89).toLocaleString()}</div>
+                <div className="num">{(samplePosture?.configFindings ?? 89).toLocaleString()}</div>
                 <div className="bar"><span style={{ width: '30%', background: 'var(--warning)' }}></span></div>
               </div>
               <div className="kpi good">
                 <div className="label">PQC Ready</div>
-                <div className="num">{(spinovationPosture?.pqcReady ?? 642).toLocaleString()}</div>
+                <div className="num">{(samplePosture?.pqcReady ?? 642).toLocaleString()}</div>
                 <div className="bar"><span style={{ width: '34%', background: 'var(--good)' }}></span></div>
               </div>
               <div className="kpi">
                 <div className="label">Risk Grade</div>
-                <div className="num" style={{ color: 'var(--critical)' }}>{spinovationPosture?.riskGrade ?? 'D+'}</div>
+                <div className="num" style={{ color: 'var(--critical)' }}>{samplePosture?.riskGrade ?? 'D+'}</div>
                 <div className="bar"><span style={{ width: '38%', background: 'var(--critical)' }}></span></div>
               </div>
             </div>
@@ -2660,7 +2666,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                 <label>Workspace Domain (Optional)</label>
                 <input
                   type="text"
-                  placeholder="spinovationcorp (leave blank for auto-routing)"
+                  placeholder="your-workspace (leave blank for auto-routing)"
                   value={loginWorkspace}
                   onChange={(e) => setLoginWorkspace(e.target.value)}
                 />
