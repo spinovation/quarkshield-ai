@@ -59,6 +59,14 @@ import {
 import HelpFeedbackWidget from './HelpFeedbackWidget';
 import { CryptographicPostureCard, calculatePostureMetrics, PostureMetrics } from './CryptographicPostureCard';
 
+// Agent versions offered on the downloads section. The main buttons, the install
+// script and console push-upgrade all use the unversioned files in /downloads
+// (CURRENT_AGENT_VERSION). A second version is published side by side in its own
+// folder and listed as an extra link; set NEWER_AGENT to null to hide it.
+const CURRENT_AGENT_VERSION = '2.3.2';
+const NEWER_AGENT = { version: '2.3.3', base: '/downloads/v2.3.3' };
+
+
 interface LandingPageProps {
   onLaunchConsole: (initialTab?: 'dashboard' | 'cbom' | 'tokens' | 'git' | 'admin' | 'planner', userEmail?: string) => void;
 }
@@ -1489,13 +1497,19 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <p className="dl-desc">Authenticode-signed scanner. Audits Schannel ciphers, the certificate store, registry-installed crypto tooling, OpenSSH and PKI.</p>
               <div className="dl-actions">
                 <a className="btn btn-primary btn-sm" href="/downloads/QuarkShield-Setup.exe" download style={{ textDecoration: 'none' }}>
-                  Download Installer (.exe)
+                  Download Installer (.exe) · v{CURRENT_AGENT_VERSION}
                 </a>
               </div>
               <div className="dl-alt">
                 <a href="/downloads/pqc-scanner-windows-amd64.exe" style={{ color: 'inherit', textDecoration: 'none' }} download>Portable .exe · no install</a>
                 {' · '}
                 <a href="/downloads/pqc-scanner-windows.zip" style={{ color: 'inherit', textDecoration: 'none' }} download>CLI .zip</a>
+              </div>
+              <div className="dl-alt" style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <span style={{ color: 'var(--cyan)' }}>Also available · v{NEWER_AGENT.version}:</span>{' '}
+                <a href={`${NEWER_AGENT.base}/QuarkShield-Setup.exe`} style={{ color: 'inherit' }} download>Installer (.exe)</a>
+                {' · '}
+                <a href={`${NEWER_AGENT.base}/quarkshield-scanner-windows-amd64.exe`} style={{ color: 'inherit' }} download>Portable .exe</a>
               </div>
             </div>
 
@@ -1510,11 +1524,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <p className="dl-desc">Notarized universal build. Discovers Keychain items, OpenSSH &amp; GPG keys, Homebrew OpenSSL and local developer certificates.</p>
               <div className="dl-actions">
                 <a className="btn btn-primary btn-sm" href="/downloads/QuarkShield-macOS.dmg" download style={{ textDecoration: 'none' }}>
-                  Download .dmg (Universal)
+                  Download .dmg (Universal) · v{CURRENT_AGENT_VERSION}
                 </a>
               </div>
               <div className="dl-alt">
                 <a href="/downloads/quarkshield-scanner-macos.zip" style={{ color: 'inherit', textDecoration: 'none' }} download>Portable .zip · universal CLI</a>
+              </div>
+              <div className="dl-alt" style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <span style={{ color: 'var(--cyan)' }}>Also available · v{NEWER_AGENT.version}:</span>{' '}
+                <a href={`${NEWER_AGENT.base}/QuarkShield-macOS.dmg`} style={{ color: 'inherit' }} download>.dmg (Universal)</a>
+                {' · '}
+                <a href={`${NEWER_AGENT.base}/quarkshield-scanner-macos.zip`} style={{ color: 'inherit' }} download>Portable .zip</a>
               </div>
             </div>
 
@@ -1529,7 +1549,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
               <p className="dl-desc">Multi-distro SBOM via dpkg / rpm / apk / pacman. Audits trust stores, OpenSSL &amp; SSH config, and the kernel crypto drivers.</p>
               <div className="dl-actions">
                 <a className="btn btn-primary btn-sm" href="/downloads/pqc-scanner-linux.tar.gz" download style={{ textDecoration: 'none' }}>
-                  Download .tar.gz (Full Bundle)
+                  Download .tar.gz (Full Bundle) · v{CURRENT_AGENT_VERSION}
                 </a>
               </div>
               <div className="dl-alt" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
@@ -1537,6 +1557,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLaunchConsole }) => 
                 <span style={{ fontSize: '0.76rem', color: 'var(--faint)' }}>
                   Raw binaries: <a href="/downloads/pqc-scanner-linux-amd64" style={{ color: 'var(--cyan)', textDecoration: 'none' }} download>amd64</a> · <a href="/downloads/pqc-scanner-linux-arm64" style={{ color: 'var(--cyan)', textDecoration: 'none' }} download>arm64</a>
                 </span>
+              </div>
+              <div className="dl-alt" style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                <span style={{ color: 'var(--cyan)' }}>Also available · v{NEWER_AGENT.version}:</span>{' '}
+                <a href={`${NEWER_AGENT.base}/quarkshield-scanner-linux.tar.gz`} style={{ color: 'inherit' }} download>.tar.gz (Full Bundle)</a>
+                {' · '}
+                <a href={`${NEWER_AGENT.base}/quarkshield-scanner-linux-amd64`} style={{ color: 'inherit' }} download>amd64</a>
+                {' · '}
+                <a href={`${NEWER_AGENT.base}/quarkshield-scanner-linux-arm64`} style={{ color: 'inherit' }} download>arm64</a>
               </div>
             </div>
           </div>
