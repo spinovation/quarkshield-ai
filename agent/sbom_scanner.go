@@ -201,14 +201,14 @@ func auditOpenSslPackage() (AuditResult, bool) {
 	} else {
 		res.IsVulnerable = false
 		res.RiskLevel = "secure"
-		res.Status = "Post-Quantum Agile (OpenSSL 3.x)"
+		res.Status = "OpenSSL 3.x (provider architecture)"
 		res.CveID = "None"
 		res.Cvss = 0.0
-		res.CveDetails = "Audited against NIST NVD & CISA KEV (0 Known Exploits). Modern OpenSSL 3.x with provider agility."
-		res.QuantumThreat = "PQC Modular Provider Enabled"
+		res.CveDetails = "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup."
+		res.QuantumThreat = "PQC algorithms not verified on this install"
 		res.Description = fmt.Sprintf("%s. Modern OpenSSL 3.x cryptographic architecture with provider agility.", versionStr)
-		res.Recommendation = "Maintain OpenSSL 3.x updates. Enable oqsprovider for ML-KEM-768 key encapsulation."
-		res.Explainer = "OpenSSL 3.x supports pluggable providers. Compatible with NIST FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA)."
+		res.Recommendation = "Maintain OpenSSL 3.x updates. For ML-KEM and ML-DSA use OpenSSL 3.5+ or add a post-quantum provider."
+		res.Explainer = "OpenSSL 3.x supports pluggable providers. ML-KEM and ML-DSA need OpenSSL 3.5+ or an added provider; this scan did not test whether they are available."
 		res.ComplianceViolations = []string{}
 	}
 
@@ -287,14 +287,14 @@ func auditOpenSshPackage() (AuditResult, bool) {
 	} else if isPqcReady {
 		res.IsVulnerable = false
 		res.RiskLevel = "secure"
-		res.Status = "Post-Quantum Default (ML-KEM / sntrup761)"
+		res.Status = "Hybrid PQ key exchange supported by this version"
 		res.CveID = "None"
 		res.Cvss = 0.0
-		res.CveDetails = "Audited against NIST NVD & CISA KEV (0 Known Exploits). Post-quantum ML-KEM-768 hybrid enabled."
-		res.QuantumThreat = "Resilient against Harvest-Now-Decrypt-Later"
-		res.Description = fmt.Sprintf("%s. Modern OpenSSH with post-quantum hybrid key exchange enabled by default.", versionStr)
-		res.Recommendation = "Maintain OpenSSH 9.8+ configuration. Verify ~/.ssh/config uses mlkem768x25519-sha256."
-		res.Explainer = "OpenSSH 9.8+ employs hybrid post-quantum key encapsulation (ML-KEM-768 + X25519) to defeat retrospective quantum decryption."
+		res.CveDetails = "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup."
+		res.QuantumThreat = "Negotiated key exchange not observed"
+		res.Description = fmt.Sprintf("%s. This OpenSSH version supports hybrid post-quantum key exchange; the configuration and negotiated sessions were not inspected.", versionStr)
+		res.Recommendation = "Keep OpenSSH current. Verify KexAlgorithms offers sntrup761x25519-sha512 or, from OpenSSH 9.9, mlkem768x25519-sha256."
+		res.Explainer = "OpenSSH offers sntrup761x25519 hybrid key exchange by default since 9.0 and adds mlkem768x25519 in 9.9. Host and user keys remain classical."
 		res.ComplianceViolations = []string{}
 	} else {
 		res.IsVulnerable = true
@@ -385,8 +385,8 @@ func auditCurlPackage() (AuditResult, bool) {
 		res.Status = "Patched Transport (curl 8.4+)"
 		res.CveID = "None"
 		res.Cvss = 0.0
-		res.CveDetails = "Audited against NIST NVD & CISA KEV (0 Known Exploits). Modern cURL with TLS 1.3 support."
-		res.QuantumThreat = "TLS 1.3 Agility Supported"
+		res.CveDetails = "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup."
+		res.QuantumThreat = "PQC key exchange not verified"
 		res.Description = fmt.Sprintf("%s. Secure network transport library.", firstLine)
 		res.Recommendation = "Maintain curl updates. Ensure HTTPS endpoints negotiate TLS 1.3."
 		res.Explainer = "Up-to-date cURL client supporting modern TLS 1.3 ciphersuites."
@@ -433,14 +433,14 @@ func auditGitPackage() (AuditResult, bool) {
 
 	res.IsVulnerable = false
 	res.RiskLevel = "secure"
-	res.Status = "Cryptographic Agility Ready"
+	res.Status = "Installed (no rule match)"
 	res.CveID = "None"
 	res.Cvss = 0.0
-	res.CveDetails = "Audited against NIST NVD & CISA KEV (0 Known Exploits). Git SSH signing and SHA-256 enabled."
+	res.CveDetails = "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup."
 	res.QuantumThreat = "SHA-1 to SHA-256 Transition"
 	res.Description = fmt.Sprintf("%s. Source control engine supporting SSH signing and SHA-256 object formats.", versionStr)
-	res.Recommendation = "Configure Git to sign commits using post-quantum SSH keys (ML-DSA / sntrup761x25519 via OpenSSH 9.8+). Note: ed25519 is NOT quantum-safe and should not be relied on for PQC."
-	res.Explainer = "Git 2.28+ supports SSH commit signing, allowing direct integration with post-quantum signing agents."
+	res.Recommendation = "Keep Git current. SSH commit signatures use classical keys (RSA, ECDSA, Ed25519); none is quantum-safe, and OpenSSH has no post-quantum signature key type yet."
+	res.Explainer = "Git supports SSH commit signing and SHA-256 object formats. Neither makes commit signatures post-quantum."
 	res.ComplianceViolations = []string{}
 
 	return res, true
@@ -519,11 +519,11 @@ func auditPythonCrypto() (AuditResult, bool) {
 	} else {
 		res.IsVulnerable = false
 		res.RiskLevel = "secure"
-		res.Status = "PQC Ready (PyCA 42+)"
+		res.Status = "Current (PyCA 42+)"
 		res.CveID = "None"
 		res.Cvss = 0.0
-		res.CveDetails = "Audited against NIST NVD & CISA KEV (0 Known Exploits). PyCA 42+ with OpenSSL 3.x binding."
-		res.QuantumThreat = "Hybrid Agility Ready"
+		res.CveDetails = "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup."
+		res.QuantumThreat = "PQC support not verified"
 		res.Description = fmt.Sprintf("Python cryptography %s. Modern cryptographic primitives with OpenSSL 3.x binding.", ver)
 		res.Recommendation = "Maintain Python cryptography package updates."
 		res.Explainer = "Up-to-date Python cryptography runtime."
@@ -845,10 +845,10 @@ func parseManifestForCryptoDependencies(filePath, fileName string) []AuditResult
 						Algorithm:      "RSA-2048 / HMAC-SHA256 / ECDSA (JWT)",
 						IsVulnerable:   isVuln,
 						RiskLevel:      ternary(isVuln, "critical", "secure"),
-						Status:         ternary(isVuln, "Critical CVE-2022-23529", "PQC Ready"),
+						Status:         ternary(isVuln, "Critical CVE-2022-23529", "Patched"),
 						CveID:          ternary(isVuln, "CVE-2022-23529", "None"),
 						Cvss:           ternaryFloat(isVuln, 9.8, 0.0),
-						CveDetails:     ternary(isVuln, "Insecure key retrieval allows remote code execution when verifying untrusted tokens with malicious key objects.", "Audited against NIST NVD & CISA KEV (0 Known Exploits)."),
+						CveDetails:     ternary(isVuln, "Insecure key retrieval allows remote code execution when verifying untrusted tokens with malicious key objects.", "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup."),
 						QuantumThreat:  "Shor's Factorization (RSA JWTs)",
 						Description:    fmt.Sprintf("npm/jsonwebtoken@%s in %s. Insecure key retrieval allows remote code execution when verifying untrusted tokens with malicious key objects.", depVer, filePath),
 						Recommendation: "npm install jsonwebtoken@^9.0.2",
@@ -876,7 +876,7 @@ func parseManifestForCryptoDependencies(filePath, fileName string) []AuditResult
 						Status:         ternary(isVuln, "High CVE-2023-45857 (CSRF)", "Patched"),
 						CveID:          ternary(isVuln, "CVE-2023-45857", "None"),
 						Cvss:           ternaryFloat(isVuln, 7.5, 0.0),
-						CveDetails:     ternary(isVuln, "Confidential headers forwarded during cross-domain redirects (CVE-2023-45857).", "Audited against NIST NVD & CISA KEV (0 Known Exploits)."),
+						CveDetails:     ternary(isVuln, "Confidential headers forwarded during cross-domain redirects (CVE-2023-45857).", "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup."),
 						QuantumThreat:  "TLS Session Exposure",
 						Description:    fmt.Sprintf("npm/axios@%s in %s. Confidential headers forwarded during cross-domain redirects (CVE-2023-45857).", depVer, filePath),
 						Recommendation: "npm install axios@^1.7.4",
@@ -906,8 +906,8 @@ func parseManifestForCryptoDependencies(filePath, fileName string) []AuditResult
 				Status:               "Active Go Crypto Module",
 				CveID:                "None",
 				Cvss:                 0.0,
-				CveDetails:           "Audited against NIST NVD & CISA KEV (0 Known Exploits).",
-				QuantumThreat:        "PQC Posture Monitoring",
+				CveDetails:           "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup.",
+				QuantumThreat:        "PQC support not verified",
 				Description:          fmt.Sprintf("Go cryptography module referenced in %s.", filePath),
 				Recommendation:       "go get -u golang.org/x/crypto@latest",
 				CodeSnippet:          "go get -u golang.org/x/crypto@latest",
@@ -931,7 +931,7 @@ func parseManifestForCryptoDependencies(filePath, fileName string) []AuditResult
 				Status:               "Python Dependency",
 				CveID:                "None",
 				Cvss:                 0.0,
-				CveDetails:           "Audited against NIST NVD & CISA KEV (0 Known Exploits).",
+				CveDetails:           "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup.",
 				QuantumThreat:        "Classical & Hybrid Primitives",
 				Description:          fmt.Sprintf("Python cryptography package required by %s.", filePath),
 				Recommendation:       "pip install --upgrade 'cryptography>=42.0.4'",
@@ -1036,8 +1036,8 @@ func createPkgAuditResult(name, version, ecosystem, path string) AuditResult {
 		res.Status = "Installed Runtime"
 		res.CveID = "None"
 		res.Cvss = 0.0
-		res.CveDetails = "Audited against NIST NVD & CISA KEV (0 Known Exploits)."
-		res.QuantumThreat = "PQC Posture Audited"
+		res.CveDetails = "No built-in known-vulnerable version rule matched. This is not a live NVD or CISA KEV lookup."
+		res.QuantumThreat = "PQC support not verified"
 		res.Description = fmt.Sprintf("%s (%s) version %s installed.", name, ecosystem, version)
 		res.Recommendation = "Maintain regular security updates."
 		res.CodeSnippet = getUpgradeCommand(name, "brew upgrade "+name, "sudo apt-get --only-upgrade install "+name, "winget upgrade "+name)
