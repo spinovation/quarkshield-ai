@@ -1003,7 +1003,7 @@
           ⚡ Grover's 64-bit <span class="tab-count" id="tab-count-grover">0</span>
         </button>
         <button class="filter-tab" data-tab="secure" onclick="setFilterTab('secure')">
-          🛡️ Quantum Safe <span class="tab-count" id="tab-count-secure">0</span>
+          🛡️ <span id="tab-label-secure">Quantum Safe</span> <span class="tab-count" id="tab-count-secure">0</span>
         </button>
         <button class="filter-tab" data-tab="sbom" onclick="setFilterTab('sbom')" style="border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">
           📦 Software BOM (SBOM) <span class="tab-count" id="tab-count-sbom">0</span>
@@ -2186,19 +2186,19 @@
           document.getElementById('threat-icon').textContent = '📦';
           document.getElementById('threat-title').textContent = 'Software BOM CVE & Cryptographic Exposures';
           document.getElementById('threat-desc').textContent = 
-            `${vulnerableCount} software packages have known CVE vulnerabilities or outdated cryptography. Remediations are ready below.`;
+            `${vulnerableCount} software packages matched a built-in known-vulnerable version rule. Remediations are listed below.`;
         } else {
           pulse.className = 'shield-pulse secure';
           icon.setAttribute('stroke', 'var(--accent-emerald)');
-          heading.textContent = 'Software BOM Up-to-Date & PQC Ready';
-          desc.textContent = `Software BOM audit completed. ${findings.length} software components cataloged. No vulnerable packages detected.`;
+          heading.textContent = 'No Known-Vulnerable Package Versions Found';
+          desc.textContent = `Software BOM scan completed. ${findings.length} software components cataloged and checked against built-in version rules (not a live CVE feed). Keys and certificates are not part of this scan: run Quick Scan for quantum exposure.`;
 
           const banner = document.getElementById('threat-banner');
           banner.className = 'threat-banner secure';
           banner.style.display = 'flex';
           document.getElementById('threat-icon').textContent = '🛡️';
-          document.getElementById('threat-title').textContent = 'Software Inventory Secured';
-          document.getElementById('threat-desc').textContent = 'All audited system binaries, cryptographic libraries, and dependencies meet security baselines.';
+          document.getElementById('threat-title').textContent = 'Software Inventory Cataloged';
+          document.getElementById('threat-desc').textContent = 'No cataloged package matched a built-in known-vulnerable version rule. This is not a full CVE audit and says nothing about post-quantum readiness.';
         }
       } else if (vulnerableCount > 0) {
         pulse.className = 'shield-pulse vulnerable';
@@ -2234,6 +2234,7 @@
       document.getElementById('metrics-grid').style.display = 'grid';
 
       if (isSbomMode) {
+        { const tl = document.getElementById('tab-label-secure'); if (tl) tl.textContent = 'No Rule Match'; }
         // Card 1: Total Packages
         const elL1 = document.getElementById('m-label-total');
         if (elL1) { elL1.textContent = 'Total Packages'; elL1.style.color = '#fff'; }
@@ -2252,7 +2253,7 @@
         const elV2 = document.getElementById('m-shor-assets');
         if (elV2) { elV2.textContent = cveCount; elV2.style.color = '#f87171'; }
         const elS2 = document.getElementById('m-sub-shor');
-        if (elS2) elS2.textContent = 'NIST NVD & CISA KEV detected';
+        if (elS2) elS2.textContent = 'Matched built-in version rules';
 
         // Card 3: Critical / High
         const elL3 = document.getElementById('m-label-config');
@@ -2274,27 +2275,28 @@
         const elS4 = document.getElementById('m-sub-hndl');
         if (elS4) elS4.textContent = 'Legacy SSH/TLS cipher suites';
 
-        // Card 5: Post-Quantum Agile
+        // Card 5: packages with no rule match (not a PQC claim)
         const elL5 = document.getElementById('m-label-grover');
-        if (elL5) { elL5.textContent = 'Post-Quantum Agile'; elL5.style.color = '#34d399'; }
+        if (elL5) { elL5.textContent = 'No Rule Match'; elL5.style.color = '#34d399'; }
         const elI5 = document.getElementById('m-icon-grover');
         if (elI5) elI5.textContent = '🛡️';
         const elV5 = document.getElementById('m-grover-assets');
         if (elV5) { elV5.textContent = pqcAgileCount; elV5.style.color = '#34d399'; }
         const elS5 = document.getElementById('m-sub-grover');
-        if (elS5) elS5.textContent = 'ML-KEM / ML-DSA capable';
+        if (elS5) elS5.textContent = 'Not on the built-in vulnerable list';
 
         // Card 6: 1-Click Fixes
         const elL6 = document.getElementById('m-label-secure');
-        if (elL6) { elL6.textContent = '1-Click Fixes'; elL6.style.color = 'var(--accent-cyan)'; }
+        if (elL6) { elL6.textContent = 'Upgrade Commands'; elL6.style.color = 'var(--accent-cyan)'; }
         const elI6 = document.getElementById('m-icon-secure');
         if (elI6) elI6.textContent = '🛠️';
         const elV6 = document.getElementById('m-secure-assets');
         if (elV6) { elV6.textContent = remediationCount; elV6.style.color = 'var(--accent-cyan)'; }
         const elS6 = document.getElementById('m-sub-secure');
-        if (elS6) elS6.textContent = 'Upgrade commands ready';
+        if (elS6) elS6.textContent = 'Copy-ready, not applied automatically';
       } else {
         // CBOM Mode
+        { const tl = document.getElementById('tab-label-secure'); if (tl) tl.textContent = 'Quantum Safe'; }
         const elL1 = document.getElementById('m-label-total');
         if (elL1) { elL1.textContent = 'Total Assets'; elL1.style.color = '#fff'; }
         const elI1 = document.getElementById('m-icon-total');
@@ -2428,7 +2430,7 @@
       const searchInput = document.getElementById('cbom-search');
 
       if (isSbomView) {
-        if (titleEl) titleEl.textContent = '📦 Software Bill of Materials (SBOM) & CVE Correlation';
+        if (titleEl) titleEl.textContent = '📦 Software Bill of Materials (SBOM) & Known-Version Check';
         if (exportBomBtn) exportBomBtn.textContent = '📥 Export SBOM JSON';
         if (threatExportBtn) threatExportBtn.textContent = '📥 Export SBOM JSON';
         if (exportCycloneDxBtn) exportCycloneDxBtn.textContent = 'Export CycloneDX 1.6 SBOM';
@@ -2453,13 +2455,13 @@
                 Version & Ecosystem <span id="sort-icon-version" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
               </th>
               <th onclick="sortFindingsTable('cve')" style="cursor: pointer; user-select: none;" title="Click to sort by CVE & CVSS">
-                CVE Correlation & Severity <span id="sort-icon-cve" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+                Known-Vulnerable Version Check <span id="sort-icon-cve" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
               </th>
-              <th onclick="sortFindingsTable('agility')" style="cursor: pointer; user-select: none;" title="Click to sort by Quantum Agility">
-                Quantum Agility Status <span id="sort-icon-agility" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+              <th onclick="sortFindingsTable('agility')" style="cursor: pointer; user-select: none;" title="Click to sort by crypto notes">
+                Crypto Notes (not tested) <span id="sort-icon-agility" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
               </th>
               <th onclick="sortFindingsTable('recommendation')" style="cursor: pointer; user-select: none;" title="Click to sort by Remediation">
-                1-Click Remediation & Action <span id="sort-icon-recommendation" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
+                Remediation & Action <span id="sort-icon-recommendation" style="font-size: 0.75rem; color: var(--text-dim); margin-left: 0.25rem;">↕</span>
               </th>
             </tr>
           `;
@@ -2612,9 +2614,9 @@
           } else {
             cveHtml = `
               <div style="display: flex; align-items: center; gap: 0.35rem;">
-                <span class="badge badge-secure" style="display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.74rem; font-weight: 600;">✓ NIST NVD / CISA Cleared</span>
+                <span class="badge badge-secure" style="display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.74rem; font-weight: 600;">✓ No rule match</span>
               </div>
-              <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 0.3rem;">No active CVEs or known exploits</div>
+              <div style="font-size: 0.72rem; color: var(--text-dim); margin-top: 0.3rem;">Built-in version rules only. Not a live NVD or KEV lookup.</div>
             `;
           }
 
@@ -2622,12 +2624,12 @@
           let agilityHtml = '';
           if (!item.isVulnerable) {
             agilityHtml = `
-              <span class="badge badge-secure" style="display: block; text-align: center; margin-bottom: 0.3rem; font-size: 0.74rem;">🛡️ Post-Quantum Ready</span>
-              <div style="font-size: 0.7rem; color: #94a3b8; font-family: monospace; text-align: center; word-break: break-word;">${escapeHtml(item.algorithm || 'ML-KEM / Hybrid')}</div>
+              <span class="badge badge-secure" style="display: block; text-align: center; margin-bottom: 0.3rem; font-size: 0.74rem;">Not flagged</span>
+              <div style="font-size: 0.7rem; color: #94a3b8; font-family: monospace; text-align: center; word-break: break-word;">${escapeHtml(item.quantumThreat || item.algorithm || 'PQC support not verified')}</div>
             `;
           } else {
             agilityHtml = `
-              <span class="badge badge-critical" style="display: block; text-align: center; margin-bottom: 0.3rem; font-size: 0.74rem;">⚡ Classical Non-Agile</span>
+              <span class="badge badge-critical" style="display: block; text-align: center; margin-bottom: 0.3rem; font-size: 0.74rem;">⚡ Flagged</span>
               <div style="font-size: 0.7rem; color: #fca5a5; font-family: monospace; text-align: center; word-break: break-word;">${escapeHtml(item.algorithm || 'Classical Legacy')}</div>
             `;
           }
