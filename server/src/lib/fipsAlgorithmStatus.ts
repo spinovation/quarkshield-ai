@@ -225,7 +225,15 @@ export const fipsAlgorithmStatus = (f: FipsInput): FipsResult => {
   const norm = isPqUnit ? algo : algo.replace(/_/g, '-');
   const parts = isPqUnit ? [algo] : norm.split(
     /\s*[\/,+|]\s*|[-\s]*WITH[-\s]*|-(?=(?:RSA|ECDSA|ECDHE?|DHE?|AES|SHA|CHACHA|3DES|DES|RC4|MD5|CAMELLIA|ARIA|SEED|IDEA|NULL)(?![A-Z]))|-(?=(?:AES|SHA|RC4|DES)\d)/i);
-  const results: FipsResult[] = parts.filter(Boolean).map(p => evalPrimitive(p, f)).filter((x): x is FipsResult => !!x);
+  // A row listing both RSA and an elliptic-curve algorithm as whole members ("ECDSA / RSA") is
+  // a set of keys: a CA bundle or trust store summarised as one row. Its single key size
+  // belongs to one member, and which one is not recorded, so it is not applied to any of
+  // them: a P-384 member must not turn the row into "RSA-384". A size written into a member's
+  // own name ("RSA-1024") still counts.
+  const members = algo.toUpperCase().split(/\s*\/\s*/);
+  const mixedKeySet = members.some(m => /^RSA(-\d+)?$/.test(m)) && members.some(m => /^(ECDSA|ECDH|ECC)(-\d+)?$/.test(m));
+  const fp = mixedKeySet ? { ...f, key_size: null } : f;
+  const results: FipsResult[] = parts.filter(Boolean).map(p => evalPrimitive(p, fp)).filter((x): x is FipsResult => !!x);
 
   // A cert/key row's hash_algorithm (e.g. sha1WithRSAEncryption's SHA-1) is part of the finding.
   if (f.hash_algorithm) {

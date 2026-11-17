@@ -306,3 +306,16 @@ test('dry run #2: a key size written into the string is used when key_size is em
 test('dry run #3: the git scanner\'s legacy-TLS finding is disallowed', () => {
   assert.equal(s({ algorithm: 'Legacy TLS Protocol (TLS 1.0/1.1)', type: 'config' }).status, 'disallowed');
 });
+
+test('a row naming both RSA and ECDSA is not sized as RSA (CA bundle with a P-384 member)', () => {
+  const bundle = s({ algorithm: 'ECDSA / RSA', key_size: 384, type: 'certificate' });
+  assert.equal(bundle.status, 'unknown');
+  assert.notEqual(s({ algorithm: 'ECDSA / ECDSA-256 / ECDSA-384 / RSA / RSA-2048 / RSA-4096', key_size: 384, type: 'certificate' }).status, 'disallowed');
+  // A weak member named with its own size is still caught.
+  assert.equal(s({ algorithm: 'ECDSA / RSA / RSA-1024', key_size: 384, type: 'certificate' }).status, 'disallowed');
+  // Single-algorithm rows and cipher suites are judged as before.
+  assert.equal(s({ algorithm: 'RSA-1024', key_size: 1024 }).status, 'disallowed');
+  assert.equal(s({ algorithm: 'RSA', key_size: 3072 }).ruleId, 'rsa');
+  assert.equal(s({ algorithm: 'RSA', key_size: 384 }).status, 'disallowed');
+  assert.equal(s({ algorithm: 'ECDHE-RSA-AES128-GCM-SHA256', key_size: 1024 }).status, 'disallowed');
+});

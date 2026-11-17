@@ -17,6 +17,10 @@
  * and the asset's algorithm is NOT on it, `compliant` / `compliant_until` become
  * `compliant_module_algo_unverified`. A coverage of `covered` or `unknown` changes nothing:
  * missing CAVP data is never turned into a worse verdict.
+ *
+ * Host system-module attribution: a key or certificate file tied to the host's system module by
+ * assumption (hostCryptoModules.systemModuleDetailFor) gets `compliant_assumed_module` where an
+ * observed link would have given `compliant` / `compliant_until`. It is counted apart.
  */
 import type { FipsStatus } from './fipsAlgorithmStatus';
 import type { CmvpStatus } from './cmvpModules';
@@ -26,6 +30,7 @@ export type ComplianceVerdict =
   | 'compliant'              // approved algorithm + module with a current certificate
   | 'compliant_until'        // same, but the algorithm has a published sunset
   | 'compliant_module_algo_unverified' // current module certificate, but this algorithm is not on its CAVP list
+  | 'compliant_assumed_module' // approved algorithm; the host's system module has a current certificate and approved mode, but that this asset uses it is assumed
   | 'validated_sunsetting'   // module certificate is Historical
   | 'validated_revoked'      // module certificate is Revoked
   | 'approved_unvalidated'   // approved algorithm, validated module not confirmed
@@ -36,13 +41,15 @@ export type ComplianceVerdict =
 
 export const VERDICT_ORDER: ComplianceVerdict[] = [
   'noncompliant', 'validated_revoked', 'restricted_use', 'approved_unvalidated',
-  'compliant_module_algo_unverified', 'validated_sunsetting', 'compliant_until', 'compliant', 'not_determined', 'not_applicable',
+  'compliant_module_algo_unverified', 'compliant_assumed_module', 'validated_sunsetting', 'compliant_until', 'compliant', 'not_determined', 'not_applicable',
 ];
 
 export const complianceVerdict = (
   fips: FipsStatus | string | undefined,
   cmvp: CmvpStatus | string | undefined,
   cavp?: CavpState | string,
+  /** The module was tied to the asset by assumption (host system module), not by observation. */
+  assumedModule?: boolean,
 ): ComplianceVerdict => {
   switch (fips) {
     case 'disallowed':
@@ -57,6 +64,8 @@ export const complianceVerdict = (
     case 'acceptable':
       if (cmvp === 'active') {
         if (cavp === 'not_covered') return 'compliant_module_algo_unverified';
+        // An assumption can never produce `compliant`.
+        if (assumedModule) return 'compliant_assumed_module';
         return fips === 'acceptable' ? 'compliant_until' : 'compliant';
       }
       if (cmvp === 'historical') return 'validated_sunsetting';

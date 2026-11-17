@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   HOST_VALIDATIONS, sanitizeHostModuleReport, moduleDetailFor, resolveHostModule, resolveAssetModule,
   isHostResolution, moduleForConsole, hostModulesForConsole, HostModuleDetail,
-  MODE_RULES,
+  MODE_RULES, systemModuleDetailFor, isSystemAttributable, SYSTEM_ATTRIBUTION_EVIDENCE,
 } from '../src/lib/hostCryptoModules';
 import { complianceVerdict, VERDICT_ORDER } from '../src/lib/complianceVerdict';
 import { assessAsset, buildAttestationCsv } from '../src/lib/fipsAttestation';
@@ -440,4 +440,92 @@ test('evidence CSV: stamped, one row per asset, formula cells neutralised', () =
   assert.equal(out.counts.compliant, 1);
   assert.equal(out.counts.noncompliant, 1);
   assert.equal(out.total, 2);
+});
+
+// ---- System-module attribution ------------------------------------------------
+
+const rhelReport = (over: { hostFacts?: any; modules?: any[]; envId?: string } = {}) => sanitizeHostModuleReport({
+  environment: env(over.envId || 'rhel', '9.4'),
+  modeFacts: over.hostFacts === undefined ? FIPS_ON : over.hostFacts,
+  modules: over.modules || [{
+    ref: 'openssl@/usr/bin/openssl', key: 'openssl', name: 'OpenSSL', version: '3.0.7',
+    fipsProvider: { present: 'yes', name: RHEL9, version: '3.0.7-cda111b5812c30d4' },
+    modeFacts: providers('base,fips'),
+  }],
+});
+
+test('attribution: only key and certificate files held on the host are eligible', () => {
+  for (const t of ['certificate', 'private_key', 'ssh_key', 'ca_root', 'asymmetric_key']) assert.ok(isSystemAttributable(t, '/etc/pki/tls/private/server.key'), t);
+  assert.ok(isSystemAttributable('certificate', 'Microsoft.PowerShell.Security\\Certificate::LocalMachine\\My'));
+  for (const t of ['source_code', 'package', 'dependency', 'config', 'keystore', 'symmetric_key', 'template', 'protocol']) assert.ok(!isSystemAttributable(t, '/etc/x'), t);
+  assert.ok(!isSystemAttributable('certificate', 'AZURE_KEYVAULT://saml-signing-cert'), 'connector asset');
+  assert.ok(!isSystemAttributable('asymmetric_key', 'HASHICORP_VAULT://transit/app-signing'));
+  assert.ok(!isSystemAttributable('certificate', ''));
+  assert.ok(!isSystemAttributable('certificate', undefined));
+});
+
+test('attribution: the system module is offered only when it passed the full gate', () => {
+  const d = systemModuleDetailFor(rhelReport());
+  assert.ok(d);
+  assert.equal(d!.key, 'openssl');
+  assert.equal(d!.attribution, 'host-system');
+  // FIPS mode not reported, off, or a build NIST does not list: nothing is attributed.
+  assert.equal(systemModuleDetailFor(rhelReport({ hostFacts: [] })), null);
+  assert.equal(systemModuleDetailFor(rhelReport({ hostFacts: [{ name: 'linux.kernel.fips_enabled', value: '0', source: '/proc/sys/crypto/fips_enabled' }] })), null);
+  assert.equal(systemModuleDetailFor(rhelReport({ modules: [{ ref: 'o', key: 'openssl', name: 'OpenSSL', version: '3.0.7', fipsProvider: { present: 'yes', name: RHEL9, version: '3.0.7-ffffffffffffffff' }, modeFacts: providers('base,fips') }] })), null);
+  // No system module is defined for this environment, or no report at all.
+  assert.equal(systemModuleDetailFor(rhelReport({ envId: 'debian' })), null);
+  assert.equal(systemModuleDetailFor(null), null);
+  // macOS has no approved-mode rule, so it never passes.
+  assert.equal(systemModuleDetailFor(sanitizeHostModuleReport({ environment: env('macos', '26.4.1', 'arm64'), modules: [{ ref: 'cc', key: 'apple-corecrypto', name: 'Apple corecrypto', version: '26.4.1' }] })), null);
+});
+
+test('attribution: two modules of the system kind that both pass are ambiguous, so none is offered', () => {
+  const m = (ref: string) => ({ ref, key: 'openssl', name: 'OpenSSL', version: '3.0.7', fipsProvider: { present: 'yes', name: RHEL9, version: '3.0.7-cda111b5812c30d4' }, modeFacts: providers('base,fips') });
+  assert.equal(systemModuleDetailFor(rhelReport({ modules: [m('a'), m('b')] })), null);
+});
+
+test('attribution: the agent cannot claim it; only the server sets the marker', () => {
+  const rep = sanitizeHostModuleReport({ environment: env('rhel', '9.4'), modules: [{ ref: 'o', key: 'openssl', name: 'OpenSSL', attribution: 'host-system' }] });
+  assert.equal((moduleDetailFor(rep, 'o') as any).attribution, undefined);
+});
+
+test('attribution: an assumed module never yields "compliant"', () => {
+  const detail = systemModuleDetailFor(rhelReport())!;
+  const key = { id: 'k', name: 'server.key', type: 'private_key', path: '/etc/pki/tls/private/server.key', algorithm: 'RSA-3072', key_size: 3072, crypto_module: 'openssl', crypto_module_detail: detail };
+  const a = assessAsset(key);
+  assert.equal(a.basis, 'host-assumed');
+  assert.deepEqual(a.certIds, ['5573']);
+  assert.equal(a.fipsMode, 'confirmed');
+  assert.notEqual(a.verdict, 'compliant');
+  assert.notEqual(a.verdict, 'compliant_until');
+  assert.ok(['compliant_assumed_module', 'compliant_module_algo_unverified'].includes(a.verdict), a.verdict);
+  // The same file with an observed link is what "compliant" is reserved for.
+  const { attribution: _a, ...observed } = detail;
+  assert.equal(assessAsset({ ...key, crypto_module_detail: observed }).basis, 'host-observed');
+  // A disallowed algorithm stays noncompliant.
+  assert.equal(assessAsset({ ...key, algorithm: 'RSA-1024', key_size: 1024 }).verdict, 'noncompliant');
+  // Verdict table: every status other than active is unchanged by the flag.
+  assert.equal(complianceVerdict('approved', 'active', 'covered', true), 'compliant_assumed_module');
+  assert.equal(complianceVerdict('acceptable', 'active', undefined, true), 'compliant_assumed_module');
+  assert.equal(complianceVerdict('approved', 'active', 'not_covered', true), 'compliant_module_algo_unverified');
+  assert.equal(complianceVerdict('approved', 'historical', undefined, true), 'validated_sunsetting');
+  assert.equal(complianceVerdict('approved', 'unverified', undefined, true), 'approved_unvalidated');
+  assert.equal(complianceVerdict('disallowed', 'active', undefined, true), 'noncompliant');
+  assert.ok(VERDICT_ORDER.includes('compliant_assumed_module'));
+});
+
+test('attribution: console, CSV and CBOM all say "assumed"', () => {
+  const detail = systemModuleDetailFor(rhelReport())!;
+  assert.equal(moduleForConsole('openssl', SYSTEM_ATTRIBUTION_EVIDENCE, detail).basis, 'host-assumed');
+  assert.match(SYSTEM_ATTRIBUTION_EVIDENCE, /Assumed, not observed/);
+  const row = { id: 'k', name: 'server.key', type: 'private_key', hostname: 'web01', path: '/etc/pki/tls/private/server.key', algorithm: 'AES-256-GCM', purpose: 'encryption', crypto_module: 'openssl', crypto_module_evidence: SYSTEM_ATTRIBUTION_EVIDENCE, crypto_module_detail: detail };
+  const out = buildAttestationCsv('t', [row]);
+  assert.match(out.csv, /host-assumed/);
+  assert.match(out.csv, /compliant_assumed_module/);
+  assert.equal(out.counts.compliant, 0);
+  assert.equal(out.counts.compliant_assumed_module, 1);
+  const c = cbomComponent({ id: 'k', name: 'server.key', assetKind: 'private_key', algorithm: 'AES-256-GCM', purpose: 'encryption', cryptoModule: 'openssl', cryptoModuleEvidence: SYSTEM_ATTRIBUTION_EVIDENCE, cryptoModuleDetail: detail } as any);
+  assert.equal(prop(c, 'quarkshield:cmvpBasis'), 'host-assumed');
+  assert.equal(prop(c, 'quarkshield:complianceVerdict'), 'compliant_assumed_module');
 });
