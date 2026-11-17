@@ -46,7 +46,12 @@ export interface HostModule {
 }
 export interface HostModuleReport { environment: OperatingEnvironment; modules: HostModule[]; modeFacts?: ModeFact[] }
 /** Stored per asset (assets.crypto_module_detail): the module, the environment it ran on, and the host's FIPS-mode facts. */
-export interface HostModuleDetail extends Omit<HostModule, 'ref'> { environment: OperatingEnvironment; hostModeFacts?: ModeFact[] }
+export interface HostModuleDetail extends Omit<HostModule, 'ref'> {
+  environment: OperatingEnvironment; hostModeFacts?: ModeFact[];
+  /** Set by the server only (systemModuleDetailFor): the asset was tied to the host's system
+   *  module by assumption, not because the host said which module uses it. */
+  attribution?: 'host-system';
+}
 
 const MAX_MODULES = 24;
 const str = (v: unknown, max: number): string | undefined => {
@@ -110,6 +115,7 @@ export const moduleDetailFor = (report: HostModuleReport | null, ref: unknown): 
   if (!report || typeof ref !== 'string' || !ref) return null;
   const m = report.modules.find(x => x.ref === ref);
   if (!m) return null;
+  // Rebuilt field by field: `attribution` can only ever be set by systemModuleDetailFor.
   const { ref: _ref, ...rest } = m;
   return report.modeFacts
     ? { ...rest, environment: report.environment, hostModeFacts: report.modeFacts }
@@ -306,6 +312,8 @@ export interface ModuleCandidate {
 
 export interface HostModuleResolution extends CmvpResolution {
   basis: 'host-observed';
+  /** 'host-system': the asset was tied to this module by assumption (see systemModuleDetailFor). */
+  attribution?: 'host-system';
   /** `active` / `historical` / `revoked` only through the FIPS-mode gate; see the file header. */
   status: 'active' | 'historical' | 'revoked' | 'unverified' | 'none';
   fipsMode: FipsModeResult;
@@ -373,6 +381,7 @@ export const resolveHostModule = (detail: HostModuleDetail): HostModuleResolutio
   const providerNamed = detail.key === 'openssl' && fp?.present === 'yes' && fp.name;
   const base = {
     basis: 'host-observed' as const,
+    attribution: detail.attribution === 'host-system' ? 'host-system' as const : undefined,
     moduleKey: detail.key,
     moduleName: providerNamed ? String(fp!.name) : (detail.name || family?.label || detail.key),
     moduleVersion: providerNamed ? fp!.version : detail.version,
@@ -443,6 +452,54 @@ const parseDetail = (detail: unknown): HostModuleDetail | null => {
   return d as HostModuleDetail;
 };
 
+// ---- System-module attribution ------------------------------------------------
+//
+// A key or certificate file is data: the host does not say which module uses it, so the agent
+// leaves it unlinked. Where the host's own SYSTEM module passed the full gate (exact identity
+// and FIPS-approved mode confirmed from host facts), the server ties such files to that module
+// as a stated ASSUMPTION. It is never reported as an observation:
+//  - the basis reads `host-assumed`, the verdict `compliant_assumed_module`, never `compliant`;
+//  - nothing is attributed on a host whose system module did not pass the gate;
+//  - only key and certificate material held on the host itself is eligible. Source code,
+//    packages, keystore files (often a Java or application runtime with its own module) and
+//    anything a connector or a remote probe found are not.
+
+/** The module that is the operating system's own, per reported environment id. */
+const SYSTEM_MODULE_KEY: Record<string, string> = {
+  windows: 'windows-cng', macos: 'apple-corecrypto',
+  rhel: 'openssl', ubuntu: 'openssl', amzn: 'openssl', ol: 'openssl',
+};
+const SYSTEM_ATTRIBUTED_TYPES = new Set(['certificate', 'private_key', 'ssh_key', 'ca_root', 'asymmetric_key']);
+
+/** Is this finding key or certificate material held on the host itself? */
+export const isSystemAttributable = (type: unknown, path: unknown): boolean =>
+  typeof type === 'string' && SYSTEM_ATTRIBUTED_TYPES.has(type)
+  && typeof path === 'string' && path.trim() !== '' && !path.includes('://');
+
+/**
+ * The host's system module, only when it passed the full gate today and is the only module of
+ * its kind that did. Null in every other case, so nothing is attributed.
+ */
+export const systemModuleDetailFor = (report: HostModuleReport | null): HostModuleDetail | null => {
+  if (!report) return null;
+  const key = SYSTEM_MODULE_KEY[report.environment.id];
+  if (!key) return null;
+  const passed: HostModuleDetail[] = [];
+  for (const m of report.modules) {
+    if (m.key !== key) continue;
+    const d = moduleDetailFor(report, m.ref)!;
+    if (resolveHostModule(d).certIds.length) passed.push(d);
+  }
+  return passed.length === 1 ? { ...passed[0], attribution: 'host-system' } : null;
+};
+
+export const SYSTEM_ATTRIBUTION_EVIDENCE =
+  'Assumed, not observed: this file is held on a host whose system cryptographic module passed the identity and FIPS-approved-mode checks. Which module or application actually uses the file was not observed.';
+
+/** `host-assumed` for a system-module attribution, `host-observed` for a link the host itself gave. */
+export const hostBasis = (r: HostModuleResolution): 'host-observed' | 'host-assumed' =>
+  r.attribution === 'host-system' ? 'host-assumed' : 'host-observed';
+
 export const isHostResolution = (r: CmvpResolution | HostModuleResolution): r is HostModuleResolution =>
   (r as HostModuleResolution).basis === 'host-observed';
 
@@ -453,7 +510,7 @@ export const moduleForConsole = (moduleKey: string, evidence?: string | null, de
   const d = host ? parseDetail(detail) : null;
   return {
     status: r.status,
-    basis: host ? 'host-observed' : 'provider-reported',
+    basis: host ? hostBasis(host) : 'provider-reported',
     moduleName: r.moduleName || moduleKey,
     moduleVersion: host?.moduleVersion,
     environment: host?.environment,

@@ -510,7 +510,7 @@ The FIPS-mode gate, the compliance verdict and the evidence export. Stage 4's se
   - `compliance_verdict` is not persisted (§7.1); it is computed on read, as A1 is;
   - Java (BC-FIPS) mode probes named in the Stage 5 row.
 
-### 9.1f Stage 6 — implemented 2026-11-16 (not deployed)
+### 9.1f Stage 6 — implemented and deployed 2026-11-16
 
 CAVP coverage: for an asset whose module has a reported certificate, is the asset's algorithm on that certificate's approved-algorithm list? Server only; no agent change and no schema change.
 
@@ -547,6 +547,18 @@ CAVP coverage: for an asset whose module has a reported certificate, is the asse
   - parameter-level coverage (key size, curve) by reading the individual CAVP validations;
   - lists for the five FIPS 140-2 certificates;
   - the roadmap rollup, exec report and QSG posture payload still do not use the verdict (unchanged from Stage 5).
+
+### 9.1g Host system-module attribution — implemented 2026-11-17 (owner decision)
+
+The first live export (one tenant, 903 assets) had no module on any key or certificate row: the agent ties a finding to a module only where the host says which module does the work (9.1d), and a key file says nothing. On a host in FIPS mode that left every key at `approved_unvalidated`.
+
+- **What changed.** At sync, the server ties key and certificate material held on the host (`certificate`, `private_key`, `ssh_key`, `ca_root`, `asymmetric_key`; never a path with a connector or remote scheme) to the host's **system module**, and only when that module passed the full Stage 5 gate (exact identity, FIPS-approved mode confirmed) and is the only module of its kind that did. System module by operating system: Windows CNG, Apple corecrypto, the OpenSSL FIPS provider on RHEL / Ubuntu / Amazon Linux / Oracle Linux. A link the agent observed always wins.
+- **It is an assumption and is labelled as one.** Basis `host-assumed` (console chip "Assumed: …", CSV "Module basis", CBOM `quarkshield:cmvpBasis`), module evidence "Assumed, not observed: …", and its own verdict `compliant_assumed_module`. It can never produce `compliant` or `compliant_until`, and the "In a validated module" tile counts it apart.
+- **Not attributed:** source code, packages, configuration rows the agent did not link, keystore files (often a Java or application runtime with its own module), connector assets, and anything on a host whose system module did not pass the gate. macOS has no approved-mode rule in the map, so nothing is attributed there.
+- **Code:** `systemModuleDetailFor`, `isSystemAttributable` in `server/src/lib/hostCryptoModules.ts`; the fourth argument of `complianceVerdict`. The agent is unchanged; existing rows change at the host's next sync.
+- **Not verified:** no host in FIPS mode has synced, so this is covered by unit tests only.
+
+Same change: a row whose algorithm lists both RSA and an elliptic-curve algorithm as members (a CA bundle summarised as "ECDSA / RSA") no longer has its single key size applied to the RSA member. Nine such rows in the live export were reported `noncompliant` as "RSA-384" because the bundle held a P-384 certificate.
 
 ### 9.2 Sequencing rationale
 

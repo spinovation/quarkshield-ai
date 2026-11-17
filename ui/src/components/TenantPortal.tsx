@@ -163,7 +163,8 @@ interface ModuleView {
   /** provider-reported: a cloud provider's published certificate for its service.
    *  host-observed: a module the agent identified on a host. Never carries certIds: identity is
    *  not validation, so at most a candidate certificate is shown. */
-  basis?: 'provider-reported' | 'host-observed';
+  /** host-assumed: a key or certificate file tied to its host's system module by assumption. */
+  basis?: 'provider-reported' | 'host-observed' | 'host-assumed';
   moduleName: string;
   moduleVersion?: string;
   environment?: string;
@@ -193,7 +194,7 @@ interface ModuleView {
 }
 
 /** Algorithm axis x module axis (Stage 5). Computed server-side from one fixed table. */
-type ComplianceVerdict = 'compliant' | 'compliant_until' | 'compliant_module_algo_unverified' | 'validated_sunsetting' | 'validated_revoked'
+type ComplianceVerdict = 'compliant' | 'compliant_until' | 'compliant_module_algo_unverified' | 'compliant_assumed_module' | 'validated_sunsetting' | 'validated_revoked'
   | 'approved_unvalidated' | 'restricted_use' | 'noncompliant' | 'not_determined' | 'not_applicable';
 
 interface FleetMachine {
@@ -354,8 +355,8 @@ const CMVP_CHIP: Record<NonNullable<Asset['cmvp']>['status'], { color: string; b
 };
 
 const cmvpChipLabel = (c: NonNullable<Asset['cmvp']>): string => {
-  if (c.basis === 'host-observed') {
-    const name = `${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}`;
+  if (c.basis === 'host-observed' || c.basis === 'host-assumed') {
+    const name = `${c.basis === 'host-assumed' ? 'Assumed: ' : ''}${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}`;
     // Identity matched exactly and FIPS mode was confirmed: the certificate is reported as such.
     if (c.certIds.length) return `${name} · CMVP #${c.certIds.join(' / #')}${c.status === 'active' ? '' : ` (${c.status})`} · FIPS mode confirmed`;
     if (c.candidate) return `${name} · candidate CMVP #${c.candidate.certId}${c.candidate.certStatus === 'active' ? '' : ` (${c.candidate.certStatus})`}`;
@@ -371,8 +372,8 @@ const cmvpChipLabel = (c: NonNullable<Asset['cmvp']>): string => {
 };
 
 const cmvpChipTitle = (c: NonNullable<Asset['cmvp']>): string => {
-  if (c.basis === 'host-observed') {
-    const p = [`Module identified on the host: ${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}${c.environment ? `, on ${c.environment}` : ''}.`];
+  if (c.basis === 'host-observed' || c.basis === 'host-assumed') {
+    const p = [`${c.basis === 'host-assumed' ? 'Assumed module (the system module of the host this file is on)' : 'Module identified on the host'}: ${c.moduleName}${c.moduleVersion ? ` ${c.moduleVersion}` : ''}${c.environment ? `, on ${c.environment}` : ''}.`];
     if (c.candidate) {
       p.push(`Candidate certificate: CMVP #${c.candidate.certId} (${c.candidate.moduleName}, ${c.candidate.standard} Level ${c.candidate.level}, ${c.candidate.certStatus} on NIST${c.candidate.sunsetDate ? `, sunset ${c.candidate.sunsetDate}` : ''}).`);
       p.push(c.candidate.matchNote);
@@ -399,6 +400,7 @@ const VERDICT_CHIP: Record<ComplianceVerdict, { label: string; color: string; bg
   compliant:            { label: 'Compliant · validated module', color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)', help: 'Approved algorithm, performed by a module whose current CMVP certificate was matched.' },
   compliant_until:      { label: 'Compliant · algorithm sunset', color: '#34d399', bg: 'rgba(16, 185, 129, 0.12)', help: 'Approved algorithm with a published sunset date, performed by a module whose current CMVP certificate was matched.' },
   compliant_module_algo_unverified: { label: 'Validated module · algorithm not on its list', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'Approved algorithm in a module with a current CMVP certificate, but this algorithm is not on that certificate\'s approved-algorithm (CAVP) list, so it is not shown as tested in the module.' },
+  compliant_assumed_module: { label: 'Approved algorithm · system module assumed', color: '#38bdf8', bg: 'rgba(56, 189, 248, 0.12)', help: 'Approved algorithm in a key or certificate file on a host whose system module has a current CMVP certificate and FIPS-approved mode confirmed. That this file is used through that module is assumed, not observed, so it is not counted as compliant.' },
   validated_sunsetting: { label: 'Module certificate historical', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'Approved algorithm, but the matched module certificate has moved to the NIST Historical list.' },
   validated_revoked:    { label: 'Module certificate revoked', color: '#f87171', bg: 'rgba(239, 68, 68, 0.12)', help: 'Approved algorithm, but the matched module certificate is revoked.' },
   approved_unvalidated: { label: 'Approved algorithm · module not validated', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.12)', help: 'The algorithm is approved, but it is not confirmed to run in a CMVP-validated module in FIPS-approved mode.' },
@@ -5114,6 +5116,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           const compliant = n('compliant') + n('compliant_until');
                           const stale = n('validated_sunsetting') + n('validated_revoked');
                           const offList = n('compliant_module_algo_unverified');
+                          const assumed = n('compliant_assumed_module');
                           const link = (label: string, v: ComplianceVerdict) => (
                             <span onClick={() => setVerdictFilter(verdictFilter === v ? 'all' : v)}
                               style={{ cursor: 'pointer', textDecoration: 'underline', color: verdictFilter === v ? '#38bdf8' : 'inherit' }}>{label}</span>
@@ -5133,6 +5136,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                                 {n('approved_unvalidated')} {link('approved, module not validated', 'approved_unvalidated')}
                                 {stale ? <> · {stale} {link('certificate historical', 'validated_sunsetting')}</> : null}
                                 {offList ? <> · {offList} {link('algorithm not on module list', 'compliant_module_algo_unverified')}</> : null}
+                                {assumed ? <> · {assumed} {link('system module assumed', 'compliant_assumed_module')}</> : null}
                               </div>
                               <div style={{ fontSize: '0.68rem', color: 'var(--text-muted, #94a3b8)', marginTop: '0.2rem', display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
                                 {compliant ? link('show compliant', 'compliant') : null}

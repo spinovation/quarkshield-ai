@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import pool from '../config/db';
 import crypto from 'crypto';
 import { cbomComponent, cbomSignature } from '../lib/cyclonedx';
-import { sanitizeHostModuleReport, moduleDetailFor } from '../lib/hostCryptoModules';
+import { sanitizeHostModuleReport, moduleDetailFor, systemModuleDetailFor, isSystemAttributable, SYSTEM_ATTRIBUTION_EVIDENCE } from '../lib/hostCryptoModules';
 import { maybeSendAlert } from '../lib/alerts';
 import { canAccessTenant, resolveWriteTenant, superNeedsGrant, denyUnscoped } from '../middleware/auth';
 import { getTenantAggregates, totalsOf } from '../lib/tenantAggregates';
@@ -830,6 +830,9 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
     const processedAssets: any[] = [];
     // CMVP/FIPS Stage 4: modules the agent observed on the host (absent from agents before 2.3.2).
     const hostModuleReport = sanitizeHostModuleReport(req.body?.crypto_modules);
+    // The host's system module, only when it passed the identity and FIPS-mode gate. Key and
+    // certificate files the agent left unlinked are tied to it as a stated assumption.
+    const systemModuleDetail = systemModuleDetailFor(hostModuleReport);
 
     for (let idx = 0; idx < safeAssets.length; idx++) {
       const rawAsset = safeAssets[idx];
@@ -953,8 +956,12 @@ export const ingestTelemetry = async (req: Request, res: Response) => {
         path: rawAsset.path || '',
         // Stage 4: the host module this finding is tied to, only when the agent's own
         // module report contains the reference it names.
-        module_detail: moduleDetailFor(hostModuleReport, rawAsset.cryptoModule),
-        module_evidence: typeof rawAsset.cryptoModuleEvidence === 'string' ? rawAsset.cryptoModuleEvidence.slice(0, 600) : null
+        ...(() => {
+          const observed = moduleDetailFor(hostModuleReport, rawAsset.cryptoModule);
+          if (observed) return { module_detail: observed, module_evidence: typeof rawAsset.cryptoModuleEvidence === 'string' ? rawAsset.cryptoModuleEvidence.slice(0, 600) : null };
+          if (systemModuleDetail && isSystemAttributable(rawAsset.type, rawAsset.path)) return { module_detail: systemModuleDetail, module_evidence: SYSTEM_ATTRIBUTION_EVIDENCE };
+          return { module_detail: null, module_evidence: null };
+        })()
       });
     }
 

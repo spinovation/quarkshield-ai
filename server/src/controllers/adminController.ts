@@ -3556,7 +3556,7 @@ export const getTenantPortalData = async (req: Request, res: Response) => {
       const cavp = cavpR ? { state: cavpR.state, note: cavpR.note, validations: cavpValidationsOf(cavpR), mapVersion: cavpR.mapVersion } : undefined;
       const cmvp = mod ? { cmvp: cavp ? { ...mod, cavp } : mod } : {};
       // Compliance verdict (Stage 5): the two axes crossed by one fixed table.
-      const complianceVerdict = computeVerdict(f.status, mod ? mod.status : 'not-assessed', cavpR?.state);
+      const complianceVerdict = computeVerdict(f.status, mod ? mod.status : 'not-assessed', cavpR?.state, mod?.basis === 'host-assumed');
       return { ...row, complianceVerdict, fipsStatus: f.status, fipsStandard: f.standard, fipsTransitionDate: f.disallowedAfter || null, fipsDraft: f.draft, ...cmvp };
     });
 

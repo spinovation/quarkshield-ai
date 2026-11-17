@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { fipsAlgorithmStatus, nistSecurityCategory, FIPS_TABLE_VERSION } from './fipsAlgorithmStatus';
 import { isClassicalAsymmetric } from './threatGraph/cryptoPurpose';
 import { nistCertificateUrl } from './cmvpModules';
-import { resolveAssetModule, isHostResolution } from './hostCryptoModules';
+import { resolveAssetModule, isHostResolution, hostBasis } from './hostCryptoModules';
 import { complianceVerdict } from './complianceVerdict';
 import { cavpCoverage, cavpValidationsOf } from './cavpCoverage';
 
@@ -165,7 +165,7 @@ export const cbomComponent = (i: CbomAssetInput): any => {
     cmvp.certIds.length ? { name: 'quarkshield:cmvpCertUrl', value: cmvp.certIds.map(nistCertificateUrl).join(' ') } : null,
     cmvp.certIds.length && cmvp.standard ? { name: 'quarkshield:cmvpFipsLevel', value: `${cmvp.standard}${cmvp.level ? ` Level ${cmvp.level}` : ''}` } : null,
     cmvp.certIds.length && cmvp.sunsetDate ? { name: 'quarkshield:cmvpSunsetDate', value: cmvp.sunsetDate } : null,
-    cmvp.moduleKey ? { name: 'quarkshield:cmvpBasis', value: host ? 'host-observed' : 'provider-reported' } : null,
+    cmvp.moduleKey ? { name: 'quarkshield:cmvpBasis', value: host ? hostBasis(host) : 'provider-reported' } : null,
     // Host modules (Stage 4): identity, and at most a CANDIDATE certificate. Deliberately not
     // `cmvpCertId`: the module's FIPS mode is unconfirmed, so this is not a validation claim.
     host?.moduleVersion ? { name: 'quarkshield:cmvpModuleVersion', value: host.moduleVersion } : null,
@@ -187,7 +187,7 @@ export const cbomComponent = (i: CbomAssetInput): any => {
     cmvp.certIds.length && cavpIds.length ? { name: 'quarkshield:cavpValidations', value: cavpIds.join(',') } : null,
     cmvp.certIds.length ? { name: 'quarkshield:cavpNote', value: cavp.note } : null,
     cmvp.certIds.length ? { name: 'quarkshield:cavpMapVersion', value: cavp.mapVersion } : null,
-    { name: 'quarkshield:complianceVerdict', value: complianceVerdict(fips.status, cmvp.status, cavp.state) },
+    { name: 'quarkshield:complianceVerdict', value: complianceVerdict(fips.status, cmvp.status, cavp.state, host?.attribution === 'host-system') },
     i.riskLevel ? { name: 'quarkshield:riskLevel', value: String(i.riskLevel) } : null,
     i.recommendation ? { name: 'quarkshield:recommendation', value: String(i.recommendation) } : null,
     i.explainer ? { name: 'quarkshield:explainer', value: String(i.explainer) } : null,
