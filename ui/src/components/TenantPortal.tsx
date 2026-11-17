@@ -4666,6 +4666,28 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                         <ShieldCheck size={14} color="#c084fc" /> Export Attested CBOM (CDXA)
                       </button>
 
+                      {/* FIPS / CMVP compliance evidence (CSV). The only non-JSON export here; the server enforces the Risk Assurance gate. */}
+                      <button
+                        onClick={() => { if (!isExportingEvidence) void downloadComplianceEvidence(); }}
+                        disabled={isExportingEvidence}
+                        title="One row per asset: algorithm FIPS status, cryptographic module, CMVP certificate, FIPS mode, CAVP coverage and compliance verdict. Evidence as observed by QuarkShield, not a certification. Requires the Risk Assurance add-on."
+                        style={{
+                          background: 'rgba(52, 211, 153, 0.12)',
+                          border: '1px solid rgba(52, 211, 153, 0.4)',
+                          color: '#34d399',
+                          padding: '0.45rem 0.85rem',
+                          borderRadius: '6px',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          cursor: isExportingEvidence ? 'wait' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem'
+                        }}
+                      >
+                        <Download size={13} /> {isExportingEvidence ? 'Exporting…' : 'Export FIPS / CMVP Evidence (CSV)'}
+                      </button>
+
                       {/* PDF/DOCX roadmap exports removed per owner (HTML roadmap is canonical; print-to-PDF from the browser if a file is needed). */}
                       {/* View PQC Roadmap Report (HTML, opens in new tab) */}
                       <button
@@ -5067,7 +5089,7 @@ export const TenantPortal: React.FC<TenantPortalProps> = ({
                           const { nonCompliant, sunset, undetermined } = fipsCounts;
                           return (
                             <div
-                              title="FIPS ALGORITHM approval (SP 800-131A Rev. 2, FIPS 203/204/205). This does not establish CMVP module validation, which is not yet assessed."
+                              title="FIPS ALGORITHM approval (SP 800-131A Rev. 2, FIPS 203/204/205). This does not establish CMVP module validation, which is shown separately."
                               style={{ background: 'rgba(0, 0, 0, 0.3)', border: '1px solid rgba(255, 255, 255, 0.06)', borderRadius: '8px', padding: '1rem' }}>
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-muted, #94a3b8)', textTransform: 'uppercase', fontWeight: 600, display: 'flex', justifyContent: 'space-between' }}>
                                 <span>FIPS Non-Compliant Algorithms</span>
